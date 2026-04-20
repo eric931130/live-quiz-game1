@@ -3,7 +3,7 @@ import { io } from 'socket.io-client';
 
 const SOCKET_URL = window.location.hostname === 'localhost' 
   ? 'http://localhost:3001' 
-  : 'https://empath-os-backend.onrender.com';
+  : 'https://live-quiz-game1.onrender.com';
 
 export default function StudentView({ onGoBack }) {
   const [socket, setSocket] = useState(null);

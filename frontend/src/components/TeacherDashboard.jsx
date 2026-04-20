@@ -4,7 +4,7 @@ import { QRCodeSVG } from 'qrcode.react';
 
 const SOCKET_URL = window.location.hostname === 'localhost' 
   ? 'http://localhost:3001' 
-  : 'https://empath-os-backend.onrender.com';
+  : 'https://live-quiz-game1.onrender.com';
 
 export default function TeacherDashboard({ onGoBack }) {
   const [socket, setSocket] = useState(null);
@@ -14,6 +14,10 @@ export default function TeacherDashboard({ onGoBack }) {
   const [questions, setQuestions] = useState([]);
   const [limit, setLimit] = useState(10);
   
+  const [savedBanks, setSavedBanks] = useState([]);
+  const [bankNameForm, setBankNameForm] = useState('');
+  const fileInputRef = useRef(null);
+
   // Game state
   const [currentQuestion, setCurrentQuestion] = useState(null);
   const [timeLeft, setTimeLeft] = useState(60);
@@ -22,6 +26,8 @@ export default function TeacherDashboard({ onGoBack }) {
   const [finalReport, setFinalReport] = useState([]);
 
   useEffect(() => {
+    fetchBanks();
+
     const newSocket = io(SOCKET_URL);
     setSocket(newSocket);
 
@@ -63,11 +69,28 @@ export default function TeacherDashboard({ onGoBack }) {
     return () => newSocket.close();
   }, []);
 
+  const fetchBanks = async () => {
+    try {
+      const res = await fetch(`${SOCKET_URL}/api/banks`);
+      if (res.ok) {
+         const data = await res.json();
+         setSavedBanks(data);
+      }
+    } catch (e) {
+      console.log('載入歷史題庫失敗');
+    }
+  };
+
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    
+    // Check if we want to name it
     const formData = new FormData();
     formData.append('file', file);
+    if (bankNameForm.trim() !== '') {
+       formData.append('bankName', bankNameForm.trim());
+    }
     
     try {
       const res = await fetch(`${SOCKET_URL}/api/upload`, {
@@ -77,16 +100,37 @@ export default function TeacherDashboard({ onGoBack }) {
       if (res.ok) {
         const data = await res.json();
         setQuestions(data.questions);
+        if (bankNameForm.trim() !== '') {
+           fetchBanks(); // re-fetch the list
+           setBankNameForm(''); // clear the form
+        }
       } else {
-        alert('匯入失敗，請確認檔案格式！');
+        const errorText = await res.text();
+        alert(`匯入失敗：${errorText}`);
       }
     } catch (err) {
       alert('上傳發生錯誤！');
     }
   };
 
+  const loadSavedBank = async (bankId) => {
+    if (!bankId) return;
+    try {
+      const res = await fetch(`${SOCKET_URL}/api/banks/${bankId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setQuestions(data.questions);
+        if (fileInputRef.current) fileInputRef.current.value = ""; // clear file input
+      } else {
+        alert('讀取失敗');
+      }
+    } catch(e) {
+      alert('連線失敗');
+    }
+  };
+
   const createRoom = () => {
-    if (questions.length === 0) return alert('請先上傳包含題目的 Excel 檔案。');
+    if (questions.length === 0) return alert('請先上傳題庫，或選擇歷史題庫。');
     socket.emit('create_room', { questions, limit });
   };
 
@@ -103,12 +147,37 @@ export default function TeacherDashboard({ onGoBack }) {
     return (
       <div className="card teacher-card animate-fade-in">
         <h2 className="title">開局設定</h2>
+        
+        {savedBanks.length > 0 && (
+          <div className="form-group" style={{background: '#e9ecef', padding: '1rem', borderRadius: '0.5rem'}}>
+            <label>📂 歷史題庫快速載入</label>
+            <select onChange={(e) => loadSavedBank(e.target.value)} defaultValue="">
+              <option value="" disabled>-- 點此選擇過去保存的題庫 --</option>
+              {savedBanks.map(b => (
+                <option key={b.id} value={b.id}>{b.name} (含 {b.count} 題)</option>
+              ))}
+            </select>
+          </div>
+        )}
+
         <div className="form-group">
-          <label>1. 上傳 Excel 題庫 (必備欄位: Question, OptA, OptB, OptC, OptD, Answer)</label>
-          <input type="file" accept=".xlsx,.xls" onChange={handleFileUpload} />
-          {questions.length > 0 && <span className="success-text">成功載入 {questions.length} 題！</span>}
+          <label>1. 上傳全新 Excel 題庫</label>
+          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
+             <input 
+               type="text" 
+               className="input-field" 
+               placeholder="為這份題庫命名 (例如：第一單元)，留白則不儲存" 
+               value={bankNameForm}
+               onChange={(e) => setBankNameForm(e.target.value)}
+               style={{ marginBottom: 0, flexGrow: 1 }}
+             />
+          </div>
+          <input type="file" accept=".xlsx,.xls" onChange={handleFileUpload} ref={fileInputRef} />
         </div>
-        <div className="form-group">
+
+        {questions.length > 0 && <div className="success-text">✅ 目前已準備好 {questions.length} 題，準備開局！</div>}
+
+        <div className="form-group mt-4">
           <label>2. 選擇本次出題數量</label>
           <select value={limit} onChange={(e)=>setLimit(Number(e.target.value))}>
             <option value={10}>抽出 10 題</option>
@@ -116,6 +185,7 @@ export default function TeacherDashboard({ onGoBack }) {
             <option value={30}>抽出 30 題</option>
           </select>
         </div>
+
         <div className="actions">
           <button className="btn back-btn" onClick={onGoBack}>返回</button>
           <button className="btn primary-btn" onClick={createRoom} disabled={questions.length === 0}>建立房間</button>

@@ -4,6 +4,8 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 const multer = require('multer');
 const xlsx = require('xlsx');
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
@@ -14,19 +16,50 @@ const io = new Server(server, {
 app.use(cors());
 app.use(express.json());
 
-// In-memory store for rooms
-const rooms = {};
-
-// Helper to generate 8 digit room code
-function generateRoomCode() {
-  let code;
-  do {
-    code = Math.floor(10000000 + Math.random() * 90000000).toString();
-  } while (rooms[code]);
-  return code;
+// --- Question Bank Persistence Logic ---
+const banksFilePath = path.join(__dirname, 'banks.json');
+if (!fs.existsSync(banksFilePath)) {
+  fs.writeFileSync(banksFilePath, JSON.stringify([]));
 }
 
-// Memory upload for excel
+function getBanks() {
+  try {
+    return JSON.parse(fs.readFileSync(banksFilePath, 'utf8'));
+  } catch(e) {
+    return [];
+  }
+}
+
+function saveBank(name, questions) {
+  const banks = getBanks();
+  const newBank = {
+    id: Date.now().toString(),
+    name: name,
+    date: new Date().toISOString(),
+    questions: questions
+  };
+  banks.push(newBank);
+  fs.writeFileSync(banksFilePath, JSON.stringify(banks));
+  return newBank;
+}
+
+app.get('/api/banks', (req, res) => {
+  const banks = getBanks();
+  // only send metadata, not full array
+  res.json(banks.map(b => ({ id: b.id, name: b.name, date: b.date, count: b.questions.length })));
+});
+
+app.get('/api/banks/:id', (req, res) => {
+  const banks = getBanks();
+  const bank = banks.find(b => b.id === req.params.id);
+  if (bank) {
+    res.json(bank);
+  } else {
+    res.status(404).json({ error: 'Bank not found' });
+  }
+});
+
+// --- Upload Logic ---
 const upload = multer({ storage: multer.memoryStorage() });
 
 app.post('/api/upload', upload.single('file'), (req, res) => {
@@ -35,34 +68,70 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
     const workbook = xlsx.read(req.file.buffer, { type: 'buffer' });
     const sheetName = workbook.SheetNames[0];
     const sheet = workbook.Sheets[sheetName];
-    // Expected headers: Question, OptA, OptB, OptC, OptD, Answer
-    const data = xlsx.utils.sheet_to_json(sheet);
-    if (!data || data.length === 0) return res.status(400).send('No data found in excel.');
-    res.json({ questions: data });
+    
+    // robust parsing: 2D array
+    const rows = xlsx.utils.sheet_to_json(sheet, { header: 1 });
+    let parsedQuestions = [];
+    
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      if (!row || row.length < 6) continue;
+      
+      let qText = String(row[0]).trim();
+      if (!qText) continue;
+      
+      // Skip header row
+      if (i === 0 && (qText.includes('題') || qText.toLowerCase().includes('question'))) continue;
+      
+      parsedQuestions.push({
+        Question: qText,
+        OptA: String(row[1]).trim(),
+        OptB: String(row[2]).trim(),
+        OptC: String(row[3]).trim(),
+        OptD: String(row[4]).trim(),
+        Answer: String(row[5]).trim().toUpperCase()
+      });
+    }
+
+    if (parsedQuestions.length === 0) return res.status(400).send('找不到有效題目，請確認至少有6個滿格欄位(題目,A,B,C,D,正確選項)。');
+
+    const bankName = req.body.bankName;
+    if (bankName && bankName.trim() !== '') {
+      saveBank(bankName.trim(), parsedQuestions);
+    }
+
+    res.json({ questions: parsedQuestions });
   } catch (err) {
     console.error(err);
     res.status(500).send('Error parsing excel file: ' + err.message);
   }
 });
 
+// --- Socket.IO Room & Game Logic ---
+const rooms = {};
+
+function generateRoomCode() {
+  let code;
+  do {
+    code = Math.floor(10000000 + Math.random() * 90000000).toString();
+  } while (rooms[code]);
+  return code;
+}
+
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
   socket.on('create_room', ({ questions, limit }) => {
-    // Select questions
     const shuffled = questions.sort(() => 0.5 - Math.random());
     let selected = shuffled.slice(0, limit || 10);
     
-    // Safety check just in case
     if (selected.length === 0) {
       socket.emit('error', 'No questions to play.');
       return;
     }
 
-    // Assign points (e.g. 1000 max) dynamically later
     selected = selected.map(q => ({
       ...q,
-      // Normalize Answer casing if needed
       Answer: String(q.Answer || '').trim().toUpperCase()
     }));
 
@@ -70,10 +139,10 @@ io.on('connection', (socket) => {
     rooms[roomId] = {
       id: roomId,
       teacherId: socket.id,
-      status: 'waiting', // waiting, playing, question_result, game_over
+      status: 'waiting', 
       questions: selected,
       currentQuestionIndex: -1,
-      players: {}, // socket.id => { id, nickname, score, streak, answers: [ { qIndex, selected, correct, score, answerTime } ] }
+      players: {}, 
       answeredCount: 0,
       timeLimit: 60,
       timer: null,
@@ -123,7 +192,6 @@ io.on('connection', (socket) => {
     const player = room.players[socket.id];
     if (!player) return;
 
-    // Check if player already answered this question
     const qIndex = room.currentQuestionIndex;
     if (player.answers.some(a => a.qIndex === qIndex)) return;
 
@@ -131,36 +199,28 @@ io.on('connection', (socket) => {
     const correctOption = question.Answer;
     const isCorrect = (selectedOption === correctOption);
     
-    // Scoring logic (faster answer = higher score, max 1000)
     const timeTaken = (Date.now() - room.questionStartTime) / 1000;
     let points = 0;
     
     if (isCorrect) {
       player.streak += 1;
-      // Formula: Score = max(0, 1000 - (timeTaken/timeLimit) * 500)
-      // Cap base score between 500 and 1000.
       let basePoints = Math.round(1000 * (1 - (timeTaken / room.timeLimit) / 2));
-      
-      // Streak bonus: e.g. 1.0x, 1.1x, 1.2x... max 2x
       let multiplier = 1 + (Math.min(player.streak, 10) * 0.1);
       points = Math.round(basePoints * multiplier);
-      
       player.score += points;
     } else {
       player.streak = 0;
     }
 
-    const answerRecord = {
+    player.answers.push({
       qIndex,
       selected: selectedOption,
       correct: isCorrect,
       score: points,
       timeTaken
-    };
-    player.answers.push(answerRecord);
+    });
     room.answeredCount += 1;
 
-    // Send immediate feedback to the student
     socket.emit('answer_feedback', {
       isCorrect,
       correctOption,
@@ -169,26 +229,19 @@ io.on('connection', (socket) => {
       streak: player.streak
     });
 
-    // Update teacher on answered count
     io.to(room.teacherId).emit('player_answered_count', room.answeredCount);
 
-    // If everyone answered, stop timer early
     const totalPlayers = Object.keys(room.players).length;
     if (room.answeredCount >= totalPlayers) {
       endQuestion(room);
-    } else {
-      // Dynamic timer speed-up logic
-      // e.g., if > 50% players answered, reduce remaining time proportionally
-      // For simplicity, let's keep it straight countdown, or implement a fixed early timeout if many answered.
     }
   });
 
   function nextQuestion(room) {
-    if (room.timer) clearTimeout(room.timer);
+    if (room.timerInterval) clearTimeout(room.timerInterval);
     
     room.currentQuestionIndex += 1;
     if (room.currentQuestionIndex >= room.questions.length) {
-      // Game Over
       room.status = 'game_over';
       io.to(room.id).emit('game_over', {
         players: Object.values(room.players).map(p => ({
@@ -205,7 +258,6 @@ io.on('connection', (socket) => {
     room.questionStartTime = Date.now();
     
     const question = room.questions[room.currentQuestionIndex];
-    // Send to teacher: Full question details
     io.to(room.teacherId).emit('new_question', {
       qIndex: room.currentQuestionIndex,
       total: room.questions.length,
@@ -214,8 +266,6 @@ io.on('connection', (socket) => {
       timeLimit: room.timeLimit
     });
 
-    // Send to students: Only basic info (options text)
-    // Avoid sending correct answer to students before they answer!
     Object.keys(room.players).forEach(pId => {
       io.to(pId).emit('new_question_student', {
         qIndex: room.currentQuestionIndex,
@@ -226,18 +276,13 @@ io.on('connection', (socket) => {
       });
     });
 
-    // Start timer
     let timeLeft = room.timeLimit;
     const interval = setInterval(() => {
       timeLeft -= 1;
-      
-      // Feature: accelerating the remaining time if >50% answered
       const totalPlayers = Object.keys(room.players).length;
       if (totalPlayers > 0 && room.answeredCount >= totalPlayers / 2) {
-         // Decrease faster
-         timeLeft -= 1; // subtract 2 seconds instead of 1
+         timeLeft -= 1;
       }
-      
       io.to(room.id).emit('tick', timeLeft);
 
       if (timeLeft <= 0) {
@@ -256,7 +301,6 @@ io.on('connection', (socket) => {
     room.status = 'question_result';
     const question = room.questions[room.currentQuestionIndex];
     
-    // Sort players for leaderboard (Send Top 5)
     const leaderboard = Object.values(room.players)
       .sort((a, b) => b.score - a.score)
       .slice(0, 5)
@@ -270,7 +314,6 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
-    // basic cleanup could be added, but in real scenarios we might allow rejoin
   });
 });
 
