@@ -84,9 +84,10 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
       let foundQ = -1, foundAns = -1, foundA = -1, foundB = -1, foundC = -1, foundD = -1;
       
       for (let c = 0; c < row.length; c++) {
-        const cell = String(row[c]).toLowerCase().trim();
-        if (cell.includes('題幹') || cell.includes('題目') || cell === 'question') foundQ = c;
-        else if (cell === '答案' || cell === '解答' || cell === 'answer') foundAns = c;
+        // 移除所有空格和星號等特殊符號來增加容錯
+        const cell = String(row[c]).toLowerCase().replace(/[\*\s]/g, '').trim();
+        if (cell.includes('題幹') || cell.includes('題目') || cell.includes('question')) foundQ = c;
+        else if (cell === '答案' || cell === '解答' || cell.includes('answer')) foundAns = c;
         else if (cell.includes('選項-a') || cell.includes('選項a') || cell === 'a' || cell === 'opta') foundA = c;
         else if (cell.includes('選項-b') || cell.includes('選項b') || cell === 'b' || cell === 'optb') foundB = c;
         else if (cell.includes('選項-c') || cell.includes('選項c') || cell === 'c' || cell === 'optc') foundC = c;
@@ -110,17 +111,24 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
       const row = rows[i];
       if (!row || row.length === 0) continue;
       
-      const qText = String(row[colMap.q] || '').trim();
+      const getCellStr = (val) => (val != null ? String(val).trim() : '');
+      const qText = getCellStr(row[colMap.q]);
+      
       // 如果沒有題目內文，跳過
-      if (!qText || qText === 'undefined') continue;
+      if (!qText) continue;
+      
+      // 若答案不是A、B、C、D的格式，也可以在這裡修整，但通常是字母
+      const rawAns = getCellStr(row[colMap.ans]).toUpperCase();
+      // 有些答案可能會多加句點如 "A."，可以利用 replace 清掉
+      const cleanAns = rawAns.replace(/[^A-D]/g, ''); 
       
       parsedQuestions.push({
         Question: qText,
-        OptA: String(row[colMap.a] || '').trim(),
-        OptB: String(row[colMap.b] || '').trim(),
-        OptC: String(row[colMap.c] || '').trim(),
-        OptD: String(row[colMap.d] || '').trim(),
-        Answer: String(row[colMap.ans] || '').trim().toUpperCase()
+        OptA: getCellStr(row[colMap.a]),
+        OptB: getCellStr(row[colMap.b]),
+        OptC: getCellStr(row[colMap.c]),
+        OptD: getCellStr(row[colMap.d]),
+        Answer: cleanAns ? cleanAns[0] : rawAns // 若有找到A-D則取第一個，否則保留原樣
       });
     }
 
