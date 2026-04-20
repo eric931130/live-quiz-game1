@@ -69,31 +69,62 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
     const sheetName = workbook.SheetNames[0];
     const sheet = workbook.Sheets[sheetName];
     
-    // robust parsing: 2D array
+    // 使用 header: 1 取得 2D 陣列
     const rows = xlsx.utils.sheet_to_json(sheet, { header: 1 });
     let parsedQuestions = [];
     
-    for (let i = 0; i < rows.length; i++) {
+    // 1. 尋找標題列 (掃描前 20 列)
+    let headerRowIdx = -1;
+    let colMap = { q: -1, ans: -1, a: -1, b: -1, c: -1, d: -1 };
+    
+    for (let i = 0; i < Math.min(rows.length, 20); i++) {
       const row = rows[i];
-      if (!row || row.length < 6) continue;
+      if (!row || !Array.isArray(row)) continue;
       
-      let qText = String(row[0]).trim();
-      if (!qText) continue;
+      let foundQ = -1, foundAns = -1, foundA = -1, foundB = -1, foundC = -1, foundD = -1;
       
-      // Skip header row
-      if (i === 0 && (qText.includes('題') || qText.toLowerCase().includes('question'))) continue;
+      for (let c = 0; c < row.length; c++) {
+        const cell = String(row[c]).toLowerCase().trim();
+        if (cell.includes('題幹') || cell.includes('題目') || cell === 'question') foundQ = c;
+        else if (cell === '答案' || cell === '解答' || cell === 'answer') foundAns = c;
+        else if (cell.includes('選項-a') || cell.includes('選項a') || cell === 'a' || cell === 'opta') foundA = c;
+        else if (cell.includes('選項-b') || cell.includes('選項b') || cell === 'b' || cell === 'optb') foundB = c;
+        else if (cell.includes('選項-c') || cell.includes('選項c') || cell === 'c' || cell === 'optc') foundC = c;
+        else if (cell.includes('選項-d') || cell.includes('選項d') || cell === 'd' || cell === 'optd') foundD = c;
+      }
+      
+      // 如果找到題目和答案，就可以認定它是標題列了
+      if (foundQ !== -1 && foundAns !== -1 && foundA !== -1) {
+        headerRowIdx = i;
+        colMap = { q: foundQ, ans: foundAns, a: foundA, b: foundB, c: foundC, d: foundD };
+        break;
+      }
+    }
+
+    if (headerRowIdx === -1) {
+      return res.status(400).send('無法辨識題庫格式。請確保包含「題幹/題目」、「答案」、「選項-A」、「選項-B」等標題列！');
+    }
+
+    // 2. 從標題列的下一行開始擷取資料
+    for (let i = headerRowIdx + 1; i < rows.length; i++) {
+      const row = rows[i];
+      if (!row || row.length === 0) continue;
+      
+      const qText = String(row[colMap.q] || '').trim();
+      // 如果沒有題目內文，跳過
+      if (!qText || qText === 'undefined') continue;
       
       parsedQuestions.push({
         Question: qText,
-        OptA: String(row[1]).trim(),
-        OptB: String(row[2]).trim(),
-        OptC: String(row[3]).trim(),
-        OptD: String(row[4]).trim(),
-        Answer: String(row[5]).trim().toUpperCase()
+        OptA: String(row[colMap.a] || '').trim(),
+        OptB: String(row[colMap.b] || '').trim(),
+        OptC: String(row[colMap.c] || '').trim(),
+        OptD: String(row[colMap.d] || '').trim(),
+        Answer: String(row[colMap.ans] || '').trim().toUpperCase()
       });
     }
 
-    if (parsedQuestions.length === 0) return res.status(400).send('找不到有效題目，請確認至少有6個滿格欄位(題目,A,B,C,D,正確選項)。');
+    if (parsedQuestions.length === 0) return res.status(400).send('在此檔案中找不到任何題目內容，請檢查格式是否大於一行。');
 
     const bankName = req.body.bankName;
     if (bankName && bankName.trim() !== '') {
