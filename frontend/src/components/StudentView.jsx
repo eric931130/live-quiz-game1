@@ -18,6 +18,15 @@ export default function StudentView({ onGoBack }) {
   const [streak, setStreak] = useState(0);
   const [finalReport, setFinalReport] = useState(null);
 
+  // Refs for socket events to avoid stale closures and prevent reconnecting
+  const stepRef = React.useRef(step);
+  const scoreRef = React.useRef(score);
+  const nicknameRef = React.useRef(nickname);
+
+  useEffect(() => { stepRef.current = step; }, [step]);
+  useEffect(() => { scoreRef.current = score; }, [score]);
+  useEffect(() => { nicknameRef.current = nickname; }, [nickname]);
+
   useEffect(() => {
     // Check if code is in URL params
     const params = new URLSearchParams(window.location.search);
@@ -47,13 +56,13 @@ export default function StudentView({ onGoBack }) {
     
     // Also might receive question_result if time runs out before answering
     newSocket.on('question_result', (data) => {
-      if (step === 'playing') {
+      if (stepRef.current === 'playing') {
         // Did not answer in time
         setFeedback({
           isCorrect: false,
           correctOption: data.correctOption,
           points: 0,
-          currentScore: score,
+          currentScore: scoreRef.current,
           streak: 0
         });
         setStreak(0);
@@ -63,7 +72,7 @@ export default function StudentView({ onGoBack }) {
 
     newSocket.on('game_over', (data) => {
       // Find self report
-      const myReport = data.players.find(p => p.nickname === nickname);
+      const myReport = data.players.find(p => p.nickname === nicknameRef.current);
       setFinalReport(myReport);
       setStep('game_over');
     });
@@ -73,7 +82,7 @@ export default function StudentView({ onGoBack }) {
     });
 
     return () => newSocket.close();
-  }, [step, score, nickname]);
+  }, []); // Run only once on mount
 
   const joinRoom = (e) => {
     e.preventDefault();

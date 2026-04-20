@@ -277,7 +277,7 @@ io.on('connection', (socket) => {
   });
 
   function nextQuestion(room) {
-    if (room.timerInterval) clearTimeout(room.timerInterval);
+    if (room.timerInterval) clearInterval(room.timerInterval);
     
     room.currentQuestionIndex += 1;
     if (room.currentQuestionIndex >= room.questions.length) {
@@ -305,14 +305,12 @@ io.on('connection', (socket) => {
       timeLimit: room.timeLimit
     });
 
-    Object.keys(room.players).forEach(pId => {
-      io.to(pId).emit('new_question_student', {
-        qIndex: room.currentQuestionIndex,
-        total: room.questions.length,
-        question: question.Question,
-        options: { A: question.OptA, B: question.OptB, C: question.OptC, D: question.OptD },
-        timeLimit: room.timeLimit
-      });
+    io.to(room.id).emit('new_question_student', {
+      qIndex: room.currentQuestionIndex,
+      total: room.questions.length,
+      question: question.Question,
+      options: { A: question.OptA, B: question.OptB, C: question.OptC, D: question.OptD },
+      timeLimit: room.timeLimit
     });
 
     let timeLeft = room.timeLimit;
