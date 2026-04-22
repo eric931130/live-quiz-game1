@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { io } from 'socket.io-client';
+import { Play, ArrowLeft, Flame, Trophy, CheckCircle2, XCircle, ListChecks, Check, X } from 'lucide-react';
+import ParticleButton from './ParticleButton';
 
 const SOCKET_URL = window.location.hostname === 'localhost' 
   ? 'http://localhost:3001' 
@@ -18,7 +20,7 @@ export default function StudentView({ onGoBack }) {
   const [streak, setStreak] = useState(0);
   const [finalReport, setFinalReport] = useState(null);
 
-  // Refs for socket events to avoid stale closures and prevent reconnecting
+  // Refs for socket events to avoid stale closures
   const stepRef = React.useRef(step);
   const scoreRef = React.useRef(score);
   const nicknameRef = React.useRef(nickname);
@@ -45,16 +47,17 @@ export default function StudentView({ onGoBack }) {
       setCurrentQuestion(q);
       setFeedback(null);
       setStep('playing');
+      stepRef.current = 'playing';
     });
 
     newSocket.on('answer_feedback', (data) => {
       setFeedback(data);
       setScore(data.currentScore);
       setStreak(data.streak);
-      setStep('feedback'); // show right/wrong immediately
+      setStep('feedback'); 
+      stepRef.current = 'feedback';
     });
     
-    // Also might receive question_result if time runs out before answering
     newSocket.on('question_result', (data) => {
       if (stepRef.current === 'playing') {
         // Did not answer in time
@@ -71,7 +74,6 @@ export default function StudentView({ onGoBack }) {
     });
 
     newSocket.on('game_over', (data) => {
-      // Find self report
       const myReport = data.players.find(p => p.nickname === nicknameRef.current);
       setFinalReport(myReport);
       setStep('game_over');
@@ -82,7 +84,7 @@ export default function StudentView({ onGoBack }) {
     });
 
     return () => newSocket.close();
-  }, []); // Run only once on mount
+  }, []);
 
   const joinRoom = (e) => {
     e.preventDefault();
@@ -96,8 +98,10 @@ export default function StudentView({ onGoBack }) {
 
   if (step === 'join') {
     return (
-      <div className="card student-join animate-fade-in">
-        <h2 className="title">加入遊戲！</h2>
+      <div className="card student-join animate-fade-in glass-panel" style={{ padding: '3rem', borderTop: '5px solid var(--primary-dark)', borderRadius: '24px' }}>
+        <h2 className="title" style={{ color: 'var(--primary-dark)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+          <Play size={28} /> 加入永續測驗！
+        </h2>
         <form onSubmit={joinRoom} className="join-form">
           <input 
             type="text" 
@@ -107,6 +111,7 @@ export default function StudentView({ onGoBack }) {
             required 
             maxLength={8}
             className="input-field"
+            style={{ padding: '1rem', fontSize: '1.2rem', textAlign: 'center' }}
           />
           <input 
             type="text" 
@@ -116,47 +121,62 @@ export default function StudentView({ onGoBack }) {
             required 
             maxLength={15}
             className="input-field"
+            style={{ padding: '1rem', fontSize: '1.2rem', textAlign: 'center' }}
           />
-          <button type="submit" className="btn primary-btn btn-block mt-2">進入房間</button>
+          <ParticleButton type="submit" className="btn primary-btn btn-block mt-4 xl-btn" style={{ borderRadius: '50px' }}>進入房間</ParticleButton>
         </form>
-        <button className="btn back-btn mt-4" onClick={onGoBack}>返回首頁</button>
+        <ParticleButton className="btn back-btn mt-4 btn-block" onClick={onGoBack} style={{ borderRadius: '50px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+           <ArrowLeft size={20} /> 返回首頁
+        </ParticleButton>
       </div>
     );
   }
 
   if (step === 'waiting') {
     return (
-      <div className="student-waiting animate-fade-in text-center">
-        <h2 className="title">成功進入房間囉！</h2>
-        <p>確認在大螢幕上看到你的綽號</p>
-        <div className="spinner mt-4"></div>
-        <p className="mt-4">等待老師開始遊戲...</p>
+      <div className="student-waiting animate-fade-in text-center" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--bg-color)' }}>
+        <h2 className="title" style={{ color: 'var(--primary-dark)', fontSize: '2.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <CheckCircle2 size={36} /> 成功進入房間！
+        </h2>
+        <p style={{ fontSize: '1.2rem', color: 'var(--text-muted)' }}>請確認在大螢幕上看到你的綽號</p>
+        <div className="spinner mt-4" style={{ borderColor: 'rgba(46, 125, 50, 0.2)', borderTopColor: '#2E7D32' }}></div>
+        <p className="mt-4" style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--primary)' }}>等待小老師開始作答...</p>
       </div>
     );
   }
 
   const renderTopBar = () => (
-    <div className="student-topbar">
-      <div className="streak">連對: {streak} 🔥</div>
-      <div className="score">分數: {score}</div>
+    <div className="student-topbar" style={{ background: 'var(--primary-dark)', color: 'white', border: 'none' }}>
+      <div className="streak" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><Flame size={20} color="#FFD54F" /> 連對: {streak}</div>
+      <div className="score" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><Trophy size={20} color="#FFD54F" /> 分數: {score}</div>
     </div>
   );
 
   if (step === 'playing' && currentQuestion) {
+    const isTrueFalse = !currentQuestion.options.C && !currentQuestion.options.D;
+    const availableOptions = isTrueFalse ? ['A', 'B'] : ['A', 'B', 'C', 'D'];
+
     return (
       <div className="student-playing">
         {renderTopBar()}
-        <h2 className="mobile-question">{currentQuestion.question}</h2>
-        <div className="student-options-grid">
-           {['A', 'B', 'C', 'D'].map((opt) => (
-             <button 
+        <h2 className="mobile-question" style={{ color: 'var(--primary-dark)', fontSize: '2rem' }}>{currentQuestion.question}</h2>
+        <div className="student-options-grid" style={{
+           display: 'grid',
+           gridTemplateColumns: isTrueFalse ? '1fr' : '1fr 1fr',
+           gridTemplateRows: isTrueFalse ? '1fr 1fr' : '1fr 1fr',
+           gap: '1rem',
+           padding: '1rem'
+        }}>
+           {availableOptions.map((opt) => (
+             <ParticleButton 
                key={opt} 
                className={`student-btn-opt opt-${opt.toLowerCase()}`}
                onClick={() => selectOption(opt)}
+               style={{ borderRadius: '24px', boxShadow: '0 8px 15px rgba(0,0,0,0.1)' }}
              >
-               <span className="opt-label">{opt}</span>
-               <span className="opt-text">{currentQuestion.options[opt]}</span>
-             </button>
+               <span className="opt-label" style={{ background: 'rgba(255,255,255,0.4)', color: 'var(--text-main)' }}>{opt}</span>
+               <span className="opt-text" style={{ fontSize: isTrueFalse ? '2rem' : '1.2rem' }}>{currentQuestion.options[opt]}</span>
+             </ParticleButton>
            ))}
         </div>
       </div>
@@ -166,17 +186,20 @@ export default function StudentView({ onGoBack }) {
   if (step === 'feedback' && feedback) {
     const isCorrect = feedback.isCorrect;
     return (
-      <div className={`student-feedback flex-center animate-pop-in ${isCorrect ? 'bg-correct' : 'bg-incorrect'}`}>
+      <div className={`student-feedback flex-center animate-pop-in`} style={{ backgroundColor: isCorrect ? '#4CAF50' : '#E53935' }}>
         {renderTopBar()}
-        <div className="feedback-content">
-          <h1>{isCorrect ? '答對了！' : '答錯囉...'}</h1>
-          <div className="points-display">
-             {isCorrect ? `+${feedback.points}` : '0'}
+        <div className="feedback-content" style={{ background: 'rgba(255,255,255,0.95)', color: 'var(--text-main)', padding: '3rem', borderRadius: '24px', boxShadow: '0 10px 30px rgba(0,0,0,0.2)' }}>
+          <h1 style={{ color: isCorrect ? '#2E7D32' : '#C62828', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '1rem' }}>
+            {isCorrect ? <CheckCircle2 size={48} /> : <XCircle size={48} />} 
+            {isCorrect ? '答對了！' : '答錯囉...'}
+          </h1>
+          <div className="points-display" style={{ background: isCorrect ? '#E8F5E9' : '#FFEBEE', color: isCorrect ? '#2E7D32' : '#C62828', padding: '1rem 3rem' }}>
+             {isCorrect ? `+${feedback.points}` : '0'} 分
           </div>
           {!isCorrect && (
-             <h3 className="mt-4">正確答案是： {feedback.correctOption}</h3>
+             <h3 className="mt-4" style={{ color: '#C62828' }}>正確答案是： {feedback.correctOption}</h3>
           )}
-          <p className="mt-4 text-small">正在等待其他同學回答...</p>
+          <p className="mt-4 text-small" style={{ color: '#666', fontWeight: 'bold' }}>請專心等待下一題 ⏳</p>
         </div>
       </div>
     );
@@ -184,22 +207,28 @@ export default function StudentView({ onGoBack }) {
 
   if (step === 'game_over' && finalReport) {
     return (
-      <div className="student-game-over bg-dark animate-fade-in">
-        <h1 className="title text-center mt-2">最終結算單</h1>
-        <div className="score-summary">
-          <h2>獲得總分： {finalReport.score}</h2>
+      <div className="student-game-over animate-fade-in" style={{ background: 'var(--bg-color)' }}>
+        <h1 className="title text-center mt-2" style={{ color: '#2E7D32', fontSize: '2.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+          <Trophy size={40} /> 最終結算單
+        </h1>
+        <div className="score-summary" style={{ background: 'linear-gradient(135deg, #4CAF50, #2E7D32)' }}>
+          <h2 style={{ fontSize: '2rem' }}>總成績： {finalReport.score} 分</h2>
         </div>
-        <div className="history-list">
-          <h3>你的作答記錄</h3>
+        <div className="history-list" style={{ boxShadow: '0 4px 15px rgba(0,0,0,0.05)' }}>
+          <h3 style={{ color: 'var(--primary-dark)', fontSize: '1.4rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <ListChecks size={24} /> 你的作答記錄
+          </h3>
           {finalReport.answers.map((ans, i) => (
-             <div key={i} className={`history-item ${ans.correct ? 'item-correct' : 'item-wrong'}`}>
+             <div key={i} className={`history-item ${ans.correct ? 'item-correct' : 'item-wrong'}`} style={{ borderLeftWidth: '8px', alignItems: 'center' }}>
                <div>第 {ans.qIndex + 1} 題：你選了 {ans.selected}</div>
-               <div>{ans.correct ? '✔' : '❌'} 獲得分數: {ans.score}</div>
+               <div style={{ color: ans.correct ? '#2E7D32' : '#E53935', display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
+                  {ans.correct ? <><Check size={16}/>答對</> : <><X size={16}/>答錯</>} ({ans.score}分)
+               </div>
              </div>
           ))}
         </div>
-        <div className="text-center mt-4">
-           <button className="btn primary-btn" onClick={() => window.location.reload()}>再玩一次</button>
+        <div className="text-center mt-4 pb-4">
+           <ParticleButton className="btn primary-btn xl-btn" onClick={() => window.location.reload()} style={{ borderRadius: '50px' }}>再玩一次</ParticleButton>
         </div>
       </div>
     );

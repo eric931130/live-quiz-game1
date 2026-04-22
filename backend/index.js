@@ -75,13 +75,13 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
     
     // 1. 尋找標題列 (掃描前 20 列)
     let headerRowIdx = -1;
-    let colMap = { q: -1, ans: -1, a: -1, b: -1, c: -1, d: -1 };
+    let colMap = { q: -1, ans: -1, a: -1, b: -1, c: -1, d: -1, chapter: -1, section: -1 };
     
     for (let i = 0; i < Math.min(rows.length, 20); i++) {
       const row = rows[i];
       if (!row || !Array.isArray(row)) continue;
       
-      let foundQ = -1, foundAns = -1, foundA = -1, foundB = -1, foundC = -1, foundD = -1;
+      let foundQ = -1, foundAns = -1, foundA = -1, foundB = -1, foundC = -1, foundD = -1, foundChapter = -1, foundSection = -1;
       
       for (let c = 0; c < row.length; c++) {
         // 移除所有空格和星號等特殊符號來增加容錯
@@ -92,12 +92,14 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
         else if (cell.includes('選項-b') || cell.includes('選項b') || cell === 'b' || cell === 'optb') foundB = c;
         else if (cell.includes('選項-c') || cell.includes('選項c') || cell === 'c' || cell === 'optc') foundC = c;
         else if (cell.includes('選項-d') || cell.includes('選項d') || cell === 'd' || cell === 'optd') foundD = c;
+        else if (cell.includes('章節') || cell.includes('chapter')) foundChapter = c;
+        else if (cell.includes('小節') || cell.includes('section')) foundSection = c;
       }
       
       // 如果找到題目和答案，就可以認定它是標題列了
       if (foundQ !== -1 && foundAns !== -1 && foundA !== -1) {
         headerRowIdx = i;
-        colMap = { q: foundQ, ans: foundAns, a: foundA, b: foundB, c: foundC, d: foundD };
+        colMap = { q: foundQ, ans: foundAns, a: foundA, b: foundB, c: foundC, d: foundD, chapter: foundChapter, section: foundSection };
         break;
       }
     }
@@ -117,27 +119,34 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
       // 如果沒有題目內文，跳過
       if (!qText) continue;
       
-      // 若答案不是A、B、C、D的格式，也可以在這裡修整，但通常是字母
       const rawAns = getCellStr(row[colMap.ans]).toUpperCase();
-      // 有些答案可能會多加句點如 "A."，可以利用 replace 清掉
       const cleanAns = rawAns.replace(/[^A-D]/g, ''); 
       
+      const optA = getCellStr(row[colMap.a]);
+      const optB = getCellStr(row[colMap.b]);
+      const optC = getCellStr(row[colMap.c]);
+      const optD = getCellStr(row[colMap.d]);
+      
+      const chapter = colMap.chapter !== -1 ? getCellStr(row[colMap.chapter]) || '未分類' : '未分類';
+      const section = colMap.section !== -1 ? getCellStr(row[colMap.section]) || '未分類' : '未分類';
+      
+      // 判定是否為是非題 (C, D為空)
+      const isTrueFalse = (!optC && !optD);
+
       parsedQuestions.push({
         Question: qText,
-        OptA: getCellStr(row[colMap.a]),
-        OptB: getCellStr(row[colMap.b]),
-        OptC: getCellStr(row[colMap.c]),
-        OptD: getCellStr(row[colMap.d]),
-        Answer: cleanAns ? cleanAns[0] : rawAns // 若有找到A-D則取第一個，否則保留原樣
+        OptA: optA,
+        OptB: optB,
+        OptC: optC,
+        OptD: optD,
+        Answer: cleanAns ? cleanAns[0] : rawAns,
+        Chapter: chapter,
+        Section: section,
+        Type: isTrueFalse ? 'true_false' : 'multiple_choice'
       });
     }
 
     if (parsedQuestions.length === 0) return res.status(400).send('在此檔案中找不到任何題目內容，請檢查格式是否大於一行。');
-
-    const bankName = req.body.bankName;
-    if (bankName && bankName.trim() !== '') {
-      saveBank(bankName.trim(), parsedQuestions);
-    }
 
     res.json({ questions: parsedQuestions });
   } catch (err) {
@@ -235,17 +244,16 @@ io.on('connection', (socket) => {
     if (player.answers.some(a => a.qIndex === qIndex)) return;
 
     const question = room.questions[qIndex];
-    const correctOption = question.Answer;
-    const isCorrect = (selectedOption === correctOption);
+    const correctOption = String(question.Answer).trim().toUpperCase();
+    const cleanSelectedOption = String(selectedOption).trim().toUpperCase();
+    const isCorrect = (cleanSelectedOption === correctOption);
     
     const timeTaken = (Date.now() - room.questionStartTime) / 1000;
     let points = 0;
     
     if (isCorrect) {
       player.streak += 1;
-      let basePoints = Math.round(1000 * (1 - (timeTaken / room.timeLimit) / 2));
-      let multiplier = 1 + (Math.min(player.streak, 10) * 0.1);
-      points = Math.round(basePoints * multiplier);
+      points = 100;
       player.score += points;
     } else {
       player.streak = 0;
@@ -338,6 +346,17 @@ io.on('connection', (socket) => {
     room.status = 'question_result';
     const question = room.questions[room.currentQuestionIndex];
     
+    const distribution = { A: 0, B: 0, C: 0, D: 0 };
+    Object.values(room.players).forEach(p => {
+       const ans = p.answers.find(a => a.qIndex === room.currentQuestionIndex);
+       if (ans && ans.selected) {
+           const sel = ans.selected.toUpperCase();
+           if (distribution[sel] !== undefined) {
+               distribution[sel]++;
+           }
+       }
+    });
+
     const leaderboard = Object.values(room.players)
       .sort((a, b) => b.score - a.score)
       .slice(0, 5)
@@ -345,7 +364,8 @@ io.on('connection', (socket) => {
 
     io.to(room.id).emit('question_result', {
       correctOption: question.Answer,
-      leaderboard: leaderboard
+      leaderboard: leaderboard,
+      distribution: distribution
     });
   }
 

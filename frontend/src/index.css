@@ -2,18 +2,21 @@
 
 :root {
   /* SDGs Sustainable Colors */
-  --primary: #19486A; /* SDG Navy Blue */
-  --secondary: #E5243B; /* SDG Red */
-  --bg-color: #F8F9FA; /* Light clean BG */
+  --primary: #2E7D32; /* Forest Green */
+  --primary-light: #C8E6C9;
+  --primary-dark: #1B5E20;
+  --secondary: #8D6E63; /* Earthy Brown */
+  --secondary-color: #8D6E63;
+  --bg-color: #F1F8E9; /* Light green clean BG */
   --panel-bg: #FFFFFF; /* White cards */
-  --text-main: #343A40;
-  --text-muted: #6C757D;
+  --text-main: #33691E;
+  --text-muted: #558B2F;
   
   /* Option Colors from SDG Wheel */
-  --opt-a: #E5243B; /* SDG 1 Red */
-  --opt-b: #0A97D9; /* SDG 6 Blue */
-  --opt-c: #FD9D24; /* SDG 2 Yellow/Orange */
-  --opt-d: #4C9F38; /* SDG 3 Green */
+  --opt-a: #4CAF50; /* Green */
+  --opt-b: #8BC34A; /* Light Green */
+  --opt-c: #CDDC39; /* Lime */
+  --opt-d: #FFEB3B; /* Yellow */
 }
 
 * {
@@ -24,7 +27,7 @@
 
 body {
   font-family: 'Noto Sans TC', sans-serif;
-  background-color: var(--bg-color);
+  background: radial-gradient(circle at center, var(--bg-color) 0%, #e8f5e9 100%);
   color: var(--text-main);
   min-height: 100vh;
   display: flex;
@@ -117,13 +120,21 @@ body {
 
 /* UI Elements */
 .card {
-  background: var(--panel-bg);
-  padding: 2rem;
-  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px);
+  padding: 3rem;
+  border-radius: 20px;
   width: 100%;
   max-width: 500px;
   margin: auto;
-  box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1);
+  box-shadow: 0 25px 40px -10px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(255, 255, 255, 0.5) inset;
+}
+
+.glass-panel {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  box-shadow: 0 30px 60px rgba(0,0,0,0.08);
 }
 
 .title {
@@ -146,18 +157,21 @@ body {
 }
 
 input[type="file"], select, input[type="text"] {
-  padding: 0.75rem;
-  border-radius: 0.5rem;
+  padding: 1rem;
+  border-radius: 12px;
   border: 1px solid #CED4DA;
-  background: #FFFFFF;
+  background: rgba(255, 255, 255, 0.9);
   color: var(--text-main);
   font-family: inherit;
   font-size: 1rem;
   outline: none;
+  transition: all 0.3s ease;
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.02);
 }
 
 input:focus, select:focus {
   border-color: var(--primary);
+  box-shadow: 0 0 0 4px rgba(46, 125, 50, 0.1);
 }
 
 .input-field {
@@ -166,24 +180,31 @@ input:focus, select:focus {
 }
 
 .btn {
-  padding: 0.75rem 1.5rem;
-  border-radius: 0.5rem;
+  padding: 1rem 2rem;
+  border-radius: 12px;
   font-weight: bold;
-  font-size: 1rem;
+  font-size: 1.1rem;
   cursor: pointer;
   border: none;
   font-family: inherit;
-  transition: all 0.2s;
+  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  box-shadow: 0 4px 6px rgba(0,0,0,0.05);
 }
 
 .btn-block { width: 100%; }
 
 .primary-btn {
-  background: var(--primary);
+  background: linear-gradient(135deg, var(--primary), var(--primary-dark));
   color: white;
+  box-shadow: 0 10px 20px rgba(46, 125, 50, 0.2);
 }
-.primary-btn:hover { background: #0E3554; }
-.primary-btn:disabled { background: #CED4DA; color: #6C757D; cursor: not-allowed; }
+.primary-btn:hover { 
+  transform: translateY(-2px);
+  box-shadow: 0 15px 25px rgba(46, 125, 50, 0.3);
+}
+.primary-btn:disabled { 
+  background: #CED4DA; color: #6C757D; cursor: not-allowed; box-shadow: none; transform: none; 
+}
 
 .back-btn {
   background: transparent;
