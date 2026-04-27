@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
 import { QRCodeSVG } from 'qrcode.react';
-import { collection, addDoc, getDocs } from 'firebase/firestore';
+import { collection, addDoc, getDocs, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import * as xlsx from 'xlsx';
-import { Cloud, UploadCloud, Shuffle, ListChecks, Folder, FileText, CheckCircle, Trophy, BarChart3, Clock, Users } from 'lucide-react';
+import { Cloud, UploadCloud, Shuffle, ListChecks, Folder, FileText, CheckCircle, Trophy, BarChart3, Clock, Users, Trash2, ChevronDown, ChevronRight } from 'lucide-react';
 import { db } from '../firebase';
 import ParticleButton from './ParticleButton';
 
@@ -22,6 +22,21 @@ export default function TeacherDashboard({ onGoBack }) {
   const [selectedBankId, setSelectedBankId] = useState('');
   const [selectedBankQuestions, setSelectedBankQuestions] = useState([]);
   
+  // Dashboard Mode
+  const [dashboardMode, setDashboardMode] = useState('live'); // 'live', 'assignment_setup', 'assignment_manage'
+  
+  // Assignment Setup State
+  const [assignmentTitle, setAssignmentTitle] = useState('');
+  const [assignmentDeadline, setAssignmentDeadline] = useState('');
+  const [assignmentType, setAssignmentType] = useState('practice'); // 'practice' or 'exam'
+  const [assignmentMaxAttempts, setAssignmentMaxAttempts] = useState(3);
+  const [assignmentLeaderboardDate, setAssignmentLeaderboardDate] = useState('');
+  
+  // Assignment Management State
+  const [assignmentsList, setAssignmentsList] = useState([]);
+  const [selectedAssignmentId, setSelectedAssignmentId] = useState(null);
+  const [assignmentResults, setAssignmentResults] = useState([]);
+
   // Setup Tabs & Flow State
   const [setupTab, setSetupTab] = useState('upload'); // 'upload' or 'select'
   const [bankNameForm, setBankNameForm] = useState('');
@@ -38,6 +53,8 @@ export default function TeacherDashboard({ onGoBack }) {
   // Available Chapters and Sections for filters
   const [chapters, setChapters] = useState([]);
   const [sections, setSections] = useState({});
+  const [expandedChapters, setExpandedChapters] = useState(new Set());
+  const [expandedSections, setExpandedSections] = useState(new Set());
 
   // Game state
   const [currentQuestion, setCurrentQuestion] = useState(null);
@@ -49,6 +66,7 @@ export default function TeacherDashboard({ onGoBack }) {
 
   useEffect(() => {
     fetchBanksFromFirebase();
+    fetchAssignmentsFromFirebase();
 
     const newSocket = io(SOCKET_URL);
     setSocket(newSocket);
@@ -106,6 +124,52 @@ export default function TeacherDashboard({ onGoBack }) {
     }
   };
 
+  const fetchAssignmentsFromFirebase = async () => {
+    try {
+      const querySnapshot = await getDocs(collection(db, "Assignments"));
+      const assigns = [];
+      querySnapshot.forEach((doc) => {
+        assigns.push({ id: doc.id, ...doc.data() });
+      });
+      // Sort by descending created date
+      assigns.sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
+      setAssignmentsList(assigns);
+    } catch(e) {
+      console.log('載入任務失敗', e);
+    }
+  };
+
+  const loadAssignmentResults = async (assignId) => {
+    try {
+       const querySnapshot = await getDocs(collection(db, "AssignmentResults"));
+       const results = [];
+       querySnapshot.forEach(doc => {
+          const data = doc.data();
+          if (data.assignmentId === assignId) {
+             results.push({ id: doc.id, ...data });
+          }
+       });
+       setAssignmentResults(results);
+    } catch(e) {
+       console.log('載入成績失敗', e);
+    }
+  };
+
+  const deleteBank = async (bankId) => {
+    if (!window.confirm("確定要永久刪除這個題庫嗎？這項操作無法復原。")) return;
+    try {
+      await deleteDoc(doc(db, "QuizBanks", bankId));
+      alert("✅ 題庫已刪除！");
+      await fetchBanksFromFirebase();
+      if (selectedBankId === bankId) {
+         setSelectedBankId('');
+         setSelectedBankQuestions([]);
+      }
+    } catch (e) {
+      alert("刪除失敗：" + e.message);
+    }
+  };
+
   const loadBank = (bankId) => {
     setSelectedBankId(bankId);
     const bank = savedBanks.find(b => b.id === bankId);
@@ -134,6 +198,49 @@ export default function TeacherDashboard({ onGoBack }) {
       setSelectedCustomQIdxs(new Set());
     } else {
       setSelectedBankQuestions([]);
+    }
+  };
+
+  const deleteQuestion = async (e, qOriginalIndex) => {
+    e.stopPropagation();
+    if (!window.confirm("確定要永久刪除這個單一題目嗎？")) return;
+    try {
+      const bank = savedBanks.find(b => b.id === selectedBankId);
+      if (!bank) return;
+      
+      const newQuestions = bank.questions.filter((_, idx) => idx !== qOriginalIndex);
+      
+      await updateDoc(doc(db, "QuizBanks", selectedBankId), {
+         questions: newQuestions
+      });
+      
+      // Update local state without losing expand states
+      const updatedSavedBanks = savedBanks.map(b => b.id === selectedBankId ? { ...b, questions: newQuestions } : b);
+      setSavedBanks(updatedSavedBanks);
+      
+      // Manually trigger reload for UI to apply new indexes
+      const chaps = new Set();
+      const secs = {};
+      const qsWithIdx = newQuestions.map((q, idx) => {
+        const cloned = {...q};
+        cloned.originalIndex = idx;
+        const c = cloned.Chapter || '未分類';
+        const s = cloned.Section || '未分類';
+        chaps.add(c);
+        if (!secs[c]) secs[c] = new Set();
+        secs[c].add(s);
+        return cloned;
+      });
+      
+      setSelectedBankQuestions(qsWithIdx);
+      setChapters(Array.from(chaps));
+      const parsedSecs = {};
+      Object.keys(secs).forEach(k => parsedSecs[k] = Array.from(secs[k]));
+      setSections(parsedSecs);
+      
+      setSelectedCustomQIdxs(new Set()); // Reset selections to prevent mismatch
+    } catch(err) {
+      alert("刪除題目失敗：" + err.message);
     }
   };
 
@@ -166,10 +273,10 @@ export default function TeacherDashboard({ onGoBack }) {
               else if (cell.includes('選項-b') || cell.includes('選項b') || cell === 'b' || cell === 'optb') foundB = c;
               else if (cell.includes('選項-c') || cell.includes('選項c') || cell === 'c' || cell === 'optc') foundC = c;
               else if (cell.includes('選項-d') || cell.includes('選項d') || cell === 'd' || cell === 'optd') foundD = c;
-              else if (cell.includes('章節') || cell.includes('chapter')) foundChapter = c;
-              else if (cell.includes('小節') || cell.includes('section')) foundSection = c;
+              else if (cell.includes('章') || cell.includes('單元') || cell.includes('主題') || cell.includes('chapter') || cell.includes('unit')) foundChapter = c;
+              else if (cell.includes('節') || cell.includes('小節') || cell.includes('section') || cell.includes('part')) foundSection = c;
            }
-           if (foundQ !== -1 && foundAns !== -1 && foundA !== -1) {
+           if (foundQ !== -1 && foundAns !== -1) {
              headerRowIdx = i;
              colMap = { q: foundQ, ans: foundAns, a: foundA, b: foundB, c: foundC, d: foundD, chapter: foundChapter, section: foundSection };
              break;
@@ -177,7 +284,7 @@ export default function TeacherDashboard({ onGoBack }) {
          }
          
          if (headerRowIdx === -1) {
-            alert('無法辨識題庫格式。請確保包含「題目」、「答案」、「選項A」、「選項B」等標題列！');
+            alert('無法辨識題庫格式。請確保至少包含「題目」、「答案」等標題列！');
             return;
          }
 
@@ -188,18 +295,29 @@ export default function TeacherDashboard({ onGoBack }) {
            const qText = getCellStr(row[colMap.q]);
            if (!qText) continue;
            
-           const rawAns = getCellStr(row[colMap.ans]).toUpperCase();
+           const rawAnsStr = getCellStr(row[colMap.ans]);
+           const rawAns = rawAnsStr.toUpperCase();
            const cleanAns = rawAns.replace(/[^A-D]/g, ''); 
-           const optA = getCellStr(row[colMap.a]);
-           const optB = getCellStr(row[colMap.b]);
-           const optC = getCellStr(row[colMap.c]);
-           const optD = getCellStr(row[colMap.d]);
+           let optA = getCellStr(row[colMap.a]);
+           let optB = getCellStr(row[colMap.b]);
+           let optC = getCellStr(row[colMap.c]);
+           let optD = getCellStr(row[colMap.d]);
            const chapter = colMap.chapter !== -1 ? getCellStr(row[colMap.chapter]) || '未分類' : '未分類';
            const section = colMap.section !== -1 ? getCellStr(row[colMap.section]) || '未分類' : '未分類';
-           const isTrueFalse = (!optC && !optD);
+           
+           const isTFText = (val) => ['O','X','是','否','對','錯','TRUE','FALSE'].includes(val.toUpperCase());
+           const isTrueFalse = (!optC && !optD) || (isTFText(optA) && isTFText(optB)) || (!optA && !optB);
 
            let finalAnswer = cleanAns ? cleanAns[0] : rawAns;
-           if (!cleanAns && rawAns) {
+           
+           if (isTrueFalse) {
+               if (!optA) optA = 'O (是)';
+               if (!optB) optB = 'X (否)';
+               if (['O', '是', '對', 'TRUE', 'A'].includes(rawAnsStr.toUpperCase())) finalAnswer = 'A';
+               else if (['X', '否', '錯', 'FALSE', 'B'].includes(rawAnsStr.toUpperCase())) finalAnswer = 'B';
+           }
+
+           if (!cleanAns && rawAnsStr && !isTrueFalse) {
              if (rawAns === optA.toUpperCase()) finalAnswer = 'A';
              else if (rawAns === optB.toUpperCase()) finalAnswer = 'B';
              else if (rawAns === optC.toUpperCase()) finalAnswer = 'C';
@@ -225,8 +343,15 @@ export default function TeacherDashboard({ onGoBack }) {
          }
          
          const bankName = bankNameForm.trim() || `題庫 ${new Date().toLocaleDateString()}`;
-         if (savedBanks.some(b => b.name === bankName && b.questions?.length === parsedQuestions.length)) {
-            alert("警告: 資料庫中疑似已有相同檔名及同題數的題庫，避免重複上傳！");
+         
+         const isDuplicate = savedBanks.some(b => {
+             const sameNameAndCount = b.name === bankName && b.questions?.length === parsedQuestions.length;
+             const sameFirstQuestion = b.questions?.[0]?.Question === parsedQuestions[0]?.Question && b.questions?.length === parsedQuestions.length;
+             return sameNameAndCount || sameFirstQuestion;
+         });
+         
+         if (isDuplicate) {
+            alert("警告：資料庫中疑似已有相同內容或名稱的題庫，為避免重複上傳已為您阻擋！");
             if(fileInputRef.current) fileInputRef.current.value = "";
             return;
          }
@@ -270,6 +395,20 @@ export default function TeacherDashboard({ onGoBack }) {
     setSelectedCustomQIdxs(newSet);
   };
 
+  const toggleExpandChapter = (chap) => {
+      const newSet = new Set(expandedChapters);
+      if (newSet.has(chap)) newSet.delete(chap);
+      else newSet.add(chap);
+      setExpandedChapters(newSet);
+  };
+
+  const toggleExpandSection = (secKey) => {
+      const newSet = new Set(expandedSections);
+      if (newSet.has(secKey)) newSet.delete(secKey);
+      else newSet.add(secKey);
+      setExpandedSections(newSet);
+  };
+
   const createRoom = () => {
     if (selectedBankQuestions.length === 0) return alert('請先選擇雲端題庫。');
     
@@ -294,7 +433,33 @@ export default function TeacherDashboard({ onGoBack }) {
 
     if (finalQuestions.length === 0) return alert('在此條件下沒有選中任何題目！');
     
-    socket.emit('create_room', { questions: finalQuestions, limit: finalQuestions.length });
+    if (dashboardMode === 'live') {
+      socket.emit('create_room', { questions: finalQuestions, limit: finalQuestions.length });
+    } else if (dashboardMode === 'assignment_setup') {
+      if (!assignmentTitle) return alert("請輸入任務名稱");
+      if (!assignmentDeadline) return alert("請設定截止日期");
+      
+      const code = Math.floor(100000 + Math.random() * 900000).toString();
+      try {
+         addDoc(collection(db, "Assignments"), {
+            code,
+            title: assignmentTitle,
+            deadline: assignmentDeadline,
+            mode: assignmentType, // practice, exam
+            maxAttempts: assignmentType === 'exam' ? 1 : assignmentMaxAttempts,
+            leaderboardDate: assignmentLeaderboardDate || assignmentDeadline,
+            questions: finalQuestions,
+            createdAt: new Date().toISOString(),
+            status: 'active'
+         }).then(() => {
+            alert(`✅ 任務已成功派發！\n學生可使用代碼加入：${code}`);
+            setDashboardMode('assignment_manage');
+            fetchAssignmentsFromFirebase();
+         });
+      } catch (e) {
+         alert("建立任務失敗：" + e.message);
+      }
+    }
   };
 
   const startGame = () => {
@@ -310,8 +475,119 @@ export default function TeacherDashboard({ onGoBack }) {
     return (
       <div className="card teacher-card animate-fade-in glass-panel" style={{ padding: '2rem', maxWidth: '800px', margin: 'auto' }}>
         <h2 className="title" style={{ textAlign: 'center', marginBottom: '1.5rem', color: 'var(--primary-dark)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
-          <Folder size={32} /> 測驗開局設定
+          <Folder size={32} /> 教師控制面板
         </h2>
+
+        {/* Top Level Mode Tabs */}
+        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '2rem', background: 'rgba(0,0,0,0.05)', padding: '0.5rem', borderRadius: '12px' }}>
+           <button 
+             onClick={() => setDashboardMode('live')}
+             style={{ flex: 1, padding: '1rem', borderRadius: '8px', border: 'none', background: dashboardMode === 'live' ? 'var(--primary-color)' : 'transparent', color: dashboardMode === 'live' ? 'white' : 'var(--text-main)', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.3s' }}
+           >
+              👥 即時連線對戰
+           </button>
+           <button 
+             onClick={() => setDashboardMode('assignment_setup')}
+             style={{ flex: 1, padding: '1rem', borderRadius: '8px', border: 'none', background: dashboardMode === 'assignment_setup' ? 'var(--primary-color)' : 'transparent', color: dashboardMode === 'assignment_setup' ? 'white' : 'var(--text-main)', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.3s' }}
+           >
+              📝 單人任務派發
+           </button>
+           <button 
+             onClick={() => setDashboardMode('assignment_manage')}
+             style={{ flex: 1, padding: '1rem', borderRadius: '8px', border: 'none', background: dashboardMode === 'assignment_manage' ? 'var(--primary-color)' : 'transparent', color: dashboardMode === 'assignment_manage' ? 'white' : 'var(--text-main)', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.3s' }}
+           >
+              📊 任務管理與成績
+           </button>
+        </div>
+
+        {dashboardMode === 'assignment_manage' ? (
+           <div className="animate-fade-in">
+              <h3 style={{ marginBottom: '1rem', color: 'var(--primary-dark)' }}>已派發的任務清單</h3>
+              {assignmentsList.length === 0 ? (
+                 <p style={{ color: '#777', textAlign: 'center' }}>目前沒有任何任務。</p>
+              ) : (
+                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                    {assignmentsList.map(a => (
+                       <div key={a.id} style={{ border: '1px solid #ddd', borderRadius: '8px', padding: '1rem', background: selectedAssignmentId === a.id ? '#f1f8e9' : '#fff' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                             <div>
+                               <h4 style={{ margin: '0 0 0.5rem 0', color: 'var(--primary-dark)' }}>{a.title}</h4>
+                               <div style={{ fontSize: '0.9rem', color: '#666' }}>代碼: <strong style={{ color: 'var(--primary-color)' }}>{a.code}</strong> | 模式: {a.mode === 'exam' ? '考核' : '練習'} | 期限: {new Date(a.deadline).toLocaleString()}</div>
+                             </div>
+                             <button onClick={() => { setSelectedAssignmentId(a.id); loadAssignmentResults(a.id); }} style={{ padding: '0.5rem 1rem', background: 'var(--primary-color)', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}>
+                               查看成績
+                             </button>
+                          </div>
+                          {selectedAssignmentId === a.id && (
+                             <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid #ccc' }}>
+                                <h4 style={{ marginBottom: '0.5rem' }}>學生成績列表 ({assignmentResults.length} 筆)</h4>
+                                {assignmentResults.length === 0 ? <p>尚未有學生完成。</p> : (
+                                   <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.9rem' }}>
+                                      <thead>
+                                         <tr style={{ background: '#eee' }}>
+                                            <th style={{ padding: '0.5rem' }}>學生</th>
+                                            <th style={{ padding: '0.5rem' }}>分數</th>
+                                            <th style={{ padding: '0.5rem' }}>作答次數</th>
+                                            <th style={{ padding: '0.5rem' }}>完成時間</th>
+                                         </tr>
+                                      </thead>
+                                      <tbody>
+                                         {assignmentResults.sort((x,y) => y.score - x.score).map((r, i) => (
+                                            <tr key={i} style={{ borderBottom: '1px solid #eee' }}>
+                                               <td style={{ padding: '0.5rem' }}>{r.nickname}</td>
+                                               <td style={{ padding: '0.5rem', fontWeight: 'bold', color: 'var(--primary-dark)' }}>{r.score}</td>
+                                               <td style={{ padding: '0.5rem' }}>{r.attempts}</td>
+                                               <td style={{ padding: '0.5rem' }}>{new Date(r.completedAt).toLocaleString()}</td>
+                                            </tr>
+                                         ))}
+                                      </tbody>
+                                   </table>
+                                )}
+                             </div>
+                          )}
+                       </div>
+                    ))}
+                 </div>
+              )}
+              <div style={{ marginTop: '2rem', textAlign: 'center' }}>
+                 <ParticleButton className="btn back-btn" onClick={onGoBack}>返回首頁</ParticleButton>
+              </div>
+           </div>
+        ) : (
+        <>
+        {/* Setup Configuration Content */}
+        {dashboardMode === 'assignment_setup' && (
+           <div className="form-group slide-in" style={{ background: '#fff', padding: '1.5rem', borderRadius: '12px', border: '1px solid #e0e0e0', marginBottom: '2rem' }}>
+              <h3 style={{ color: 'var(--primary-dark)', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}><FileText size={20}/> 任務設定</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                 <div>
+                    <label>任務名稱</label>
+                    <input type="text" className="input-field" placeholder="例如：期中線上考核" value={assignmentTitle} onChange={e => setAssignmentTitle(e.target.value)} style={{ width: '100%' }} />
+                 </div>
+                 <div>
+                    <label>截止日期與時間</label>
+                    <input type="datetime-local" className="input-field" value={assignmentDeadline} onChange={e => setAssignmentDeadline(e.target.value)} style={{ width: '100%' }} />
+                 </div>
+                 <div>
+                    <label>作答模式</label>
+                    <select className="input-field" value={assignmentType} onChange={e => setAssignmentType(e.target.value)} style={{ width: '100%' }}>
+                       <option value="practice">練習 (可多次作答，順序固定)</option>
+                       <option value="exam">考核 (限一次作答，題目隨機)</option>
+                    </select>
+                 </div>
+                 {assignmentType === 'practice' && (
+                    <div>
+                       <label>最大作答次數限制</label>
+                       <input type="number" min="1" className="input-field" value={assignmentMaxAttempts} onChange={e => setAssignmentMaxAttempts(Number(e.target.value))} style={{ width: '100%' }} />
+                    </div>
+                 )}
+                 <div>
+                    <label>排行榜結算日期 (選填)</label>
+                    <input type="datetime-local" className="input-field" value={assignmentLeaderboardDate} onChange={e => setAssignmentLeaderboardDate(e.target.value)} style={{ width: '100%' }} />
+                 </div>
+              </div>
+           </div>
+        )}
         
         <div className="tabs" style={{ display: 'flex', gap: '1rem', borderBottom: '2px solid rgba(0,0,0,0.05)', paddingBottom: '1rem', marginBottom: '2rem' }}>
            <ParticleButton 
@@ -351,12 +627,23 @@ export default function TeacherDashboard({ onGoBack }) {
           <div className="slide-in">
             <div className="form-group">
               <label style={{ fontWeight: 'bold', color: 'var(--primary-dark)' }}>選擇雲端題庫</label>
-              <select onChange={(e) => loadBank(e.target.value)} value={selectedBankId} className="input-field" style={{ width: '100%', marginTop: '0.5rem' }}>
-                <option value="" disabled>-- 點此選擇題庫 --</option>
-                {savedBanks.map(b => (
-                  <option key={b.id} value={b.id}>{b.name} (含 {b.questions?.length || 0} 題)</option>
-                ))}
-              </select>
+              <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem' }}>
+                <select onChange={(e) => loadBank(e.target.value)} value={selectedBankId} className="input-field" style={{ flex: 1, marginBottom: 0 }}>
+                  <option value="" disabled>-- 點此選擇題庫 --</option>
+                  {savedBanks.map(b => (
+                    <option key={b.id} value={b.id}>{b.name} (含 {b.questions?.length || 0} 題)</option>
+                  ))}
+                </select>
+                {selectedBankId && (
+                  <button 
+                    onClick={() => deleteBank(selectedBankId)}
+                    style={{ background: '#ffebee', color: '#c62828', border: '1px solid #ef9a9a', borderRadius: '8px', padding: '0 1rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.3rem', fontWeight: 'bold' }}
+                    title="刪除此題庫"
+                  >
+                    <Trash2 size={16} /> 刪除
+                  </button>
+                )}
+              </div>
             </div>
 
             {selectedBankQuestions.length > 0 && (
@@ -407,38 +694,66 @@ export default function TeacherDashboard({ onGoBack }) {
                   <div className="animate-fade-in" style={{ maxHeight: '400px', overflowY: 'auto', background: 'white', padding: '1rem', borderRadius: '8px', border: '1px solid #ccc' }}>
                     {chapters.map(chap => {
                        const chapQs = selectedBankQuestions.filter(q => q.Chapter === chap);
+                       const isChapExpanded = expandedChapters.has(chap);
                        return (
                          <div key={chap} style={{ marginBottom: '1rem' }}>
                            <div style={{ fontWeight: 'bold', borderBottom: '2px solid var(--primary-light)', paddingBottom: '0.5rem', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', color: 'var(--primary-dark)' }}>
+                             <div onClick={() => toggleExpandChapter(chap)} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', marginRight: '0.5rem' }}>
+                                {isChapExpanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+                             </div>
                              <input type="checkbox" style={{ marginRight: '0.5rem', width: '18px', height: '18px' }} 
                                 checked={chapQs.every(q => selectedCustomQIdxs.has(q.originalIndex))}
                                 onChange={() => toggleChapter(chapQs)}
                              /> 
-                             <Folder size={18} style={{ marginRight: '0.5rem' }}/> {chap} 
+                             <div onClick={() => toggleExpandChapter(chap)} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', userSelect: 'none' }}>
+                                <Folder size={18} style={{ marginRight: '0.5rem' }} fill={isChapExpanded ? "#C8E6C9" : "none"} /> {chap} ({chapQs.length} 題)
+                             </div>
                            </div>
-                           {(sections[chap] || []).map(sec => {
+                           
+                           {isChapExpanded && (sections[chap] || []).map(sec => {
                              const secQs = chapQs.filter(q => q.Section === sec);
+                             const secKey = `${chap}-${sec}`;
+                             const isSecExpanded = expandedSections.has(secKey);
                              return (
-                               <div key={sec} style={{ marginLeft: '1.5rem', marginBottom: '0.5rem' }}>
+                               <div key={secKey} style={{ marginLeft: '1.5rem', marginBottom: '0.5rem' }}>
                                  <div style={{ fontWeight: 'bold', color: 'var(--secondary)', marginBottom: '0.3rem', display: 'flex', alignItems: 'center' }}>
+                                   <div onClick={() => toggleExpandSection(secKey)} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', marginRight: '0.5rem' }}>
+                                      {isSecExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                                   </div>
                                    <input type="checkbox" style={{ marginRight: '0.5rem', width: '16px', height: '16px' }} 
                                       checked={secQs.every(q => selectedCustomQIdxs.has(q.originalIndex))}
                                       onChange={() => toggleChapter(secQs)}
                                    />
-                                   <FileText size={16} style={{ marginRight: '0.5rem' }}/> {sec}
+                                   <div onClick={() => toggleExpandSection(secKey)} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', userSelect: 'none' }}>
+                                      <FileText size={16} style={{ marginRight: '0.5rem' }}/> {sec} ({secQs.length} 題)
+                                   </div>
                                  </div>
-                                 <div style={{ marginLeft: '1.5rem' }}>
-                                   {secQs.map(q => (
-                                     <div key={q.originalIndex} style={{ display: 'flex', alignItems: 'center', marginBottom: '0.2rem', fontSize: '0.9rem' }}>
-                                        <input type="checkbox" style={{ marginRight: '0.5rem' }} 
-                                           checked={selectedCustomQIdxs.has(q.originalIndex)}
-                                           onChange={() => toggleCustomQ(q.originalIndex)}
-                                        />
-                                        <span style={{ color: q.Type==='true_false' ? 'var(--primary-dark)' : 'var(--secondary-color)', marginRight: '0.5rem', fontWeight: 'bold' }}>{q.Type==='true_false' ? '[是非]' : '[選擇]'}</span> 
-                                        {q.Question}
-                                     </div>
-                                   ))}
-                                 </div>
+                                 
+                                 {isSecExpanded && (
+                                    <div style={{ marginLeft: '1.5rem' }}>
+                                     {secQs.map(q => (
+                                        <div key={q.originalIndex} className="question-row" style={{ display: 'flex', alignItems: 'flex-start', marginBottom: '0.4rem', fontSize: '0.95rem', padding: '0.2rem', borderRadius: '4px' }}>
+                                           <input type="checkbox" style={{ marginTop: '0.2rem', marginRight: '0.5rem' }} 
+                                              checked={selectedCustomQIdxs.has(q.originalIndex)}
+                                              onChange={() => toggleCustomQ(q.originalIndex)}
+                                           />
+                                           <div style={{ flex: 1 }}>
+                                             <span style={{ color: q.Type==='true_false' ? 'var(--primary-dark)' : 'var(--secondary-color)', marginRight: '0.5rem', fontWeight: 'bold', fontSize: '0.8rem', background: '#f5f5f5', padding: '0.1rem 0.3rem', borderRadius: '4px' }}>
+                                               {q.Type==='true_false' ? '是非' : '選擇'}
+                                             </span> 
+                                             {q.Question}
+                                           </div>
+                                           <div 
+                                             onClick={(e) => deleteQuestion(e, q.originalIndex)}
+                                             style={{ cursor: 'pointer', color: '#ef5350', marginLeft: '0.5rem', padding: '0.1rem', borderRadius: '4px', display: 'flex', alignItems: 'center' }}
+                                             title="刪除此題"
+                                           >
+                                             <Trash2 size={16} />
+                                           </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                 )}
                                </div>
                              );
                            })}
@@ -454,8 +769,12 @@ export default function TeacherDashboard({ onGoBack }) {
 
         <div className="actions" style={{ marginTop: '2rem', display: 'flex', justifyContent: 'space-between' }}>
           <ParticleButton className="btn back-btn" onClick={onGoBack}>返回</ParticleButton>
-          <ParticleButton className="btn primary-btn" onClick={createRoom} disabled={selectedBankQuestions.length === 0 && setupTab === 'select'}>建立測驗房間</ParticleButton>
+          <ParticleButton className="btn primary-btn" onClick={createRoom} disabled={selectedBankQuestions.length === 0 && setupTab === 'select'}>
+             {dashboardMode === 'live' ? '建立測驗房間' : '派發單人任務'}
+          </ParticleButton>
         </div>
+        </>
+        )}
       </div>
     );
   }
@@ -535,26 +854,33 @@ export default function TeacherDashboard({ onGoBack }) {
         <h3 className="correct-answer-display" style={{ textAlign: 'center', background: '#e8f5e9', padding: '1rem', borderRadius: '12px', margin: '1rem 0' }}>✅ 正確解答：{currentQuestion.correctOption}</h3>
         
         <div className="distribution-section" style={{ maxWidth: '800px', margin: 'auto' }}>
-          <h3 style={{ marginBottom: '1rem' }}>📊 各選項作答人數比例</h3>
+          <h3 style={{ marginBottom: '1.5rem', textAlign: 'center', color: 'var(--primary-dark)' }}>📊 各選項作答人數比例</h3>
+          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-end', height: '220px', gap: '2.5rem', padding: '1.5rem', background: 'rgba(255,255,255,0.6)', borderRadius: '16px', boxShadow: 'inset 0 2px 10px rgba(0,0,0,0.05)' }}>
           {['A', 'B', 'C', 'D'].filter(opt => currentQuestion.options[opt]).map((opt) => {
             const count = distribution ? (distribution[opt] || 0) : 0;
             const pct = totalAns > 0 ? (count / totalAns) * 100 : 0;
             const isCorrect = currentQuestion.correctOption === opt;
             
             return (
-              <div key={opt} style={{ display: 'flex', alignItems: 'center', marginBottom: '1rem' }}>
-                <div style={{ width: '40px', fontWeight: 'bold', color: isCorrect ? '#2e7d32' : '#555' }}>{opt}</div>
-                <div style={{ flex: 1, background: '#eee', height: '24px', borderRadius: '12px', overflow: 'hidden', position: 'relative' }}>
-                  <div style={{ 
-                      width: `${pct}%`, height: '100%', 
-                      background: isCorrect ? '#4caf50' : '#bdbdbd',
-                      transition: 'width 1s ease'
-                  }}></div>
+              <div key={opt} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', height: '100%', width: '80px' }}>
+                <div style={{ flex: 1, display: 'flex', alignItems: 'flex-end', width: '100%' }}>
+                     <div style={{ 
+                         width: '100%', 
+                         height: `${pct}%`, 
+                         background: isCorrect ? 'linear-gradient(to top, #43a047, #81c784)' : 'linear-gradient(to top, #9e9e9e, #e0e0e0)',
+                         borderRadius: '12px 12px 0 0',
+                         transition: 'height 1s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
+                         boxShadow: '0 4px 10px rgba(0,0,0,0.1)',
+                         position: 'relative'
+                     }}>
+                        <div style={{ position: 'absolute', top: '-30px', width: '100%', textAlign: 'center', fontWeight: 'bold', fontSize: '1.2rem', color: 'var(--text-main)' }}>{count}</div>
+                     </div>
                 </div>
-                <div style={{ width: '50px', textAlign: 'right', fontWeight: 'bold' }}>{count} 人</div>
+                <div style={{ textAlign: 'center', fontWeight: 'bold', color: isCorrect ? '#2e7d32' : '#777', marginTop: '12px', fontSize: '1.4rem', background: isCorrect ? 'rgba(76, 175, 80, 0.2)' : 'transparent', borderRadius: '50%', width: '40px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{opt}</div>
               </div>
             );
           })}
+          </div>
         </div>
         
         <div className="leaderboard" style={{ maxWidth: '800px', margin: '2rem auto', background: '#fff', padding: '2rem', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>

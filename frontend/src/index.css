@@ -2,21 +2,27 @@
 
 :root {
   /* SDGs Sustainable Colors */
-  --primary: #2E7D32; /* Forest Green */
-  --primary-light: #C8E6C9;
+  --primary: #2E7D32; /* Forest Green (SDG 13/15) */
+  --primary-light: #A5D6A7;
   --primary-dark: #1B5E20;
-  --secondary: #8D6E63; /* Earthy Brown */
-  --secondary-color: #8D6E63;
+  --secondary: #0277BD; /* Deep Ocean Blue (SDG 14) */
+  --secondary-color: #0277BD;
+  --tertiary: #FBC02D; /* Sunshine/Energy (SDG 7) */
   --bg-color: #F1F8E9; /* Light green clean BG */
   --panel-bg: #FFFFFF; /* White cards */
-  --text-main: #33691E;
-  --text-muted: #558B2F;
+  --text-main: #263238; /* Dark Blue-Grey */
+  --text-muted: #546E7A;
+  
+  /* ESG / SDG expanded palette for variety */
+  --sdg-water: #03A9F4; /* SDG 6 */
+  --sdg-edu: #C62828;   /* SDG 4 */
+  --sdg-industry: #F57C00; /* SDG 9 */
   
   /* Option Colors from SDG Wheel */
-  --opt-a: #4CAF50; /* Green */
-  --opt-b: #8BC34A; /* Light Green */
-  --opt-c: #CDDC39; /* Lime */
-  --opt-d: #FFEB3B; /* Yellow */
+  --opt-a: #4CAF50; /* Green (Environment) */
+  --opt-b: #03A9F4; /* Blue (Water/Ocean) */
+  --opt-c: #FF9800; /* Orange (Innovation) */
+  --opt-d: #FBC02D; /* Yellow (Energy) */
 }
 
 * {
@@ -27,7 +33,8 @@
 
 body {
   font-family: 'Noto Sans TC', sans-serif;
-  background: radial-gradient(circle at center, var(--bg-color) 0%, #e8f5e9 100%);
+  background: linear-gradient(135deg, #e0f2f1 0%, #e8f5e9 35%, #fffde7 70%, #e3f2fd 100%);
+  background-attachment: fixed;
   color: var(--text-main);
   min-height: 100vh;
   display: flex;
@@ -53,6 +60,12 @@ body {
 .animate-pop-in { animation: pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
 .animate-bounce { animation: bounce 2s infinite ease-in-out; }
 
+@keyframes gradientBG {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
 /* Home / Role Selection */
 .home-container {
   display: flex;
@@ -61,7 +74,10 @@ body {
   justify-content: center;
   height: 100%;
   padding: 2rem;
-  background: radial-gradient(circle at top, #EBF5FB 0%, #F8F9FA 100%);
+  /* Dynamic ESG Mesh Gradient */
+  background: linear-gradient(120deg, #e0f2f1 0%, #e8f5e9 25%, #fffde7 50%, #e1f5fe 75%, #f3e5f5 100%);
+  background-size: 200% 200%;
+  animation: gradientBG 15s ease infinite;
 }
 
 .hero-section {
@@ -73,8 +89,11 @@ body {
   font-family: 'Fredoka', 'Noto Sans TC', sans-serif;
   font-size: 4rem;
   font-weight: 700;
-  color: var(--primary);
-  text-shadow: 0 4px 10px rgba(25, 72, 106, 0.1);
+  background: linear-gradient(90deg, var(--primary) 0%, var(--sdg-water) 50%, var(--sdg-industry) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
+  margin-bottom: 0.5rem;
 }
 
 .hero-subtitle {
@@ -91,26 +110,45 @@ body {
 }
 
 .role-card {
-  background: var(--panel-bg);
-  border: 2px solid #E9ECEF;
-  border-radius: 1rem;
-  padding: 2rem;
-  width: 280px;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  border-radius: 1.5rem;
+  padding: 3rem 2rem;
+  width: 320px;
   text-align: center;
   cursor: pointer;
-  transition: all 0.3s;
-  box-shadow: 0 10px 25px -5px rgba(0,0,0,0.05);
+  transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  box-shadow: 0 15px 35px rgba(0,0,0,0.05), inset 0 0 0 1px rgba(255,255,255,1);
+  position: relative;
+  overflow: hidden;
+}
+
+.role-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; height: 8px;
+  background: linear-gradient(90deg, var(--sdg-water), var(--primary-light));
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.role-card.teacher::before {
+  background: linear-gradient(90deg, var(--sdg-edu), var(--tertiary));
 }
 
 .role-card:hover {
-  transform: translateY(-8px);
-  border-color: var(--primary);
-  box-shadow: 0 20px 25px -5px rgba(25, 72, 106, 0.15);
+  transform: translateY(-12px);
+  box-shadow: 0 30px 50px rgba(0,0,0,0.1);
+}
+
+.role-card:hover::before {
+  opacity: 1;
 }
 
 .role-card.teacher:hover {
-  border-color: var(--secondary);
-  box-shadow: 0 20px 25px -5px rgba(229, 36, 59, 0.15);
+  box-shadow: 0 30px 50px rgba(198, 40, 40, 0.1);
 }
 
 .role-card .icon {
@@ -120,14 +158,15 @@ body {
 
 /* UI Elements */
 .card {
-  background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(12px);
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
   padding: 3rem;
   border-radius: 20px;
   width: 100%;
   max-width: 500px;
   margin: auto;
-  box-shadow: 0 25px 40px -10px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(255, 255, 255, 0.5) inset;
+  box-shadow: 0 25px 40px -10px rgba(46, 125, 50, 0.15), 0 0 0 1px rgba(255, 255, 255, 0.6) inset;
 }
 
 .glass-panel {

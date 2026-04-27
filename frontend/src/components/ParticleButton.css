@@ -1,6 +1,7 @@
 .particle-btn {
   position: relative;
   transition: all 0.3s ease;
+  overflow: visible !important;
 }
 
 .particle-btn .btn-content {
@@ -10,14 +11,15 @@
 
 .particle {
   position: absolute;
-  width: 8px;
-  height: 8px;
-  background-color: rgba(255, 255, 255, 0.8);
+  width: var(--size);
+  height: var(--size);
+  background-color: var(--color);
   border-radius: 50%;
   pointer-events: none;
   transform: translate(-50%, -50%);
-  animation: explode 0.6s ease-out forwards;
-  z-index: 1;
+  animation: explode 0.8s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+  z-index: 10;
+  box-shadow: 0 0 8px var(--color);
 }
 
 @keyframes explode {
@@ -26,7 +28,7 @@
     opacity: 1;
   }
   100% {
-    transform: translate(calc(-50% + var(--vx)), calc(-50% + var(--vy))) scale(0);
+    transform: translate(calc(-50% + var(--vx)), calc(-50% + var(--vy) + 30px)) scale(0);
     opacity: 0;
   }
 }

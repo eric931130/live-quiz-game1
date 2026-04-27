@@ -97,7 +97,7 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
       }
       
       // 如果找到題目和答案，就可以認定它是標題列了
-      if (foundQ !== -1 && foundAns !== -1 && foundA !== -1) {
+      if (foundQ !== -1 && foundAns !== -1) {
         headerRowIdx = i;
         colMap = { q: foundQ, ans: foundAns, a: foundA, b: foundB, c: foundC, d: foundD, chapter: foundChapter, section: foundSection };
         break;
@@ -105,7 +105,7 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
     }
 
     if (headerRowIdx === -1) {
-      return res.status(400).send('無法辨識題庫格式。請確保包含「題幹/題目」、「答案」、「選項-A」、「選項-B」等標題列！');
+      return res.status(400).send('無法辨識題庫格式。請確保至少包含「題幹/題目」、「答案」等標題列！');
     }
 
     // 2. 從標題列的下一行開始擷取資料
@@ -119,19 +119,36 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
       // 如果沒有題目內文，跳過
       if (!qText) continue;
       
-      const rawAns = getCellStr(row[colMap.ans]).toUpperCase();
+      const rawAnsStr = getCellStr(row[colMap.ans]);
+      const rawAns = rawAnsStr.toUpperCase();
       const cleanAns = rawAns.replace(/[^A-D]/g, ''); 
       
-      const optA = getCellStr(row[colMap.a]);
-      const optB = getCellStr(row[colMap.b]);
-      const optC = getCellStr(row[colMap.c]);
-      const optD = getCellStr(row[colMap.d]);
+      let optA = getCellStr(row[colMap.a]);
+      let optB = getCellStr(row[colMap.b]);
+      let optC = getCellStr(row[colMap.c]);
+      let optD = getCellStr(row[colMap.d]);
       
       const chapter = colMap.chapter !== -1 ? getCellStr(row[colMap.chapter]) || '未分類' : '未分類';
       const section = colMap.section !== -1 ? getCellStr(row[colMap.section]) || '未分類' : '未分類';
       
-      // 判定是否為是非題 (C, D為空)
-      const isTrueFalse = (!optC && !optD);
+      const isTFText = (val) => ['O','X','是','否','對','錯','TRUE','FALSE'].includes(val.toUpperCase());
+      const isTrueFalse = (!optC && !optD) || (isTFText(optA) && isTFText(optB)) || (!optA && !optB);
+
+      let finalAnswer = cleanAns ? cleanAns[0] : rawAns;
+
+      if (isTrueFalse) {
+          if (!optA) optA = 'O (是)';
+          if (!optB) optB = 'X (否)';
+          if (['O', '是', '對', 'TRUE', 'A'].includes(rawAnsStr.toUpperCase())) finalAnswer = 'A';
+          else if (['X', '否', '錯', 'FALSE', 'B'].includes(rawAnsStr.toUpperCase())) finalAnswer = 'B';
+      }
+
+      if (!cleanAns && rawAnsStr && !isTrueFalse) {
+          if (rawAns === optA.toUpperCase()) finalAnswer = 'A';
+          else if (rawAns === optB.toUpperCase()) finalAnswer = 'B';
+          else if (rawAns === optC.toUpperCase()) finalAnswer = 'C';
+          else if (rawAns === optD.toUpperCase()) finalAnswer = 'D';
+      }
 
       parsedQuestions.push({
         Question: qText,
@@ -139,7 +156,7 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
         OptB: optB,
         OptC: optC,
         OptD: optD,
-        Answer: cleanAns ? cleanAns[0] : rawAns,
+        Answer: finalAnswer,
         Chapter: chapter,
         Section: section,
         Type: isTrueFalse ? 'true_false' : 'multiple_choice'
@@ -253,7 +270,17 @@ io.on('connection', (socket) => {
     
     if (isCorrect) {
       player.streak += 1;
-      points = 100;
+      
+      const totalPlayers = Object.keys(room.players).length || 1;
+      const timeRatio = Math.max(0, 1 - (timeTaken / room.timeLimit));
+      const orderRatio = Math.max(0, 1 - (room.answeredCount / totalPlayers));
+      
+      const questionBaseScore = 1000 * (0.5 * timeRatio + 0.5 * orderRatio);
+      const streakMultiplier = 1 + (player.streak - 1) * 0.2;
+      
+      points = Math.round(questionBaseScore * streakMultiplier);
+      points = Math.max(100, points); // guaranteed minimum score if correct
+      
       player.score += points;
     } else {
       player.streak = 0;
