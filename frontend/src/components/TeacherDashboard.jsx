@@ -1,17 +1,35 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { Suspense, lazy, useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
 import { QRCodeSVG } from 'qrcode.react';
-import { collection, addDoc, getDocs, deleteDoc, doc, updateDoc } from 'firebase/firestore';
-import * as xlsx from 'xlsx';
-import { Cloud, UploadCloud, Shuffle, ListChecks, Folder, FileText, CheckCircle, Trophy, BarChart3, Clock, Users, Trash2, ChevronDown, ChevronRight } from 'lucide-react';
+import { collection, addDoc, getDocs, doc, updateDoc } from 'firebase/firestore';
+import { Cloud, UploadCloud, Shuffle, ListChecks, Folder, FileText, CheckCircle, Trophy, BarChart3, Clock, Users, Trash2, ChevronDown, ChevronRight, MessageSquare, Save, Archive, PlusCircle } from 'lucide-react';
 import { db } from '../firebase';
 import ParticleButton from './ParticleButton';
+import LazyErrorBoundary from './LazyErrorBoundary';
+import { questionBankApi } from '../questionBankApi';
+
+const QuestionBankDashboard = lazy(() => import('./QuestionBankDashboard'));
+const AdminQuestionBankControlPanel = lazy(() => import('./AdminQuestionBankControlPanel'));
 
 const SOCKET_URL = window.location.hostname === 'localhost' 
   ? 'http://localhost:3001' 
   : 'https://live-quiz-game1.onrender.com';
 
-export default function TeacherDashboard({ onGoBack }) {
+function isAdminUser(user) {
+  const role = String(user?.role || user?.customClaims?.role || '').toLowerCase();
+  return ['admin', 'developer', 'owner', 'platform_admin', 'superadmin'].includes(role);
+}
+
+function DashboardChunkFallback({ label = '載入模組...' }) {
+  return (
+    <div className="dashboard-chunk-fallback">
+      <strong>師說新宇</strong>
+      <span>{label}</span>
+    </div>
+  );
+}
+
+export default function TeacherDashboard({ onGoBack, user }) {
   const [socket, setSocket] = useState(null);
   const [step, setStep] = useState('setup'); // setup, waiting, playing, question_result, game_over
   const [roomCode, setRoomCode] = useState('');
@@ -23,7 +41,7 @@ export default function TeacherDashboard({ onGoBack }) {
   const [selectedBankQuestions, setSelectedBankQuestions] = useState([]);
   
   // Dashboard Mode
-  const [dashboardMode, setDashboardMode] = useState('live'); // 'live', 'assignment_setup', 'assignment_manage'
+  const [dashboardMode, setDashboardMode] = useState('live'); // 'live', 'assignment_setup', 'assignment_manage', 'classroom_discussion'
   
   // Assignment Setup State
   const [assignmentTitle, setAssignmentTitle] = useState('');
@@ -64,9 +82,18 @@ export default function TeacherDashboard({ onGoBack }) {
   const [finalReport, setFinalReport] = useState([]);
   const [distribution, setDistribution] = useState(null);
 
+  // Classroom Discussion State
+  const [discussionMessages, setDiscussionMessages] = useState([]);
+  const [discussionTitle, setDiscussionTitle] = useState('');
+  const [discussionInput, setDiscussionInput] = useState('');
+  const [discussionTag, setDiscussionTag] = useState('提問');
+  const [discussionFilter, setDiscussionFilter] = useState('all');
+  const canUseAdminPanel = isAdminUser(user);
+
   useEffect(() => {
     fetchBanksFromFirebase();
     fetchAssignmentsFromFirebase();
+    fetchDiscussionsFromFirebase();
 
     const newSocket = io(SOCKET_URL);
     setSocket(newSocket);
@@ -109,15 +136,11 @@ export default function TeacherDashboard({ onGoBack }) {
     });
 
     return () => newSocket.close();
-  }, []);
+  }, [user]);
 
   const fetchBanksFromFirebase = async () => {
     try {
-      const querySnapshot = await getDocs(collection(db, "QuizBanks"));
-      const banks = [];
-      querySnapshot.forEach((doc) => {
-        banks.push({ id: doc.id, ...doc.data() });
-      });
+      const banks = await questionBankApi.list(user);
       setSavedBanks(banks);
     } catch (e) {
       console.log('載入歷史題庫失敗', e);
@@ -155,10 +178,54 @@ export default function TeacherDashboard({ onGoBack }) {
     }
   };
 
+  const fetchDiscussionsFromFirebase = async () => {
+    try {
+      const querySnapshot = await getDocs(collection(db, "ClassroomDiscussions"));
+      const messages = [];
+      querySnapshot.forEach((doc) => {
+        messages.push({ id: doc.id, ...doc.data() });
+      });
+      messages.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      setDiscussionMessages(messages);
+    } catch (e) {
+      console.log('載入課堂討論失敗', e);
+    }
+  };
+
+  const addDiscussionMessage = async (e) => {
+    e.preventDefault();
+    if (!discussionInput.trim()) return alert('請輸入要整理的討論內容。');
+    try {
+      await addDoc(collection(db, "ClassroomDiscussions"), {
+        title: discussionTitle.trim() || '未命名課堂',
+        content: discussionInput.trim(),
+        tag: discussionTag,
+        status: 'pending',
+        createdAt: new Date().toISOString()
+      });
+      setDiscussionInput('');
+      await fetchDiscussionsFromFirebase();
+    } catch (err) {
+      alert('新增討論內容失敗：' + err.message);
+    }
+  };
+
+  const updateDiscussionStatus = async (messageId, status) => {
+    try {
+      await updateDoc(doc(db, "ClassroomDiscussions", messageId), {
+        status,
+        reviewedAt: new Date().toISOString()
+      });
+      setDiscussionMessages(prev => prev.map(item => item.id === messageId ? { ...item, status, reviewedAt: new Date().toISOString() } : item));
+    } catch (err) {
+      alert('更新討論狀態失敗：' + err.message);
+    }
+  };
+
   const deleteBank = async (bankId) => {
     if (!window.confirm("確定要永久刪除這個題庫嗎？這項操作無法復原。")) return;
     try {
-      await deleteDoc(doc(db, "QuizBanks", bankId));
+      await questionBankApi.removeBank(user, bankId);
       alert("✅ 題庫已刪除！");
       await fetchBanksFromFirebase();
       if (selectedBankId === bankId) {
@@ -170,9 +237,9 @@ export default function TeacherDashboard({ onGoBack }) {
     }
   };
 
-  const loadBank = (bankId) => {
-    setSelectedBankId(bankId);
-    const bank = savedBanks.find(b => b.id === bankId);
+  const loadBank = (bankOrId) => {
+    const bank = typeof bankOrId === 'object' ? bankOrId : savedBanks.find(b => b.id === bankOrId);
+    setSelectedBankId(bank?.id || bankOrId);
     if (bank && bank.questions) {
       setSelectedBankQuestions(bank.questions);
       
@@ -202,17 +269,23 @@ export default function TeacherDashboard({ onGoBack }) {
   };
 
   const deleteQuestion = async (e, qOriginalIndex) => {
-    e.stopPropagation();
+    if (e?.stopPropagation) e.stopPropagation();
+    const requestedQuestionId = typeof e === 'string' ? e : null;
     if (!window.confirm("確定要永久刪除這個單一題目嗎？")) return;
     try {
       const bank = savedBanks.find(b => b.id === selectedBankId);
       if (!bank) return;
       
-      const newQuestions = bank.questions.filter((_, idx) => idx !== qOriginalIndex);
-      
-      await updateDoc(doc(db, "QuizBanks", selectedBankId), {
-         questions: newQuestions
-      });
+      const targetQuestion = requestedQuestionId ? bank.questions.find(q => q.id === requestedQuestionId) : bank.questions[qOriginalIndex];
+      const newQuestions = bank.questions.filter((q, idx) => targetQuestion?.id ? q.id !== targetQuestion.id : idx !== qOriginalIndex);
+
+      if (targetQuestion?.id) {
+        await questionBankApi.removeQuestion(user, selectedBankId, targetQuestion.id);
+      } else {
+        await updateDoc(doc(db, "QuizBanks", selectedBankId), {
+           questions: newQuestions
+        });
+      }
       
       // Update local state without losing expand states
       const updatedSavedBanks = savedBanks.map(b => b.id === selectedBankId ? { ...b, questions: newQuestions } : b);
@@ -244,138 +317,55 @@ export default function TeacherDashboard({ onGoBack }) {
     }
   };
 
-  const handleFileUpload = async (e) => {
-    const file = e.target.files[0];
+  const handleServerFileUpload = async (e) => {
+    const file = e.target.files?.[0];
     if (!file) return;
+    if (!file.name.toLowerCase().endsWith('.xlsx')) {
+      alert('請上傳 .xlsx 題庫檔案。');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
 
-    const reader = new FileReader();
-    reader.onload = async (evt) => {
-       try {
-         const data = new Uint8Array(evt.target.result);
-         const workbook = xlsx.read(data, { type: 'array' });
-         const sheetName = workbook.SheetNames[0];
-         const sheet = workbook.Sheets[sheetName];
-         const rows = xlsx.utils.sheet_to_json(sheet, { header: 1 });
-         
-         let parsedQuestions = [];
-         let headerRowIdx = -1;
-         let colMap = { q: -1, ans: -1, a: -1, b: -1, c: -1, d: -1, chapter: -1, section: -1 };
-         
-         for (let i = 0; i < Math.min(rows.length, 20); i++) {
-           const row = rows[i];
-           if (!row || !Array.isArray(row)) continue;
-           let foundQ = -1, foundAns = -1, foundA = -1, foundB = -1, foundC = -1, foundD = -1, foundChapter = -1, foundSection = -1;
-           for (let c = 0; c < row.length; c++) {
-              const cell = String(row[c]).toLowerCase().replace(/[\*\s]/g, '').trim();
-              if (cell.includes('題幹') || cell.includes('題目') || cell.includes('question')) foundQ = c;
-              else if (cell === '答案' || cell === '解答' || cell.includes('answer')) foundAns = c;
-              else if (cell.includes('選項-a') || cell.includes('選項a') || cell === 'a' || cell === 'opta') foundA = c;
-              else if (cell.includes('選項-b') || cell.includes('選項b') || cell === 'b' || cell === 'optb') foundB = c;
-              else if (cell.includes('選項-c') || cell.includes('選項c') || cell === 'c' || cell === 'optc') foundC = c;
-              else if (cell.includes('選項-d') || cell.includes('選項d') || cell === 'd' || cell === 'optd') foundD = c;
-              else if (cell.includes('章') || cell.includes('單元') || cell.includes('主題') || cell.includes('chapter') || cell.includes('unit')) foundChapter = c;
-              else if (cell.includes('節') || cell.includes('小節') || cell.includes('section') || cell.includes('part')) foundSection = c;
-           }
-           if (foundQ !== -1 && foundAns !== -1) {
-             headerRowIdx = i;
-             colMap = { q: foundQ, ans: foundAns, a: foundA, b: foundB, c: foundC, d: foundD, chapter: foundChapter, section: foundSection };
-             break;
-           }
-         }
-         
-         if (headerRowIdx === -1) {
-            alert('無法辨識題庫格式。請確保至少包含「題目」、「答案」等標題列！');
-            return;
-         }
+    try {
+      const preview = await questionBankApi.previewExcel(user, file, {});
+      const parsedQuestions = (preview.rows || [])
+        .filter((row) => row.valid)
+        .map((row) => row.question);
 
-         for (let i = headerRowIdx + 1; i < rows.length; i++) {
-           const row = rows[i];
-           if (!row || row.length === 0) continue;
-           const getCellStr = (val) => (val != null ? String(val).trim() : '');
-           const qText = getCellStr(row[colMap.q]);
-           if (!qText) continue;
-           
-           const rawAnsStr = getCellStr(row[colMap.ans]);
-           const rawAns = rawAnsStr.toUpperCase();
-           const cleanAns = rawAns.replace(/[^A-D]/g, ''); 
-           let optA = getCellStr(row[colMap.a]);
-           let optB = getCellStr(row[colMap.b]);
-           let optC = getCellStr(row[colMap.c]);
-           let optD = getCellStr(row[colMap.d]);
-           const chapter = colMap.chapter !== -1 ? getCellStr(row[colMap.chapter]) || '未分類' : '未分類';
-           const section = colMap.section !== -1 ? getCellStr(row[colMap.section]) || '未分類' : '未分類';
-           
-           const isTFText = (val) => ['O','X','是','否','對','錯','TRUE','FALSE'].includes(val.toUpperCase());
-           const isTrueFalse = (!optC && !optD) || (isTFText(optA) && isTFText(optB)) || (!optA && !optB);
+      if (parsedQuestions.length === 0) {
+        alert('沒有找到可匯入的有效題目，請先檢查 Excel 欄位與錯誤提示。');
+        return;
+      }
 
-           let finalAnswer = cleanAns ? cleanAns[0] : rawAns;
-           
-           if (isTrueFalse) {
-               if (!optA) optA = 'O (是)';
-               if (!optB) optB = 'X (否)';
-               if (['O', '是', '對', 'TRUE', 'A'].includes(rawAnsStr.toUpperCase())) finalAnswer = 'A';
-               else if (['X', '否', '錯', 'FALSE', 'B'].includes(rawAnsStr.toUpperCase())) finalAnswer = 'B';
-           }
+      const bankName = bankNameForm.trim() || `題庫 ${new Date().toLocaleDateString()}`;
+      const isDuplicate = savedBanks.some((bank) => {
+        const sameNameAndCount = bank.name === bankName && bank.questions?.length === parsedQuestions.length;
+        const sameFirstQuestion = bank.questions?.[0]?.Question === parsedQuestions[0]?.Question && bank.questions?.length === parsedQuestions.length;
+        return sameNameAndCount || sameFirstQuestion;
+      });
 
-           if (!cleanAns && rawAnsStr && !isTrueFalse) {
-             if (rawAns === optA.toUpperCase()) finalAnswer = 'A';
-             else if (rawAns === optB.toUpperCase()) finalAnswer = 'B';
-             else if (rawAns === optC.toUpperCase()) finalAnswer = 'C';
-             else if (rawAns === optD.toUpperCase()) finalAnswer = 'D';
-           }
+      if (isDuplicate) {
+        alert('偵測到可能重複的題庫，請確認名稱或內容後再匯入。');
+        return;
+      }
 
-           parsedQuestions.push({
-             Question: qText,
-             OptA: optA,
-             OptB: optB,
-             OptC: optC,
-             OptD: optD,
-             Answer: finalAnswer,
-             Chapter: chapter,
-             Section: section,
-             Type: isTrueFalse ? 'true_false' : 'multiple_choice'
-           });
-         }
-         
-         if (parsedQuestions.length === 0) {
-            alert('在此檔案中找不到任何題目內容。');
-            return;
-         }
-         
-         const bankName = bankNameForm.trim() || `題庫 ${new Date().toLocaleDateString()}`;
-         
-         const isDuplicate = savedBanks.some(b => {
-             const sameNameAndCount = b.name === bankName && b.questions?.length === parsedQuestions.length;
-             const sameFirstQuestion = b.questions?.[0]?.Question === parsedQuestions[0]?.Question && b.questions?.length === parsedQuestions.length;
-             return sameNameAndCount || sameFirstQuestion;
-         });
-         
-         if (isDuplicate) {
-            alert("警告：資料庫中疑似已有相同內容或名稱的題庫，為避免重複上傳已為您阻擋！");
-            if(fileInputRef.current) fileInputRef.current.value = "";
-            return;
-         }
+      const docRef = await addDoc(collection(db, 'QuizBanks'), {
+        name: bankName,
+        courseCategory: randChapter !== 'All' ? randChapter : '未分類',
+        createdAt: new Date().toISOString(),
+        questions: parsedQuestions
+      });
 
-         try {
-            const docRef = await addDoc(collection(db, "QuizBanks"), {
-              name: bankName,
-              createdAt: new Date().toISOString(),
-              questions: parsedQuestions
-            });
-            alert("✅ 上傳成功並自動儲存至雲端題庫！");
-            await fetchBanksFromFirebase();
-            setSetupTab('select');
-            loadBank(docRef.id);
-         } catch(fbErr) {
-            alert("儲存至雲端失敗: " + fbErr.message);
-         }
-         if (fileInputRef.current) fileInputRef.current.value = "";
-         setBankNameForm('');
-       } catch (err) {
-         alert('檔案解析發生錯誤：' + err.message);
-       }
-    };
-    reader.readAsArrayBuffer(file);
+      alert(`已匯入 ${parsedQuestions.length} 題。`);
+      await fetchBanksFromFirebase();
+      setSetupTab('select');
+      loadBank(docRef.id);
+      setBankNameForm('');
+    } catch (err) {
+      alert(`Excel 匯入失敗：${err.message}`);
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   };
 
   const toggleCustomQ = (idx) => {
@@ -409,7 +399,7 @@ export default function TeacherDashboard({ onGoBack }) {
       setExpandedSections(newSet);
   };
 
-  const createRoom = () => {
+  const createRoom = async () => {
     if (selectedBankQuestions.length === 0) return alert('請先選擇雲端題庫。');
     
     let finalQuestions = [];
@@ -433,8 +423,19 @@ export default function TeacherDashboard({ onGoBack }) {
 
     if (finalQuestions.length === 0) return alert('在此條件下沒有選中任何題目！');
     
+    if (selectedBankId) {
+      questionBankApi.schedule(user, selectedBankId, { mode: dashboardMode, questionCount: finalQuestions.length }).catch((error) => {
+        console.log('題庫調度紀錄失敗', error);
+      });
+    }
+
     if (dashboardMode === 'live') {
-      socket.emit('create_room', { questions: finalQuestions, limit: finalQuestions.length });
+      socket.emit('create_room', {
+        questions: finalQuestions,
+        limit: finalQuestions.length,
+        teacherUserId: user?.uid || user?.email || 'anonymous-teacher',
+        questionBankId: selectedBankId
+      });
     } else if (dashboardMode === 'assignment_setup') {
       if (!assignmentTitle) return alert("請輸入任務名稱");
       if (!assignmentDeadline) return alert("請設定截止日期");
@@ -449,6 +450,8 @@ export default function TeacherDashboard({ onGoBack }) {
             maxAttempts: assignmentType === 'exam' ? 1 : assignmentMaxAttempts,
             leaderboardDate: assignmentLeaderboardDate || assignmentDeadline,
             questions: finalQuestions,
+            questionBankId: selectedBankId,
+            teacherUserId: user?.uid || user?.email || 'anonymous-teacher',
             createdAt: new Date().toISOString(),
             status: 'active'
          }).then(() => {
@@ -471,6 +474,61 @@ export default function TeacherDashboard({ onGoBack }) {
     socket.emit('next_question', roomCode);
   };
 
+  const applyGeneratedActivity = (activity) => {
+    if (!activity) return;
+    const preparedQuestions = (activity.questions || []).map((question, index) => ({
+      ...question,
+      originalIndex: index,
+      Chapter: question.Chapter || question.chapter || '未分類',
+      Section: question.Section || question.section || '未分節'
+    }));
+    setSelectedBankId(activity.questionBankId || '');
+    setSelectedBankQuestions(preparedQuestions);
+    setGenMode('custom');
+    setSelectedCustomQIdxs(new Set(preparedQuestions.map((_, index) => index)));
+    setChapters(Array.from(new Set(preparedQuestions.map((question) => question.Chapter || '未分類'))));
+    const nextSections = {};
+    preparedQuestions.forEach((question) => {
+      const chapter = question.Chapter || '未分類';
+      if (!nextSections[chapter]) nextSections[chapter] = new Set();
+      nextSections[chapter].add(question.Section || '未分節');
+    });
+    const parsedSections = {};
+    Object.keys(nextSections).forEach((chapter) => {
+      parsedSections[chapter] = Array.from(nextSections[chapter]);
+    });
+    setSections(parsedSections);
+    setNumTF(preparedQuestions.filter((question) => question.Type === 'true_false' || question.type === 'true_false').length);
+    setNumMC(preparedQuestions.filter((question) => question.Type !== 'true_false' && question.type !== 'true_false').length);
+
+    const assignmentTypes = ['homework', 'formal_quiz', 'review_practice', 'remedial_task', 'challenge_task'];
+    if (assignmentTypes.includes(activity.activityType)) {
+      setDashboardMode('assignment_setup');
+      setAssignmentTitle(activity.title || '題庫任務');
+      setAssignmentType(activity.activityType === 'formal_quiz' ? 'exam' : 'practice');
+      if (!assignmentDeadline) {
+        const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
+        setAssignmentDeadline(tomorrow.toISOString().slice(0, 16));
+      }
+    } else {
+      setDashboardMode('live');
+    }
+
+    alert(`已套用「${activity.title}」到教師控制台。你可以檢查設定後建立測驗房間或派發任務。`);
+  };
+
+  const filteredDiscussions = discussionMessages.filter(item => discussionFilter === 'all' || item.status === discussionFilter);
+  const discussionStatusText = {
+    pending: '待判斷',
+    saved: '已保存',
+    removed: '已移除'
+  };
+  const discussionStatusColor = {
+    pending: '#f57c00',
+    saved: '#2e7d32',
+    removed: '#c62828'
+  };
+
   if (step === 'setup') {
     return (
       <div className="card teacher-card animate-fade-in glass-panel" style={{ padding: '2rem', maxWidth: '800px', margin: 'auto' }}>
@@ -479,25 +537,39 @@ export default function TeacherDashboard({ onGoBack }) {
         </h2>
 
         {/* Top Level Mode Tabs */}
-        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '2rem', background: 'rgba(0,0,0,0.05)', padding: '0.5rem', borderRadius: '12px' }}>
+        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '2rem', background: 'rgba(0,0,0,0.05)', padding: '0.5rem', borderRadius: '12px', flexWrap: 'wrap' }}>
            <button 
              onClick={() => setDashboardMode('live')}
-             style={{ flex: 1, padding: '1rem', borderRadius: '8px', border: 'none', background: dashboardMode === 'live' ? 'var(--primary-color)' : 'transparent', color: dashboardMode === 'live' ? 'white' : 'var(--text-main)', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.3s' }}
+             style={{ flex: 1, minWidth: '160px', padding: '1rem', borderRadius: '8px', border: 'none', background: dashboardMode === 'live' ? 'var(--primary-color)' : 'transparent', color: dashboardMode === 'live' ? 'white' : 'var(--text-main)', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.3s' }}
            >
               👥 即時連線對戰
            </button>
            <button 
              onClick={() => setDashboardMode('assignment_setup')}
-             style={{ flex: 1, padding: '1rem', borderRadius: '8px', border: 'none', background: dashboardMode === 'assignment_setup' ? 'var(--primary-color)' : 'transparent', color: dashboardMode === 'assignment_setup' ? 'white' : 'var(--text-main)', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.3s' }}
+             style={{ flex: 1, minWidth: '160px', padding: '1rem', borderRadius: '8px', border: 'none', background: dashboardMode === 'assignment_setup' ? 'var(--primary-color)' : 'transparent', color: dashboardMode === 'assignment_setup' ? 'white' : 'var(--text-main)', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.3s' }}
            >
               📝 單人任務派發
            </button>
            <button 
              onClick={() => setDashboardMode('assignment_manage')}
-             style={{ flex: 1, padding: '1rem', borderRadius: '8px', border: 'none', background: dashboardMode === 'assignment_manage' ? 'var(--primary-color)' : 'transparent', color: dashboardMode === 'assignment_manage' ? 'white' : 'var(--text-main)', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.3s' }}
+             style={{ flex: 1, minWidth: '160px', padding: '1rem', borderRadius: '8px', border: 'none', background: dashboardMode === 'assignment_manage' ? 'var(--primary-color)' : 'transparent', color: dashboardMode === 'assignment_manage' ? 'white' : 'var(--text-main)', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.3s' }}
            >
               📊 任務管理與成績
            </button>
+           <button 
+             onClick={() => setDashboardMode('classroom_discussion')}
+             style={{ flex: 1, minWidth: '160px', padding: '1rem', borderRadius: '8px', border: 'none', background: dashboardMode === 'classroom_discussion' ? 'var(--primary-color)' : 'transparent', color: dashboardMode === 'classroom_discussion' ? 'white' : 'var(--text-main)', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.3s' }}
+           >
+              💬 課堂討論
+           </button>
+           {canUseAdminPanel && (
+             <button
+               onClick={() => setDashboardMode('admin_governance')}
+               style={{ flex: 1, minWidth: '160px', padding: '1rem', borderRadius: '8px', border: 'none', background: dashboardMode === 'admin_governance' ? 'var(--primary-color)' : 'transparent', color: dashboardMode === 'admin_governance' ? 'white' : 'var(--text-main)', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.3s' }}
+             >
+                🛡️ 平台治理
+             </button>
+           )}
         </div>
 
         {dashboardMode === 'assignment_manage' ? (
@@ -511,7 +583,7 @@ export default function TeacherDashboard({ onGoBack }) {
                        <div key={a.id} style={{ border: '1px solid #ddd', borderRadius: '8px', padding: '1rem', background: selectedAssignmentId === a.id ? '#f1f8e9' : '#fff' }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                              <div>
-                               <h4 style={{ margin: '0 0 0.5rem 0', color: 'var(--primary-dark)' }}>{a.title}</h4>
+                <h4 style={{ margin: '0 0 0.5rem 0', color: 'var(--primary-dark)' }}>{a.title}</h4>
                                <div style={{ fontSize: '0.9rem', color: '#666' }}>代碼: <strong style={{ color: 'var(--primary-color)' }}>{a.code}</strong> | 模式: {a.mode === 'exam' ? '考核' : '練習'} | 期限: {new Date(a.deadline).toLocaleString()}</div>
                              </div>
                              <button onClick={() => { setSelectedAssignmentId(a.id); loadAssignmentResults(a.id); }} style={{ padding: '0.5rem 1rem', background: 'var(--primary-color)', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}>
@@ -552,8 +624,113 @@ export default function TeacherDashboard({ onGoBack }) {
               <div style={{ marginTop: '2rem', textAlign: 'center' }}>
                  <ParticleButton className="btn back-btn" onClick={onGoBack}>返回首頁</ParticleButton>
               </div>
-           </div>
-        ) : (
+            </div>
+         ) : dashboardMode === 'admin_governance' && canUseAdminPanel ? (
+            <Suspense fallback={<DashboardChunkFallback label="載入平台治理控制台..." />}>
+              <LazyErrorBoundary title="平台治理控制台載入失敗">
+                <AdminQuestionBankControlPanel user={user} />
+              </LazyErrorBoundary>
+            </Suspense>
+         ) : dashboardMode === 'classroom_discussion' ? (
+            <div className="animate-fade-in">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem', color: 'var(--primary-dark)' }}>
+                <MessageSquare size={24} />
+                <h3>課堂討論管理</h3>
+              </div>
+              <p style={{ color: '#666', lineHeight: 1.7, marginBottom: '1.5rem' }}>
+                老師可把課堂中的提問、補充、迷思概念或學生回饋記錄在這裡，再決定哪些內容要保存成教學素材，哪些要移除或暫時保留待判斷。
+              </p>
+
+              <form onSubmit={addDiscussionMessage} style={{ background: '#fff', border: '1px solid #e0e0e0', borderRadius: '12px', padding: '1.5rem', marginBottom: '1.5rem' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 180px', gap: '1rem' }}>
+                  <div>
+                    <label style={{ fontWeight: 'bold', color: 'var(--primary-dark)' }}>課程 / 課堂名稱</label>
+                    <input
+                      type="text"
+                      className="input-field"
+                      placeholder="例如：國中英文文法複習、Python 入門第一堂"
+                      value={discussionTitle}
+                      onChange={e => setDiscussionTitle(e.target.value)}
+                      style={{ width: '100%', marginTop: '0.5rem' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontWeight: 'bold', color: 'var(--primary-dark)' }}>內容類型</label>
+                    <select className="input-field" value={discussionTag} onChange={e => setDiscussionTag(e.target.value)} style={{ width: '100%', marginTop: '0.5rem' }}>
+                      <option value="提問">提問</option>
+                      <option value="補充">補充</option>
+                      <option value="迷思概念">迷思概念</option>
+                      <option value="延伸任務">延伸任務</option>
+                      <option value="學生回饋">學生回饋</option>
+                    </select>
+                  </div>
+                </div>
+                <label style={{ fontWeight: 'bold', color: 'var(--primary-dark)' }}>討論內容</label>
+                <textarea
+                  value={discussionInput}
+                  onChange={e => setDiscussionInput(e.target.value)}
+                  placeholder="輸入要保存或待整理的聊天內容、學生提問、老師補充說明..."
+                  rows={4}
+                  style={{ width: '100%', marginTop: '0.5rem', padding: '1rem', borderRadius: '12px', border: '1px solid #CED4DA', fontFamily: 'inherit', fontSize: '1rem', resize: 'vertical' }}
+                />
+                <ParticleButton type="submit" className="btn primary-btn" style={{ marginTop: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+                  <PlusCircle size={18} /> 新增討論內容
+                </ParticleButton>
+              </form>
+
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
+                {[
+                  ['all', '全部'],
+                  ['pending', '待判斷'],
+                  ['saved', '已保存'],
+                  ['removed', '已移除']
+                ].map(([value, label]) => (
+                  <button
+                    key={value}
+                    onClick={() => setDiscussionFilter(value)}
+                    style={{ padding: '0.6rem 1rem', borderRadius: '8px', border: '1px solid #d6dde5', background: discussionFilter === value ? 'var(--primary-dark)' : '#fff', color: discussionFilter === value ? '#fff' : 'var(--text-main)', fontWeight: 'bold', cursor: 'pointer' }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {filteredDiscussions.length === 0 ? (
+                <p style={{ color: '#777', textAlign: 'center', padding: '2rem', background: '#fff', borderRadius: '12px' }}>目前沒有符合條件的討論內容。</p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  {filteredDiscussions.map(item => (
+                    <div key={item.id} style={{ background: '#fff', border: '1px solid #e0e0e0', borderLeft: `6px solid ${discussionStatusColor[item.status] || '#90a4ae'}`, borderRadius: '12px', padding: '1rem' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'flex-start' }}>
+                        <div>
+                          <h4 style={{ color: 'var(--primary-dark)', marginBottom: '0.4rem' }}>{item.title}</h4>
+                          <div style={{ color: '#777', fontSize: '0.9rem' }}>
+                            {item.tag} · {new Date(item.createdAt).toLocaleString()} · <strong style={{ color: discussionStatusColor[item.status] || '#777' }}>{discussionStatusText[item.status] || item.status}</strong>
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                          <button onClick={() => updateDiscussionStatus(item.id, 'saved')} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', padding: '0.5rem 0.8rem', borderRadius: '8px', border: '1px solid #a5d6a7', background: '#e8f5e9', color: '#2e7d32', fontWeight: 'bold', cursor: 'pointer' }}>
+                            <Save size={16} /> 保存
+                          </button>
+                          <button onClick={() => updateDiscussionStatus(item.id, 'pending')} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', padding: '0.5rem 0.8rem', borderRadius: '8px', border: '1px solid #ffcc80', background: '#fff8e1', color: '#ef6c00', fontWeight: 'bold', cursor: 'pointer' }}>
+                            <Archive size={16} /> 待判斷
+                          </button>
+                          <button onClick={() => updateDiscussionStatus(item.id, 'removed')} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', padding: '0.5rem 0.8rem', borderRadius: '8px', border: '1px solid #ef9a9a', background: '#ffebee', color: '#c62828', fontWeight: 'bold', cursor: 'pointer' }}>
+                            <Trash2 size={16} /> 移除
+                          </button>
+                        </div>
+                      </div>
+                      <p style={{ marginTop: '1rem', color: '#444', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{item.content}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div style={{ marginTop: '2rem', textAlign: 'center' }}>
+                 <ParticleButton className="btn back-btn" onClick={onGoBack}>返回首頁</ParticleButton>
+              </div>
+            </div>
+         ) : (
         <>
         {/* Setup Configuration Content */}
         {dashboardMode === 'assignment_setup' && (
@@ -562,7 +739,7 @@ export default function TeacherDashboard({ onGoBack }) {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                  <div>
                     <label>任務名稱</label>
-                    <input type="text" className="input-field" placeholder="例如：期中線上考核" value={assignmentTitle} onChange={e => setAssignmentTitle(e.target.value)} style={{ width: '100%' }} />
+                     <input type="text" className="input-field" placeholder="例如：文法單元練習、期中線上考核" value={assignmentTitle} onChange={e => setAssignmentTitle(e.target.value)} style={{ width: '100%' }} />
                  </div>
                  <div>
                     <label>截止日期與時間</label>
@@ -589,6 +766,22 @@ export default function TeacherDashboard({ onGoBack }) {
            </div>
         )}
         
+        <Suspense fallback={<DashboardChunkFallback label="載入題庫管理系統..." />}>
+          <LazyErrorBoundary title="題庫管理系統載入失敗">
+            <QuestionBankDashboard
+              user={user}
+              banks={savedBanks}
+              selectedBankId={selectedBankId}
+              onReload={fetchBanksFromFirebase}
+              onSelectBank={loadBank}
+              onDeleteBank={deleteBank}
+              onDeleteQuestion={deleteQuestion}
+              onActivityGenerated={applyGeneratedActivity}
+            />
+          </LazyErrorBoundary>
+        </Suspense>
+
+        {Boolean(window.__legacyQuestionBankUi) && (<>
         <div className="tabs" style={{ display: 'flex', gap: '1rem', borderBottom: '2px solid rgba(0,0,0,0.05)', paddingBottom: '1rem', marginBottom: '2rem' }}>
            <ParticleButton 
              className={`tab-btn ${setupTab === 'select' ? 'active' : ''}`}
@@ -608,25 +801,25 @@ export default function TeacherDashboard({ onGoBack }) {
 
         {setupTab === 'upload' && (
           <div className="form-group slide-in">
-            <label style={{ fontWeight: 'bold', color: 'var(--primary-dark)' }}>為這個新題庫命名</label>
+             <label style={{ fontWeight: 'bold', color: 'var(--primary-dark)' }}>為這門課或題庫命名</label>
             <input 
                type="text" 
                className="input-field" 
-               placeholder="例如：永續經營第一單元" 
+                placeholder="例如：國中英文時態入門、Python 基礎第一單元" 
                value={bankNameForm}
                onChange={(e) => setBankNameForm(e.target.value)}
                style={{ width: '100%', marginBottom: '1rem' }}
             />
             <label style={{ fontWeight: 'bold', color: 'var(--primary-dark)' }}>選擇 Excel 檔案</label>
-            <input type="file" accept=".xlsx,.xls" onChange={handleFileUpload} ref={fileInputRef} className="input-field" style={{ width: '100%' }} />
-            <p style={{ marginTop: '0.5rem', fontSize: '0.9rem', color: '#666' }}>💡 系統將自動辨識「章節」、「小節」欄位，且若無C/D選項將自動歸類為「是非題」。</p>
+            <input type="file" accept=".xlsx" onChange={handleServerFileUpload} ref={fileInputRef} className="input-field" style={{ width: '100%' }} />
+             <p style={{ marginTop: '0.5rem', fontSize: '0.9rem', color: '#666' }}>💡 系統將自動辨識「標準大類 / 主題 / 分類」與「子內容 / 小節」欄位，且若無 C/D 選項將自動歸類為「是非題」。</p>
           </div>
         )}
 
         {setupTab === 'select' && (
           <div className="slide-in">
             <div className="form-group">
-              <label style={{ fontWeight: 'bold', color: 'var(--primary-dark)' }}>選擇雲端題庫</label>
+               <label style={{ fontWeight: 'bold', color: 'var(--primary-dark)' }}>選擇雲端課程題庫</label>
               <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem' }}>
                 <select onChange={(e) => loadBank(e.target.value)} value={selectedBankId} className="input-field" style={{ flex: 1, marginBottom: 0 }}>
                   <option value="" disabled>-- 點此選擇題庫 --</option>
@@ -663,16 +856,16 @@ export default function TeacherDashboard({ onGoBack }) {
                   <div className="animate-fade-in">
                     <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
                       <div style={{ flex: 1 }}>
-                        <label>過濾章節</label>
+                        <label>過濾標準大類</label>
                         <select className="input-field" style={{ width: '100%' }} value={randChapter} onChange={(e) => { setRandChapter(e.target.value); setRandSection('All'); }}>
-                          <option value="All">全部章節</option>
+                          <option value="All">全部大類</option>
                           {chapters.map(c => <option key={c} value={c}>{c}</option>)}
                         </select>
                       </div>
                       <div style={{ flex: 1 }}>
-                        <label>過濾小節</label>
+                        <label>過濾子內容</label>
                         <select className="input-field" style={{ width: '100%' }} value={randSection} onChange={(e) => setRandSection(e.target.value)} disabled={randChapter === 'All'}>
-                          <option value="All">全部小節</option>
+                          <option value="All">全部子內容</option>
                           {(sections[randChapter] || []).map(s => <option key={s} value={s}>{s}</option>)}
                         </select>
                       </div>
@@ -767,9 +960,11 @@ export default function TeacherDashboard({ onGoBack }) {
           </div>
         )}
 
+        </>)}
+
         <div className="actions" style={{ marginTop: '2rem', display: 'flex', justifyContent: 'space-between' }}>
           <ParticleButton className="btn back-btn" onClick={onGoBack}>返回</ParticleButton>
-          <ParticleButton className="btn primary-btn" onClick={createRoom} disabled={selectedBankQuestions.length === 0 && setupTab === 'select'}>
+          <ParticleButton className="btn primary-btn" onClick={createRoom} disabled={selectedBankQuestions.length === 0}>
              {dashboardMode === 'live' ? '建立測驗房間' : '派發單人任務'}
           </ParticleButton>
         </div>
@@ -784,9 +979,9 @@ export default function TeacherDashboard({ onGoBack }) {
     const joinUrl = `${window.location.origin}/?code=${roomCode}`;
     return (
       <div className="card teacher-waiting animate-fade-in" style={{ textAlign: 'center' }}>
-        <h2 className="title" style={{ color: 'var(--primary-dark)' }}>等待永續夥伴加入...</h2>
+        <h2 className="title" style={{ color: 'var(--primary-dark)' }}>等待學生加入課堂...</h2>
         <div className="room-info" style={{ background: '#f1f8e9', padding: '2rem', borderRadius: '12px' }}>
-          <h3>學生請前往首頁並輸入代碼：</h3>
+          <h3>學生請前往首頁並輸入課堂代碼：</h3>
           <div className="room-code" style={{ fontSize: '4rem', letterSpacing: '8px', color: 'var(--primary-color)' }}>{roomCode}</div>
           <div className="qr-container" style={{ marginTop: '1rem' }}>
              <QRCodeSVG value={joinUrl} size={180} />
@@ -923,5 +1118,5 @@ export default function TeacherDashboard({ onGoBack }) {
     );
   }
 
-  return <div style={{ textAlign: 'center', padding: '4rem', fontSize: '1.5rem' }}>系統載入中...🌿</div>;
+  return <div style={{ textAlign: 'center', padding: '4rem', fontSize: '1.5rem' }}>系統載入中...</div>;
 }

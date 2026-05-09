@@ -1,7 +1,7 @@
 {
   "hosting": {
     "site": "teach999-53c2d",
-    "public": "dist",
+    "public": "frontend/dist",
     "ignore": [
       "firebase.json",
       "**/.*",
@@ -44,6 +44,6 @@
     ]
   },
   "firestore": {
-    "rules": "firestore.rules"
+    "rules": "frontend/firestore.rules"
   }
 }

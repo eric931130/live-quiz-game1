@@ -1,17 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { io } from 'socket.io-client';
 import { collection, query, where, getDocs, addDoc } from 'firebase/firestore';
-import { db } from '../firebase';
+import { Play, ArrowLeft, CheckCircle2, XCircle, Flame, Trophy, ListChecks, Check, X } from 'lucide-react';
+import { db, auth } from '../firebase';
+import { signInAnonymously, setPersistence, inMemoryPersistence, updateProfile } from 'firebase/auth';
 import ParticleButton from './ParticleButton';
 
 const SOCKET_URL = window.location.hostname === 'localhost' 
   ? 'http://localhost:3001' 
   : 'https://live-quiz-game1.onrender.com';
+const API_BASE = SOCKET_URL;
 
-export default function StudentView({ onGoBack, currentUser }) {
+export default function StudentView({ onGoBack, currentUser, initialCode }) {
   const [socket, setSocket] = useState(null);
   const [step, setStep] = useState('join'); // join, waiting, playing, feedback, game_over
-  const [roomCode, setRoomCode] = useState('');
+  const [roomCode, setRoomCode] = useState(initialCode || '');
   const [nickname, setNickname] = useState('');
   
   // Game State
@@ -43,8 +46,18 @@ export default function StudentView({ onGoBack, currentUser }) {
   useEffect(() => { scoreRef.current = score; }, [score]);
   useEffect(() => { nicknameRef.current = nickname; }, [nickname]);
 
+  const exitStudentView = async () => {
+     if (currentUser && currentUser.isAnonymous) {
+        try {
+           await currentUser.delete();
+        } catch (err) {
+           console.warn('匿名帳號刪除失敗', err);
+        }
+     }
+     if (onGoBack) onGoBack();
+  };
+
   useEffect(() => {
-    // Check if code is in URL params
     const params = new URLSearchParams(window.location.search);
     if (params.get('code')) {
       setRoomCode(params.get('code'));
@@ -102,10 +115,11 @@ export default function StudentView({ onGoBack, currentUser }) {
     return () => newSocket.close();
   }, []);
 
+  // handleAutoJoin removed to allow manual nickname entry
+
   const joinRoom = async (e) => {
     e.preventDefault();
-    const userNickname = currentUser ? (localStorage.getItem('userNickname') || currentUser.displayName || currentUser.email.split('@')[0]) : nickname;
-    if (!roomCode || !userNickname) return;
+    if (!roomCode) return;
     
     // Check Firestore first for Assignments
     try {
@@ -120,16 +134,16 @@ export default function StudentView({ onGoBack, currentUser }) {
              return;
           }
           
-          if (!currentUser) {
-             alert('【單人考核 / 練習模式】限定！\n訪客無法參與單人任務，請先返回首頁註冊或登入會員！');
-             onGoBack && onGoBack();
+          if (!currentUser || currentUser.isAnonymous) {
+             alert('【單人考核 / 練習模式】限定！\n訪客或單次匿名用戶無法參與單人任務，請先返回首頁註冊或登入會員！');
+             exitStudentView();
              return;
           }
 
           let sid = currentUser.uid;
           setStudentId(sid);
           
-          const userNickname = localStorage.getItem('userNickname') || currentUser.displayName || currentUser.email.split('@')[0];
+          const userNickname = localStorage.getItem('userNickname') || currentUser.displayName || (currentUser.email ? currentUser.email.split('@')[0] : '訪客');
           setNickname(userNickname);
           nicknameRef.current = userNickname;
           
@@ -152,10 +166,38 @@ export default function StudentView({ onGoBack, currentUser }) {
        console.error("Firebase query error", err);
     }
 
-    socket.emit('join_room_student', { roomId: roomCode, nickname: userNickname });
+    let currentAuthUser = currentUser;
+    let finalNickname = nickname;
+
+    if (!currentAuthUser) {
+        if (!nickname.trim()) {
+            alert("請輸入訪客綽號！");
+            return;
+        }
+        try {
+            await setPersistence(auth, inMemoryPersistence);
+            const userCred = await signInAnonymously(auth);
+            currentAuthUser = userCred.user;
+            await updateProfile(currentAuthUser, { displayName: nickname });
+            localStorage.setItem('userNickname', nickname);
+        } catch (error) {
+            console.error("Anonymous auth failed", error);
+            alert("匿名登入失敗，請重試");
+            return;
+        }
+    } else {
+        finalNickname = currentAuthUser.displayName || localStorage.getItem('userNickname') || (currentAuthUser.email ? currentAuthUser.email.split('@')[0] : nickname);
+    }
+    
+    if (!finalNickname) finalNickname = "匿名用戶";
+    nicknameRef.current = finalNickname;
+    setNickname(finalNickname);
+
+    socket.emit('join_room_student', { roomId: roomCode, nickname: finalNickname });
   };
 
   const selectOption = (opt) => {
+    hasAnsweredRef.current = true;
     if (isAssignmentMode) {
       handleAssignmentAnswer(opt, assignmentQuestions, currentAQuestionIndex);
     } else {
@@ -185,8 +227,13 @@ export default function StudentView({ onGoBack, currentUser }) {
      const q = qs[idx];
      // Map format to currentQuestion expected format
      setCurrentQuestion({
-        question: q.Question,
-        options: { A: q.OptA, B: q.OptB, C: q.OptC, D: q.OptD }
+        question: q.Question || q.prompt,
+        options: {
+          A: q.OptA || q.options?.A,
+          B: q.OptB || q.options?.B,
+          C: q.OptC || q.options?.C,
+          D: q.OptD || q.options?.D
+        }
      });
      setATimeLeft(60);
      setAQuestionStartTime(Date.now());
@@ -209,7 +256,8 @@ export default function StudentView({ onGoBack, currentUser }) {
      if (aTimerRef.current) clearInterval(aTimerRef.current);
      
      const timeTaken = (Date.now() - aQuestionStartTime) / 1000;
-     const correctOption = String(qs[idx].Answer).trim().toUpperCase();
+     const question = qs[idx];
+     const correctOption = String(question.Answer || question.answer).trim().toUpperCase();
      const cleanSelected = selectedOption ? String(selectedOption).trim().toUpperCase() : null;
      const isCorrect = cleanSelected === correctOption;
      
@@ -232,10 +280,23 @@ export default function StudentView({ onGoBack, currentUser }) {
      
      aAnswersRef.current.push({
         qIndex: idx,
-        selected: selectedOption || '未作答',
+        questionId: question.id || `${assignment.id}_${idx}`,
+        questionBankId: question.questionBankId || assignment.questionBankId || '',
+        prompt: question.Question || question.prompt || '',
+        selected: cleanSelected || '未作答',
+        correctAnswer: correctOption,
         correct: isCorrect,
         score: points,
-        timeTaken
+        timeTaken,
+        explanation: question.explanation || '',
+        knowledgePoint: question.knowledgePoint || question.Chapter || question.chapter || '',
+        difficulty: question.difficulty || '',
+        options: question.options || {
+          A: question.OptA || '',
+          B: question.OptB || '',
+          C: question.OptC || '',
+          D: question.OptD || ''
+        }
      });
      
      setFeedback({ isCorrect, correctOption, points, currentScore, streak: newStreak });
@@ -248,7 +309,52 @@ export default function StudentView({ onGoBack, currentUser }) {
      loadAssignmentQuestion(assignmentQuestions, nextIdx);
   };
 
-  const finishAssignment = async (qs) => {
+  const syncAssignmentAnswersToBackend = async () => {
+     if (!assignment?.questionBankId || !aAnswersRef.current.length) return;
+     try {
+        const token = currentUser?.getIdToken ? await currentUser.getIdToken() : null;
+        await fetch(`${API_BASE}/api/student-answers/bulk`, {
+           method: 'POST',
+           headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { Authorization: `Bearer ${token}` } : {})
+           },
+           body: JSON.stringify({
+              studentId,
+              studentName: nickname,
+              teacherUserId: assignment.teacherUserId || '',
+              classId: assignment.id,
+              activityId: assignment.activityId || '',
+              questionBankId: assignment.questionBankId,
+              answers: aAnswersRef.current.map((answer) => ({
+                 questionId: answer.questionId,
+                 questionBankId: answer.questionBankId || assignment.questionBankId,
+                 selectedAnswer: answer.selected,
+                 correctAnswer: answer.correctAnswer,
+                 isCorrect: answer.correct,
+                 timeSpent: answer.timeTaken,
+                 score: answer.score,
+                 question: {
+                    id: answer.questionId,
+                    questionBankId: answer.questionBankId || assignment.questionBankId,
+                    prompt: answer.prompt,
+                    Question: answer.prompt,
+                    answer: answer.correctAnswer,
+                    Answer: answer.correctAnswer,
+                    explanation: answer.explanation,
+                    knowledgePoint: answer.knowledgePoint,
+                    difficulty: answer.difficulty,
+                    options: answer.options
+                 }
+              }))
+           })
+        });
+     } catch (error) {
+        console.warn('同步作答分析失敗', error);
+     }
+  };
+
+  const finishAssignment = async () => {
      try {
         await addDoc(collection(db, "AssignmentResults"), {
            assignmentId: assignment.id,
@@ -259,6 +365,7 @@ export default function StudentView({ onGoBack, currentUser }) {
            answers: aAnswersRef.current,
            completedAt: new Date().toISOString()
         });
+        await syncAssignmentAnswersToBackend();
         setFinalReport({ score: scoreRef.current, answers: aAnswersRef.current });
         setStep('game_over');
      } catch (e) {
@@ -270,12 +377,12 @@ export default function StudentView({ onGoBack, currentUser }) {
     return (
       <div className="card student-join animate-fade-in glass-panel" style={{ padding: '3rem', borderTop: '5px solid var(--primary-dark)', borderRadius: '24px' }}>
         <h2 className="title" style={{ color: 'var(--primary-dark)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
-          <Play size={28} /> 加入測驗房間！
+          <Play size={28} /> 加入師說新宇課堂
         </h2>
         <form onSubmit={joinRoom} className="join-form">
           <input 
             type="text" 
-            placeholder="請輸入即時對戰或單人任務代碼" 
+            placeholder="請輸入即時課堂或單人任務代碼" 
             value={roomCode} 
             onChange={e => setRoomCode(e.target.value)} 
             required 
@@ -300,10 +407,10 @@ export default function StudentView({ onGoBack, currentUser }) {
         </form>
         {currentUser && (
           <p style={{ textAlign: 'center', marginTop: '1rem', color: '#666' }}>
-             將以 <strong style={{ color: 'var(--primary-dark)' }}>{localStorage.getItem('userNickname') || currentUser.displayName || currentUser.email.split('@')[0]}</strong> 的身分作答
+             將以 <strong style={{ color: 'var(--primary-dark)' }}>{localStorage.getItem('userNickname') || currentUser.displayName || (currentUser.email ? currentUser.email.split('@')[0] : nickname)}</strong> 的身分作答
           </p>
         )}
-        <ParticleButton className="btn back-btn mt-4 btn-block" onClick={onGoBack} style={{ borderRadius: '50px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+        <ParticleButton className="btn back-btn mt-4 btn-block" onClick={exitStudentView} style={{ borderRadius: '50px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
            <ArrowLeft size={20} /> 返回首頁
         </ParticleButton>
       </div>
@@ -316,9 +423,9 @@ export default function StudentView({ onGoBack, currentUser }) {
         <h2 className="title" style={{ color: 'var(--primary-dark)', fontSize: '2.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <CheckCircle2 size={36} /> 成功進入房間！
         </h2>
-        <p style={{ fontSize: '1.2rem', color: 'var(--text-muted)' }}>請確認在大螢幕上看到你的綽號</p>
+        <p style={{ fontSize: '1.2rem', color: 'var(--text-muted)' }}>請確認在老師畫面上看到你的綽號</p>
         <div className="spinner mt-4" style={{ borderColor: 'rgba(46, 125, 50, 0.2)', borderTopColor: '#2E7D32' }}></div>
-        <p className="mt-4" style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--primary)' }}>等待小老師開始作答...</p>
+        <p className="mt-4" style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--primary)' }}>等待老師開始作答...</p>
       </div>
     );
   }
@@ -433,6 +540,8 @@ export default function StudentView({ onGoBack, currentUser }) {
   }
 
   if (step === 'game_over' && finalReport) {
+    const wrongAnswers = (finalReport.answers || []).filter((ans) => !ans.correct && ans.prompt);
+
     return (
       <div className="student-game-over animate-fade-in" style={{ background: 'var(--bg-color)' }}>
         <h1 className="title text-center mt-2" style={{ color: '#2E7D32', fontSize: '2.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
@@ -454,6 +563,24 @@ export default function StudentView({ onGoBack, currentUser }) {
              </div>
           ))}
         </div>
+        {wrongAnswers.length > 0 && (
+          <div className="student-wrong-answer-book">
+            <h3><ListChecks size={24} /> 個人錯題本</h3>
+            <p>以下整理你本次需要複習的題目。錯題本會先在本次結算顯示，後續階段可延伸為長期追蹤。</p>
+            {wrongAnswers.map((ans, index) => (
+              <div key={`${ans.questionId || index}-wrong`} className="wrong-answer-card">
+                <strong>第 {ans.qIndex + 1} 題</strong>
+                <p>{ans.prompt}</p>
+                <div>
+                  <span>你的答案：{ans.selected}</span>
+                  <span>正確答案：{ans.correctAnswer}</span>
+                  {ans.knowledgePoint && <span>知識點：{ans.knowledgePoint}</span>}
+                </div>
+                {ans.explanation && <small>解析：{ans.explanation}</small>}
+              </div>
+            ))}
+          </div>
+        )}
         <div className="text-center mt-4 pb-4">
            <ParticleButton className="btn primary-btn xl-btn" onClick={() => window.location.reload()} style={{ borderRadius: '50px' }}>再玩一次</ParticleButton>
         </div>

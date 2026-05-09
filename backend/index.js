@@ -3,9 +3,11 @@ const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const multer = require('multer');
-const xlsx = require('xlsx');
+const ExcelJS = require('exceljs');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
+const admin = require('firebase-admin');
 
 const app = express();
 const server = http.createServer(app);
@@ -14,165 +16,1783 @@ const io = new Server(server, {
 });
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '2mb' }));
 
-// --- Question Bank Persistence Logic ---
-const banksFilePath = path.join(__dirname, 'banks.json');
-if (!fs.existsSync(banksFilePath)) {
-  fs.writeFileSync(banksFilePath, JSON.stringify([]));
+const storeFilePath = process.env.QUESTION_BANK_STORE_PATH || path.join(__dirname, 'question_banks_store.json');
+const legacyBanksFilePath = path.join(__dirname, 'banks.json');
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+const MUTATION_WINDOW_MS = 60 * 1000;
+const MUTATION_LIMIT = 80;
+const mutationBuckets = new Map();
+const ADMIN_ROLE_VALUES = new Set(['admin', 'developer', 'platform_owner', 'owner', 'platform_admin', 'superadmin']);
+let firebaseAuthClient = null;
+let firebaseAuthInitAttempted = false;
+
+function envList(name) {
+  return String(process.env[name] || '')
+    .split(',')
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
 }
 
-function getBanks() {
+function isAdminRole(role) {
+  return ADMIN_ROLE_VALUES.has(String(role || '').toLowerCase());
+}
+
+function hasTrustedAdminAccess(req, userId, email) {
+  const allowedIds = envList('ADMIN_USER_IDS');
+  const allowedEmails = envList('ADMIN_EMAILS');
+  const normalizedUserId = String(userId || '').trim().toLowerCase();
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  const configuredSecret = String(process.env.ADMIN_API_SECRET || '').trim();
+  const providedSecret = String(req.header('x-admin-secret') || '').trim();
+  const secretMatches = Boolean(configuredSecret && providedSecret) &&
+    Buffer.byteLength(providedSecret) === Buffer.byteLength(configuredSecret) &&
+    crypto.timingSafeEqual(Buffer.from(providedSecret), Buffer.from(configuredSecret));
+
+  return (
+    allowedIds.includes(normalizedUserId) ||
+    allowedEmails.includes(normalizedEmail) ||
+    Boolean(secretMatches)
+  );
+}
+
+function getFirebaseAuthClient() {
+  if (firebaseAuthClient || firebaseAuthInitAttempted) return firebaseAuthClient;
+  firebaseAuthInitAttempted = true;
+
   try {
-    return JSON.parse(fs.readFileSync(banksFilePath, 'utf8'));
+    const serviceAccountJson = String(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '').trim();
+    const projectId = String(process.env.FIREBASE_PROJECT_ID || '').trim();
+    if (!serviceAccountJson && !projectId) return null;
+
+    const appOptions = {};
+    if (serviceAccountJson) {
+      appOptions.credential = admin.credential.cert(JSON.parse(serviceAccountJson));
+    } else {
+      appOptions.credential = admin.credential.applicationDefault();
+    }
+    if (projectId) appOptions.projectId = projectId;
+
+    if (!admin.apps.length) admin.initializeApp(appOptions);
+    firebaseAuthClient = admin.auth();
+  } catch (error) {
+    console.error('Firebase Admin initialization failed:', error.message);
+    firebaseAuthClient = null;
+  }
+
+  return firebaseAuthClient;
+}
+
+async function verifyFirebaseToken(req) {
+  const authHeader = String(req.header('authorization') || '');
+  const match = authHeader.match(/^Bearer\s+(.+)$/i);
+  if (!match) return null;
+  const authClient = getFirebaseAuthClient();
+  if (!authClient) return null;
+  try {
+    return await authClient.verifyIdToken(match[1]);
+  } catch (error) {
+    console.warn('Firebase ID token verification failed:', error.message);
+    return null;
+  }
+}
+
+app.get('/api/health', (req, res) => {
+  const store = readStore();
+  res.json({
+    ok: true,
+    service: 'live-quiz-game-backend',
+    timestamp: nowIso(),
+    uptimeSeconds: Math.round(process.uptime()),
+    counts: {
+      questionBanks: store.questionBanks.length,
+      shares: store.shares.length,
+      activities: store.activities.length,
+      studentAnswers: store.studentAnswers.length,
+      auditLogs: store.auditLogs.length
+    }
+  });
+});
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function createId(prefix) {
+  return `${prefix}_${crypto.randomUUID()}`;
+}
+
+function readStore() {
+  if (!fs.existsSync(storeFilePath)) {
+    fs.writeFileSync(storeFilePath, JSON.stringify({ questionBanks: [], shares: [], auditLogs: [], activities: [], studentAnswers: [], questionAnalytics: [] }, null, 2));
+  }
+
+  try {
+    const parsed = JSON.parse(fs.readFileSync(storeFilePath, 'utf8'));
+    return {
+      questionBanks: Array.isArray(parsed.questionBanks) ? parsed.questionBanks : [],
+      shares: Array.isArray(parsed.shares) ? parsed.shares : [],
+      auditLogs: Array.isArray(parsed.auditLogs) ? parsed.auditLogs : [],
+      activities: Array.isArray(parsed.activities) ? parsed.activities : [],
+      studentAnswers: Array.isArray(parsed.studentAnswers) ? parsed.studentAnswers : [],
+      questionAnalytics: Array.isArray(parsed.questionAnalytics) ? parsed.questionAnalytics : []
+    };
+  } catch (error) {
+    console.error('Unable to read question bank store:', error);
+    return { questionBanks: [], shares: [], auditLogs: [], activities: [], studentAnswers: [], questionAnalytics: [] };
+  }
+}
+
+function writeStore(store) {
+  fs.writeFileSync(storeFilePath, JSON.stringify(store, null, 2));
+}
+
+async function getPrincipal(req) {
+  const decodedToken = await verifyFirebaseToken(req);
+  const tokenRole = decodedToken?.role || (decodedToken?.admin ? 'admin' : '');
+  const requestedRole = String(tokenRole || req.header('x-user-role') || 'teacher').toLowerCase();
+  const userId = String(decodedToken?.uid || req.header('x-user-id') || '').trim() || 'anonymous-teacher';
+  const email = String(decodedToken?.email || req.header('x-user-email') || '').trim();
+  const tokenClaimsAdmin = Boolean(decodedToken && (decodedToken.admin === true || isAdminRole(decodedToken.role)));
+  const clientClaimsAdmin = isAdminRole(requestedRole);
+  const trustedAdmin = clientClaimsAdmin && (tokenClaimsAdmin || hasTrustedAdminAccess(req, userId, email));
+  const role = clientClaimsAdmin && !trustedAdmin ? 'teacher' : requestedRole;
+
+  return {
+    userId,
+    role,
+    requestedRole,
+    trustedAdmin,
+    authVerified: Boolean(decodedToken),
+    authSource: decodedToken ? 'firebase_id_token' : 'headers',
+    email,
+    displayName: String(decodedToken?.name || req.header('x-user-name') || '').trim(),
+    organizationId: String(req.header('x-organization-id') || req.header('x-school-id') || 'default-school').trim(),
+    schoolId: String(req.header('x-school-id') || req.header('x-organization-id') || 'default-school').trim(),
+    ipAddress: req.ip,
+    userAgent: req.get('user-agent') || ''
+  };
+}
+
+function isAdmin(principal) {
+  return Boolean(principal.trustedAdmin && isAdminRole(principal.role));
+}
+
+async function requirePrincipal(req, res, next) {
+  req.principal = await getPrincipal(req);
+  if (String(process.env.REQUIRE_FIREBASE_AUTH || '').toLowerCase() === 'true' && !req.principal.authVerified) {
+    return res.status(401).json({ error: 'Firebase authentication is required.' });
+  }
+  next();
+}
+
+function requireAdmin(req, res, next) {
+  if (!isAdmin(req.principal)) return res.status(403).json({ error: 'Admin permission required.' });
+  next();
+}
+
+async function rateLimitMutations(req, res, next) {
+  const principal = req.principal || await getPrincipal(req);
+  const key = `${principal.userId}:${Math.floor(Date.now() / MUTATION_WINDOW_MS)}`;
+  const count = (mutationBuckets.get(key) || 0) + 1;
+  mutationBuckets.set(key, count);
+  if (count > MUTATION_LIMIT) return res.status(429).json({ error: 'Too many question bank requests. Please try again later.' });
+  next();
+}
+
+function normalizeText(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ');
+}
+
+function sanitizeCell(value) {
+  let text = normalizeText(value);
+  text = text.replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '');
+  text = text.replace(/\son\w+\s*=/gi, '');
+  if (/^[=+\-@]/.test(text)) text = `'${text}`;
+  return text;
+}
+
+function normalizePromptKey(value) {
+  return normalizeText(value).toLowerCase().replace(/\s+/g, '');
+}
+
+function activeShareFor(store, bank, principal) {
+  return store.shares.find((share) => (
+    share.questionBankId === bank.id &&
+    share.sharedWithTeacherId === principal.userId &&
+    !share.revokedAt &&
+    (!share.expiresAt || new Date(share.expiresAt).getTime() > Date.now())
+  ));
+}
+
+function getPermission(store, bank, principal) {
+  const share = activeShareFor(store, bank, principal);
+  const owner = bank.ownerTeacherId === principal.userId;
+  const admin = isAdmin(principal);
+  const visibleRecord = bank.status !== 'deleted' && !bank.deletedAt;
+  const usableRecord = visibleRecord && !['locked', 'suspended'].includes(bank.status);
+
+  return {
+    isOwner: owner,
+    isAdmin: admin,
+    share,
+    canView: admin || (visibleRecord && owner) || (visibleRecord && Boolean(share)),
+    canUse: admin || (usableRecord && owner) || (usableRecord && Boolean(share?.canUse)),
+    canEdit: admin || (usableRecord && owner),
+    canDelete: admin || (usableRecord && owner),
+    canShare: admin || (usableRecord && owner),
+    canExport: admin || (usableRecord && owner) || (usableRecord && Boolean(share?.canExport)),
+    canCopy: admin || (usableRecord && owner) || (usableRecord && Boolean(share?.canCopy))
+  };
+}
+
+function publicBank(store, bank, principal) {
+  const permission = getPermission(store, bank, principal);
+  return {
+    ...bank,
+    questions: (bank.questions || []).filter((question) => !question.deletedAt),
+    shares: permission.isOwner || permission.isAdmin
+      ? store.shares.filter((share) => share.questionBankId === bank.id)
+      : undefined,
+    permission: {
+      isOwner: permission.isOwner,
+      canView: permission.canView,
+      canUse: permission.canUse,
+      canEdit: permission.canEdit,
+      canDelete: permission.canDelete,
+      canShare: permission.canShare,
+      canExport: permission.canExport,
+      canCopy: permission.canCopy,
+      label: permission.isOwner ? '我擁有的題庫' : permission.share ? '分享給我的題庫' : permission.isAdmin ? '管理員檢視' : '無權限',
+      notice: permission.isOwner ? '你可以編輯與管理此題庫。' : '你可以使用此題庫，但不能修改原始內容。'
+    }
+  };
+}
+
+function findBankOr404(store, id, res) {
+  const bank = store.questionBanks.find((item) => item.id === id);
+  if (!bank) {
+    res.status(404).json({ error: 'Question bank not found.' });
+    return null;
+  }
+  return bank;
+}
+
+function addAudit(store, principal, actionType, targetType, targetId, metadata = {}) {
+  const log = {
+    id: createId('audit'),
+    actorUserId: principal.userId,
+    actorRole: principal.role,
+    actionType,
+    targetType,
+    targetId,
+    targetQuestionBankId: metadata.targetQuestionBankId || (targetType === 'questionBank' ? targetId : undefined),
+    targetQuestionId: metadata.targetQuestionId,
+    metadata,
+    createdAt: nowIso(),
+    ipAddress: principal.ipAddress,
+    userAgent: principal.userAgent
+  };
+  store.auditLogs.unshift(log);
+  return log;
+}
+
+function headerKey(value) {
+  return normalizeText(value).toLowerCase().replace(/[\s_*：:()（）-]/g, '');
+}
+
+function matchHeader(cell) {
+  const key = headerKey(cell);
+  if (!key) return null;
+
+  const headerMap = [
+    ['prompt', ['題目', '題幹', 'question', 'prompt', '問題']],
+    ['answer', ['答案', '正解', 'answer', 'correctanswer']],
+    ['optionA', ['選項a', 'a', 'opta', 'optiona']],
+    ['optionB', ['選項b', 'b', 'optb', 'optionb']],
+    ['optionC', ['選項c', 'c', 'optc', 'optionc']],
+    ['optionD', ['選項d', 'd', 'optd', 'optiond']],
+    ['type', ['題型', 'type', 'questiontype']],
+    ['difficulty', ['難度', '難易度', 'difficulty']],
+    ['course', ['課程', 'course']],
+    ['chapter', ['章節', '章', 'chapter', 'unit', '單元']],
+    ['section', ['小節', '節', 'section']],
+    ['tags', ['標籤', 'tags', 'tag']],
+    ['explanation', ['解析', '詳解', 'explanation']],
+    ['knowledgePoint', ['知識點', '概念', 'knowledgepoint', 'concept']],
+    ['teachingGoal', ['教學目標', '學習目標', 'teachinggoal', 'learningobjective']],
+    ['estimatedSolvingTime', ['預估作答時間', '作答時間', 'estimatedtime', 'solvingtime']],
+    ['sourceNote', ['來源備註', '來源', 'sourcenote', 'source']],
+    ['rightsRiskStatus', ['權利風險', '授權狀態', 'rightsrisk', 'rightsstatus']]
+  ];
+
+  for (const [field, aliases] of headerMap) {
+    if (aliases.some((alias) => key === headerKey(alias) || key.includes(headerKey(alias)))) return field;
+  }
+  return null;
+}
+
+function detectType(rawType, row) {
+  const type = headerKey(rawType);
+  if (['是非題', 'truefalse', 'tf', '判斷題'].some((item) => type.includes(headerKey(item)))) return 'true_false';
+  if (['簡答題', 'shortanswer', 'short'].some((item) => type.includes(headerKey(item)))) return 'short_answer';
+  if (['填空題', 'fillblank', 'blank'].some((item) => type.includes(headerKey(item)))) return 'fill_blank';
+  if (['配合題', 'matching', 'match'].some((item) => type.includes(headerKey(item)))) return 'matching';
+  if (['申論', '開放', 'essay', 'open'].some((item) => type.includes(headerKey(item)))) return 'essay';
+  if (['選擇題', 'multiplechoice', 'multiple_choice', 'choice', 'mc'].some((item) => type.includes(headerKey(item)))) return 'multiple_choice';
+  if (!row.optionC && !row.optionD) return 'true_false';
+  return 'multiple_choice';
+}
+
+function normalizeAnswer(rawAnswer, options, type) {
+  const raw = normalizeText(rawAnswer);
+  const upper = raw.toUpperCase();
+
+  if (type === 'true_false') {
+    if (['O', 'TRUE', 'T', '1', 'YES', 'Y', '對', '是', 'A'].includes(upper)) return 'A';
+    if (['X', 'FALSE', 'F', '0', 'NO', 'N', '錯', '否', 'B'].includes(upper)) return 'B';
+    return upper || '';
+  }
+
+  if (type === 'multiple_choice') {
+    const exact = Object.entries(options).find(([, value]) => normalizeText(value).toUpperCase() === upper);
+    if (exact) return exact[0];
+    if (['1', '2', '3', '4'].includes(upper)) return ['A', 'B', 'C', 'D'][Number(upper) - 1];
+    const match = upper.match(/[A-D]/);
+    return match ? match[0] : upper;
+  }
+
+  return raw;
+}
+
+function normalizeQuestion(row, defaults = {}) {
+  const type = detectType(row.type || row.Type || defaults.type, row);
+  const options = {
+    A: sanitizeCell(row.optionA || row.OptA || row.A || (type === 'true_false' ? 'O（是／對）' : '')),
+    B: sanitizeCell(row.optionB || row.OptB || row.B || (type === 'true_false' ? 'X（否／錯）' : '')),
+    C: sanitizeCell(row.optionC || row.OptC || row.C || ''),
+    D: sanitizeCell(row.optionD || row.OptD || row.D || '')
+  };
+  const prompt = sanitizeCell(row.prompt || row.Question || row.question);
+  const answer = normalizeAnswer(row.answer || row.Answer, options, type);
+  const tags = Array.isArray(row.tags)
+    ? row.tags.map(sanitizeCell).filter(Boolean)
+    : sanitizeCell(row.tags || defaults.tags || '').split(/[，,]/).map((tag) => tag.trim()).filter(Boolean);
+  const chapter = sanitizeCell(row.chapter || row.Chapter || defaults.chapter || '未分類');
+  const section = sanitizeCell(row.section || row.Section || defaults.section || '未分節');
+  const knowledgePoint = sanitizeCell(row.knowledgePoint || row.concept || defaults.knowledgePoint || '');
+  const teachingGoal = sanitizeCell(row.teachingGoal || row.learningObjective || defaults.teachingGoal || '');
+  const sourceNote = sanitizeCell(row.sourceNote || row.source || '');
+  const rightsRiskStatus = sanitizeCell(row.rightsRiskStatus || defaults.rightsRiskStatus || 'unchecked');
+  const estimatedSolvingTime = Number(row.estimatedSolvingTime || defaults.estimatedSolvingTime || 60);
+
+  return {
+    id: row.id || createId('q'),
+    type,
+    prompt,
+    options,
+    answer,
+    explanation: sanitizeCell(row.explanation || ''),
+    difficulty: sanitizeCell(row.difficulty || defaults.difficulty || 'medium'),
+    knowledgePoint,
+    teachingGoal,
+    estimatedSolvingTime: Number.isFinite(estimatedSolvingTime) && estimatedSolvingTime > 0 ? estimatedSolvingTime : 60,
+    tags,
+    course: sanitizeCell(row.course || defaults.course || ''),
+    chapter,
+    section,
+    unit: sanitizeCell(row.unit || defaults.unit || ''),
+    sourceNote,
+    rightsRiskStatus,
+    aiAssisted: Boolean(row.aiAssisted),
+    analyticsMetadata: row.analyticsMetadata || {},
+    createdAt: row.createdAt || nowIso(),
+    updatedAt: nowIso(),
+    deletedAt: row.deletedAt || null,
+    Question: prompt,
+    OptA: options.A,
+    OptB: options.B,
+    OptC: options.C,
+    OptD: options.D,
+    Answer: answer,
+    Chapter: chapter,
+    Section: section,
+    Type: type
+  };
+}
+
+function hasPossibleRightsRisk(question) {
+  const text = [
+    question.prompt,
+    question.sourceNote,
+    ...(question.tags || [])
+  ].join(' ').toLowerCase();
+  return ['課本', '出版社', '補習班', '考古題', '會考', '學測', '統測', 'toeic', '版權', 'copyright', 'textbook', 'publisher']
+    .some((keyword) => text.includes(keyword));
+}
+
+function hasPossiblePersonalData(question) {
+  const text = [question.prompt, question.explanation, question.sourceNote].join(' ');
+  return /[\w.-]+@[\w.-]+\.\w+/.test(text) || /09\d{8}/.test(text) || /(學生姓名|身分證|地址|電話|家長姓名)/.test(text);
+}
+
+function countBy(items, picker) {
+  return items.reduce((acc, item) => {
+    const key = picker(item) || '未標示';
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+}
+
+function percentage(part, total) {
+  if (!total) return 0;
+  return Math.round((part / total) * 100);
+}
+
+function generateQuestionBankHealthReport(bank) {
+  const questions = (bank.questions || []).filter((question) => !question.deletedAt);
+  const totalQuestions = questions.length;
+  const duplicateKeys = new Map();
+  questions.forEach((question) => {
+    const key = normalizePromptKey(question.prompt || question.Question);
+    if (!key) return;
+    duplicateKeys.set(key, (duplicateKeys.get(key) || 0) + 1);
+  });
+
+  const invalidQuestions = questions.filter((question) => {
+    if (!question.prompt) return true;
+    if (question.type !== 'essay' && !question.answer) return true;
+    if (question.type === 'multiple_choice' && (!question.options?.A || !question.options?.B)) return true;
+    return false;
+  });
+  const duplicateCandidates = Array.from(duplicateKeys.values()).filter((count) => count > 1).reduce((sum, count) => sum + count, 0);
+  const missingAnswers = questions.filter((question) => question.type !== 'essay' && !question.answer).length;
+  const missingOptions = questions.filter((question) => question.type === 'multiple_choice' && (!question.options?.A || !question.options?.B)).length;
+  const missingExplanations = questions.filter((question) => !question.explanation).length;
+  const rightsRiskQuestions = questions.filter(hasPossibleRightsRisk).length;
+  const personalDataCandidates = questions.filter(hasPossiblePersonalData).length;
+  const difficultyDistribution = countBy(questions, (question) => question.difficulty);
+  const typeDistribution = countBy(questions, (question) => question.type);
+  const knowledgeDistribution = countBy(questions, (question) => question.knowledgePoint);
+  const teachingGoalCoverage = questions.filter((question) => question.teachingGoal).length;
+  const knowledgeCoverage = questions.filter((question) => question.knowledgePoint).length;
+  const needsReview = invalidQuestions.length + duplicateCandidates + rightsRiskQuestions + personalDataCandidates;
+  const qualityScore = Math.max(0, Math.min(100,
+    100
+    - invalidQuestions.length * 8
+    - duplicateCandidates * 3
+    - missingExplanations * 1
+    - rightsRiskQuestions * 4
+    - personalDataCandidates * 8
+  ));
+
+  const suggestions = [];
+  if (missingExplanations) suggestions.push(`建議補上 ${missingExplanations} 題解析，讓學生複習時能理解錯因。`);
+  if (duplicateCandidates) suggestions.push(`偵測到 ${duplicateCandidates} 題疑似重複，建議合併或改寫。`);
+  if (knowledgeCoverage < totalQuestions) suggestions.push('建議補齊知識點標籤，方便後續依概念產生活動。');
+  if (rightsRiskQuestions) suggestions.push('部分題目 may involve textbook, publisher, or exam-provider rights; please confirm authorization.');
+  if (personalDataCandidates) suggestions.push('部分題目 potentially contains personal data; please remove student-identifiable information before use.');
+  if (!suggestions.length) suggestions.push('題庫格式健康度良好，可進一步建立活動或分享給其他老師。');
+
+  return {
+    generatedAt: nowIso(),
+    scope: 'phase_2_rule_based_ai_health_report',
+    disclaimer: 'This report is an AI-assisted, rule-based review. It may flag possible rights concerns, but it is not a legal conclusion. Please confirm authorization before uploading, sharing, exporting, or copying content.',
+    totals: {
+      totalQuestions,
+      validQuestions: totalQuestions - invalidQuestions.length,
+      invalidQuestions: invalidQuestions.length,
+      needsReview,
+      duplicateCandidates,
+      missingAnswers,
+      missingOptions,
+      missingExplanations,
+      possibleRightsRisk: rightsRiskQuestions,
+      possiblePersonalData: personalDataCandidates
+    },
+    qualityScore,
+    difficultyDistribution,
+    typeDistribution,
+    knowledgeCoverage: {
+      coveredQuestions: knowledgeCoverage,
+      coverageRate: percentage(knowledgeCoverage, totalQuestions),
+      distribution: knowledgeDistribution
+    },
+    teachingGoalCoverage: {
+      coveredQuestions: teachingGoalCoverage,
+      coverageRate: percentage(teachingGoalCoverage, totalQuestions)
+    },
+    classroomReadiness: {
+      estimatedUsability: qualityScore >= 85 ? 'ready' : qualityScore >= 65 ? 'usable_with_review' : 'needs_cleanup',
+      suggestedUse: qualityScore >= 85 ? '可用於即時測驗或課後複習。' : '建議先修正缺漏答案、解析與權利風險標記。'
+    },
+    suggestions
+  };
+}
+
+function createAiPreview(bank, actionType) {
+  const questions = (bank.questions || []).filter((question) => !question.deletedAt);
+  const sample = questions.slice(0, 8);
+  const previewItems = sample.map((question) => {
+    const before = {
+      id: question.id,
+      prompt: question.prompt,
+      explanation: question.explanation,
+      tags: question.tags || [],
+      difficulty: question.difficulty,
+      knowledgePoint: question.knowledgePoint || ''
+    };
+    const inferredTags = Array.from(new Set([
+      ...(question.tags || []),
+      question.chapter,
+      question.knowledgePoint,
+      question.type === 'true_false' ? '判斷概念' : '',
+      question.difficulty ? `難度:${question.difficulty}` : ''
+    ].filter(Boolean)));
+    const after = { ...before };
+
+    if (actionType === 'auto_tag') {
+      after.tags = inferredTags;
+      after.knowledgePoint = before.knowledgePoint || question.chapter || bank.chapter || '待確認知識點';
+    } else if (actionType === 'generate_explanations') {
+      after.explanation = before.explanation || `建議解析：請引導學生回到「${question.knowledgePoint || question.chapter || bank.subject || '本題核心概念'}」，確認題幹關鍵字與答案選項的對應關係。`;
+    } else if (actionType === 'improve_clarity') {
+      after.prompt = before.prompt ? before.prompt.replace(/\s+/g, ' ').trim() : before.prompt;
+      after.explanation = before.explanation || '建議補充解析，降低學生只記答案的風險。';
+    } else if (actionType === 'check_rights_risk') {
+      after.rightsRiskStatus = hasPossibleRightsRisk(question) ? 'potentially_requires_review' : 'no_obvious_signal';
+      after.note = hasPossibleRightsRisk(question)
+        ? 'This question may involve third-party teaching material or exam content; please confirm authorization.'
+        : 'No obvious rights-risk signal was detected by the rule-based check.';
+    }
+
+    return { questionId: question.id, before, after, aiAssisted: true };
+  });
+
+  return {
+    id: createId('ai_preview'),
+    actionType,
+    generatedAt: nowIso(),
+    status: 'preview_only',
+    disclaimer: 'AI-assisted suggestions are previews only. A teacher must review and confirm before any change is saved.',
+    items: previewItems
+  };
+}
+
+function validateQuestions(rawRows, principal, defaults = {}) {
+  const store = readStore();
+  const existingPrompts = new Set();
+  store.questionBanks
+    .filter((bank) => bank.ownerTeacherId === principal.userId && !bank.deletedAt)
+    .forEach((bank) => (bank.questions || []).forEach((question) => {
+      if (!question.deletedAt) existingPrompts.add(normalizePromptKey(question.prompt || question.Question));
+    }));
+
+  const seenPrompts = new Map();
+  const rows = rawRows
+    .filter((row) => row && Object.values(row).some((value) => normalizeText(value)))
+    .map((row, index) => {
+      const question = normalizeQuestion(row, defaults);
+      const errors = [];
+      const warnings = [];
+      const promptKey = normalizePromptKey(question.prompt);
+
+      if (!question.prompt) errors.push({ field: 'prompt', message: '缺少題目內容。' });
+      if (!question.answer && question.type !== 'essay') warnings.push({ field: 'answer', message: '缺少答案；開放題以外建議填寫答案。' });
+      if (!question.explanation) warnings.push({ field: 'explanation', message: '缺少解析，建議補充學生友善說明。', missingExplanation: true });
+      if (!question.knowledgePoint) warnings.push({ field: 'knowledgePoint', message: '尚未標示知識點，建議於儲存前補上。', needsReview: true });
+      if ([question.prompt, question.answer, question.explanation, question.sourceNote, ...Object.values(question.options || {})].some((value) => /^'[=+\-@]/.test(String(value || '')))) {
+        warnings.push({ field: 'spreadsheetSafety', message: '偵測到疑似試算表公式，已作為純文字處理。', needsReview: true });
+      }
+      if (hasPossibleRightsRisk(question)) warnings.push({ field: 'rightsRiskStatus', message: '可能涉及教材、出版社或考試來源，請確認授權。', rightsRisk: true });
+      if (hasPossiblePersonalData(question)) warnings.push({ field: 'prompt', message: '可能包含學生個資，請確認已移除或取得合法處理依據。', rightsRisk: true });
+      if (question.type === 'multiple_choice') {
+        if (!question.options.A || !question.options.B) errors.push({ field: 'options', message: '選擇題至少需要 A、B 兩個選項。' });
+        if (question.answer && !['A', 'B', 'C', 'D'].includes(question.answer)) errors.push({ field: 'answer', message: '選擇題答案需為 A、B、C 或 D。' });
+        if (question.answer && !question.options[question.answer]) warnings.push({ field: 'answer', message: '答案指向的選項目前沒有內容。' });
+      }
+      if (question.type === 'true_false' && question.answer && !['A', 'B'].includes(question.answer)) {
+        errors.push({ field: 'answer', message: '是非題答案需為 O/對/A 或 X/錯/B。' });
+      }
+      if (promptKey && seenPrompts.has(promptKey)) warnings.push({ field: 'prompt', message: `與第 ${seenPrompts.get(promptKey)} 列重複。`, duplicate: true });
+      if (promptKey && existingPrompts.has(promptKey)) warnings.push({ field: 'prompt', message: '與你既有題庫中的題目相似。', duplicate: true });
+      if (promptKey && !seenPrompts.has(promptKey)) seenPrompts.set(promptKey, index + 1);
+
+      return { rowNumber: index + 1, question, errors, warnings, valid: errors.length === 0 };
+    });
+
+  return {
+    rows,
+    summary: {
+      totalRows: rows.length,
+      validQuestions: rows.filter((row) => row.valid).length,
+      invalidRows: rows.filter((row) => !row.valid).length,
+      duplicateQuestions: rows.filter((row) => row.warnings.some((warning) => warning.duplicate)).length,
+      missingExplanations: rows.filter((row) => row.warnings.some((warning) => warning.missingExplanation)).length,
+      needsReview: rows.filter((row) => !row.valid || row.warnings.some((warning) => warning.needsReview || warning.rightsRisk)).length,
+      possibleRightsRisk: rows.filter((row) => row.warnings.some((warning) => warning.rightsRisk)).length,
+      questionsToCreate: rows.filter((row) => row.valid).length
+    }
+  };
+}
+
+function cellTextForImport(cell) {
+  const value = cell?.value;
+  if (value === null || value === undefined) return '';
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  if (typeof value !== 'object') return value;
+  if (Array.isArray(value.richText)) return value.richText.map((part) => part.text || '').join('');
+  if (value.formula) return value.result ?? '';
+  if (value.text) return value.text;
+  if (value.result !== undefined) return value.result;
+  return '';
+}
+
+async function parseWorkbookExcelJs(buffer) {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer, {
+    ignoreNodes: ['sheetProtection', 'dataValidations', 'conditionalFormatting', 'extLst']
+  });
+  const worksheet = workbook.worksheets[0];
+  if (!worksheet) throw new Error('Excel file does not contain a worksheet.');
+
+  const rows = [];
+  const columnCount = Math.min(Math.max(worksheet.columnCount || 0, 1), 80);
+  worksheet.eachRow({ includeEmpty: true }, (row) => {
+    const rowValues = [];
+    for (let columnIndex = 1; columnIndex <= columnCount; columnIndex += 1) {
+      rowValues.push(cellTextForImport(row.getCell(columnIndex)));
+    }
+    rows.push(rowValues);
+  });
+
+  let headerRowIdx = -1;
+  let columnMap = {};
+  for (let rowIndex = 0; rowIndex < Math.min(rows.length, 25); rowIndex += 1) {
+    const map = {};
+    rows[rowIndex].forEach((cell, colIndex) => {
+      const field = matchHeader(cell);
+      if (field && map[field] === undefined) map[field] = colIndex;
+    });
+    if (map.prompt !== undefined && map.answer !== undefined) {
+      headerRowIdx = rowIndex;
+      columnMap = map;
+      break;
+    }
+  }
+
+  if (headerRowIdx === -1) {
+    throw new Error('Unable to identify required question and answer columns in the Excel file.');
+  }
+
+  return rows.slice(headerRowIdx + 1).map((row) => {
+    const item = {};
+    Object.entries(columnMap).forEach(([field, colIndex]) => {
+      item[field] = sanitizeCell(row[colIndex]);
+    });
+    return item;
+  });
+}
+
+async function workbookBufferFromRows(rows, sheetName = 'Question Bank') {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'Shi Shuo Xin Yu';
+  workbook.created = new Date();
+  const worksheet = workbook.addWorksheet(sheetName);
+  const headers = Array.from(new Set(rows.flatMap((row) => Object.keys(row))));
+  worksheet.addRow(headers);
+  rows.forEach((row) => {
+    worksheet.addRow(headers.map((header) => sanitizeCell(row[header] ?? '')));
+  });
+  worksheet.getRow(1).font = { bold: true, color: { argb: 'FF1A1A1A' } };
+  worksheet.columns.forEach((column) => {
+    const lengths = column.values.slice(1).map((value) => normalizeText(value).length + 2);
+    column.width = Math.min(42, Math.max(12, ...lengths));
+  });
+  return Buffer.from(await workbook.xlsx.writeBuffer());
+}
+
+function snapshotQuestionBank(bank) {
+  return {
+    id: bank.id,
+    title: bank.title,
+    description: bank.description,
+    subject: bank.subject,
+    gradeLevel: bank.gradeLevel,
+    course: bank.course,
+    unit: bank.unit,
+    chapter: bank.chapter,
+    knowledgePoints: bank.knowledgePoints || [],
+    tags: bank.tags || [],
+    visibility: bank.visibility,
+    status: bank.status,
+    version: bank.version,
+    rightsRiskStatus: bank.rightsRiskStatus,
+    questions: (bank.questions || []).filter((question) => !question.deletedAt).map((question) => ({
+      id: question.id,
+      type: question.type,
+      prompt: question.prompt,
+      options: question.options,
+      answer: question.answer,
+      explanation: question.explanation,
+      difficulty: question.difficulty,
+      knowledgePoint: question.knowledgePoint,
+      teachingGoal: question.teachingGoal,
+      tags: question.tags || [],
+      rightsRiskStatus: question.rightsRiskStatus,
+      aiAssisted: Boolean(question.aiAssisted)
+    }))
+  };
+}
+
+function createVersionRecord(bank, principal, versionNumber, versionName, changeSummary) {
+  return {
+    id: createId('version'),
+    questionBankId: bank.id,
+    versionNumber,
+    versionName: sanitizeCell(versionName || `Version ${versionNumber}`),
+    changeSummary: sanitizeCell(changeSummary || ''),
+    snapshot: snapshotQuestionBank({ ...bank, version: versionNumber }),
+    createdBy: principal.userId,
+    createdAt: nowIso()
+  };
+}
+
+function compareQuestionBankSnapshots(baseSnapshot, targetSnapshot) {
+  const metadataFields = ['title', 'description', 'subject', 'gradeLevel', 'course', 'unit', 'chapter', 'visibility', 'status', 'rightsRiskStatus'];
+  const metadataChanges = metadataFields
+    .filter((field) => JSON.stringify(baseSnapshot?.[field] || '') !== JSON.stringify(targetSnapshot?.[field] || ''))
+    .map((field) => ({
+      field,
+      current: baseSnapshot?.[field] || '',
+      target: targetSnapshot?.[field] || ''
+    }));
+
+  const currentQuestions = new Map((baseSnapshot?.questions || []).map((question) => [question.id, question]));
+  const targetQuestions = new Map((targetSnapshot?.questions || []).map((question) => [question.id, question]));
+  const addedInTarget = [];
+  const removedInTarget = [];
+  const changedQuestions = [];
+
+  targetQuestions.forEach((question, id) => {
+    const current = currentQuestions.get(id);
+    if (!current) {
+      addedInTarget.push({ id, prompt: question.prompt });
+      return;
+    }
+    const changedFields = ['type', 'prompt', 'answer', 'explanation', 'difficulty', 'knowledgePoint', 'rightsRiskStatus']
+      .filter((field) => JSON.stringify(current[field] || '') !== JSON.stringify(question[field] || ''));
+    if (changedFields.length) {
+      changedQuestions.push({
+        id,
+        prompt: question.prompt || current.prompt,
+        changedFields,
+        currentPrompt: current.prompt,
+        targetPrompt: question.prompt
+      });
+    }
+  });
+
+  currentQuestions.forEach((question, id) => {
+    if (!targetQuestions.has(id)) removedInTarget.push({ id, prompt: question.prompt });
+  });
+
+  return {
+    comparedAt: nowIso(),
+    metadataChanges,
+    questionSummary: {
+      currentQuestionCount: currentQuestions.size,
+      targetQuestionCount: targetQuestions.size,
+      addedInTargetCount: addedInTarget.length,
+      removedInTargetCount: removedInTarget.length,
+      changedQuestionCount: changedQuestions.length
+    },
+    addedInTarget,
+    removedInTarget,
+    changedQuestions
+  };
+}
+
+function restoreBankFromSnapshot(bank, snapshot) {
+  const metadataFields = ['title', 'description', 'subject', 'gradeLevel', 'course', 'unit', 'chapter', 'knowledgePoints', 'tags', 'visibility', 'rightsRiskStatus'];
+  metadataFields.forEach((field) => {
+    if (snapshot[field] !== undefined) bank[field] = snapshot[field];
+  });
+  bank.name = bank.title;
+  bank.status = snapshot.status && snapshot.status !== 'deleted' ? snapshot.status : 'active';
+  bank.deletedAt = null;
+  bank.questions = (snapshot.questions || []).map((question) => normalizeQuestion({
+    id: question.id || createId('q'),
+    type: question.type,
+    prompt: question.prompt,
+    optionA: question.options?.A,
+    optionB: question.options?.B,
+    optionC: question.options?.C,
+    optionD: question.options?.D,
+    answer: question.answer,
+    explanation: question.explanation,
+    difficulty: question.difficulty,
+    knowledgePoint: question.knowledgePoint,
+    teachingGoal: question.teachingGoal,
+    tags: question.tags || [],
+    rightsRiskStatus: question.rightsRiskStatus,
+    aiAssisted: question.aiAssisted,
+    createdAt: question.createdAt,
+    deletedAt: null
+  }, bank));
+}
+
+function ensureVersionHistory(bank, principal) {
+  if (Array.isArray(bank.versions) && bank.versions.length > 0) return;
+  bank.versions = [
+    createVersionRecord(
+      bank,
+      principal,
+      sanitizeCell(bank.version || '1.0'),
+      'Baseline',
+      'Initial version history record created for this question bank.'
+    )
+  ];
+}
+
+function nextMinorVersion(currentVersion) {
+  const match = sanitizeCell(currentVersion || '1.0').match(/^(\d+)(?:\.(\d+))?/);
+  if (!match) return '1.1';
+  const major = Number(match[1]);
+  const minor = Number(match[2] || 0);
+  return `${major}.${minor + 1}`;
+}
+
+function applyAiPreviewToBank(bank, preview) {
+  const beforeSnapshot = snapshotQuestionBank(bank);
+  const updatedQuestionIds = [];
+
+  (preview.items || []).forEach((item) => {
+    const question = (bank.questions || []).find((candidate) => candidate.id === item.questionId && !candidate.deletedAt);
+    if (!question) return;
+    const after = item.after || {};
+    if (typeof after.prompt === 'string') question.prompt = sanitizeCell(after.prompt);
+    if (typeof after.explanation === 'string') question.explanation = sanitizeCell(after.explanation);
+    if (Array.isArray(after.tags)) question.tags = after.tags.map(sanitizeCell).filter(Boolean);
+    if (typeof after.difficulty === 'string') question.difficulty = sanitizeCell(after.difficulty);
+    if (typeof after.knowledgePoint === 'string') question.knowledgePoint = sanitizeCell(after.knowledgePoint);
+    if (typeof after.rightsRiskStatus === 'string') question.rightsRiskStatus = sanitizeCell(after.rightsRiskStatus);
+    question.aiAssisted = true;
+    question.updatedAt = nowIso();
+    question.Question = question.prompt;
+    updatedQuestionIds.push(question.id);
+  });
+
+  return { beforeSnapshot, updatedQuestionIds };
+}
+
+function createActivityCode() {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+function questionMatchesActivityFilters(question, filters = {}) {
+  if (filters.difficulty && filters.difficulty !== 'any' && question.difficulty !== filters.difficulty) return false;
+  if (filters.questionType && filters.questionType !== 'any' && question.type !== filters.questionType) return false;
+  if (filters.knowledgePoint) {
+    const haystack = [
+      question.knowledgePoint,
+      question.chapter,
+      question.section,
+      ...(question.tags || [])
+    ].join(' ').toLowerCase();
+    if (!haystack.includes(String(filters.knowledgePoint).toLowerCase())) return false;
+  }
+  return true;
+}
+
+function toPlayableQuestion(question) {
+  return {
+    id: question.id,
+    questionBankId: question.questionBankId,
+    Question: question.prompt || question.Question,
+    prompt: question.prompt || question.Question,
+    OptA: question.options?.A || question.OptA || '',
+    OptB: question.options?.B || question.OptB || '',
+    OptC: question.options?.C || question.OptC || '',
+    OptD: question.options?.D || question.OptD || '',
+    options: question.options || {
+      A: question.OptA || '',
+      B: question.OptB || '',
+      C: question.OptC || '',
+      D: question.OptD || ''
+    },
+    Answer: question.answer || question.Answer,
+    answer: question.answer || question.Answer,
+    explanation: question.explanation || '',
+    Type: question.type,
+    type: question.type,
+    Chapter: question.chapter || '未分類',
+    Section: question.section || '未分節',
+    difficulty: question.difficulty,
+    knowledgePoint: question.knowledgePoint,
+    teachingGoal: question.teachingGoal,
+    estimatedSolvingTime: question.estimatedSolvingTime
+  };
+}
+
+function generateActivityFromQuestionBank(bank, principal, options = {}) {
+  const activityType = sanitizeCell(options.activityType || 'live_quiz');
+  const supportedTypes = ['quick_warmup', 'live_quiz', 'homework', 'formal_quiz', 'review_practice', 'group_battle', 'remedial_task', 'challenge_task'];
+  const type = supportedTypes.includes(activityType) ? activityType : 'live_quiz';
+  const requestedCount = Number(options.questionCount || 10);
+  const questionCount = Number.isFinite(requestedCount) ? Math.max(1, Math.min(100, requestedCount)) : 10;
+  const filters = {
+    difficulty: sanitizeCell(options.difficulty || 'any'),
+    questionType: sanitizeCell(options.questionType || 'any'),
+    knowledgePoint: sanitizeCell(options.knowledgePoint || '')
+  };
+  const pool = (bank.questions || [])
+    .filter((question) => !question.deletedAt)
+    .filter((question) => questionMatchesActivityFilters(question, filters));
+  const randomize = options.randomize !== false;
+  const selected = (randomize ? [...pool].sort(() => 0.5 - Math.random()) : pool).slice(0, questionCount);
+  if (!selected.length) {
+    const error = new Error('No usable questions matched the selected activity settings.');
+    error.status = 422;
+    throw error;
+  }
+
+  const timestamp = nowIso();
+  const activity = {
+    id: createId('activity'),
+    code: createActivityCode(),
+    questionBankId: bank.id,
+    questionBankTitle: bank.title,
+    ownerTeacherId: bank.ownerTeacherId,
+    createdBy: principal.userId,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    activityType: type,
+    title: sanitizeCell(options.title || `${bank.title} - ${type}`),
+    status: 'draft',
+    questionCount: selected.length,
+    sourceQuestionIds: selected.map((question) => question.id),
+    questions: selected.map((question) => toPlayableQuestion({ ...question, questionBankId: bank.id })),
+    settings: {
+      timeLimit: Math.max(10, Math.min(600, Number(options.timeLimit || 60))),
+      randomize,
+      showAnswer: options.showAnswer !== false,
+      showExplanation: Boolean(options.showExplanation),
+      allowRetry: Boolean(options.allowRetry),
+      leaderboard: options.leaderboard !== false,
+      participantMode: sanitizeCell(options.participantMode || 'individual'),
+      anonymous: Boolean(options.anonymous),
+      filters
+    }
+  };
+  return activity;
+}
+
+function recordStudentAnswer(store, payload) {
+  const question = payload.question || {};
+  const questionBankId = sanitizeCell(payload.questionBankId || question.questionBankId || '');
+  const questionId = sanitizeCell(payload.questionId || question.id || `${payload.roomId}_${payload.qIndex}`);
+  const selectedAnswer = sanitizeCell(payload.selectedAnswer || '');
+  const correctAnswer = sanitizeCell(payload.correctAnswer || question.Answer || question.answer || '');
+  const isCorrect = Boolean(payload.isCorrect);
+  const submittedAt = nowIso();
+  const answer = {
+    id: createId('answer'),
+    studentId: sanitizeCell(payload.studentId || ''),
+    studentName: sanitizeCell(payload.studentName || ''),
+    teacherUserId: sanitizeCell(payload.teacherUserId || ''),
+    classId: sanitizeCell(payload.classId || payload.roomId || ''),
+    activityId: sanitizeCell(payload.activityId || ''),
+    roomId: sanitizeCell(payload.roomId || ''),
+    questionId,
+    questionBankId,
+    selectedAnswer,
+    correctAnswer,
+    isCorrect,
+    timeSpent: Number(payload.timeSpent || 0),
+    attemptCount: Number(payload.attemptCount || 1),
+    score: Number(payload.score || 0),
+    knowledgePoint: sanitizeCell(question.knowledgePoint || question.Chapter || question.chapter || ''),
+    difficulty: sanitizeCell(question.difficulty || ''),
+    questionPrompt: sanitizeCell(question.prompt || question.Question || ''),
+    submittedAt
+  };
+  store.studentAnswers.unshift(answer);
+
+  if (questionBankId && questionId) {
+    let analytics = store.questionAnalytics.find((item) => item.questionId === questionId && item.questionBankId === questionBankId);
+    if (!analytics) {
+      analytics = {
+        id: createId('analytics'),
+        questionId,
+        questionBankId,
+        timesUsed: 0,
+        correctCount: 0,
+        totalAnswerTime: 0,
+        commonWrongAnswers: {},
+        detectedDifficulty: 'unknown',
+        teachingInsight: '',
+        updatedAt: submittedAt
+      };
+      store.questionAnalytics.push(analytics);
+    }
+    analytics.timesUsed += 1;
+    analytics.correctCount += isCorrect ? 1 : 0;
+    analytics.totalAnswerTime += answer.timeSpent;
+    if (!isCorrect && selectedAnswer) {
+      analytics.commonWrongAnswers[selectedAnswer] = (analytics.commonWrongAnswers[selectedAnswer] || 0) + 1;
+    }
+    analytics.accuracyRate = Math.round((analytics.correctCount / analytics.timesUsed) * 100);
+    analytics.averageAnswerTime = Math.round((analytics.totalAnswerTime / analytics.timesUsed) * 10) / 10;
+    analytics.detectedDifficulty = analytics.accuracyRate >= 80 ? 'easy' : analytics.accuracyRate >= 50 ? 'medium' : 'hard';
+    analytics.teachingInsight = analytics.accuracyRate < 50
+      ? 'Students may need a follow-up explanation or remedial practice for this concept.'
+      : 'Performance is currently within an expected range.';
+    analytics.updatedAt = submittedAt;
+  }
+
+  return answer;
+}
+
+function buildWeaknessReport(store, bank, principal) {
+  const answers = (store.studentAnswers || []).filter((answer) => (
+    answer.questionBankId === bank.id &&
+    !answer.deletedAt &&
+    (isAdmin(principal) || answer.teacherUserId === principal.userId)
+  ));
+  const totalAnswers = answers.length;
+  const incorrectAnswers = answers.filter((answer) => !answer.isCorrect);
+  const conceptStats = {};
+  incorrectAnswers.forEach((answer) => {
+    const key = answer.knowledgePoint || '未標示知識點';
+    if (!conceptStats[key]) conceptStats[key] = { knowledgePoint: key, incorrect: 0, total: 0 };
+    conceptStats[key].incorrect += 1;
+  });
+  answers.forEach((answer) => {
+    const key = answer.knowledgePoint || '未標示知識點';
+    if (!conceptStats[key]) conceptStats[key] = { knowledgePoint: key, incorrect: 0, total: 0 };
+    conceptStats[key].total += 1;
+  });
+  const concepts = Object.values(conceptStats)
+    .map((item) => ({
+      ...item,
+      incorrectRate: item.total ? Math.round((item.incorrect / item.total) * 100) : 0
+    }))
+    .sort((a, b) => b.incorrectRate - a.incorrectRate || b.incorrect - a.incorrect);
+  const mostMissedConcept = concepts[0] || null;
+  const weakQuestions = (store.questionAnalytics || [])
+    .filter((item) => item.questionBankId === bank.id && item.timesUsed > 0)
+    .sort((a, b) => (a.accuracyRate || 100) - (b.accuracyRate || 100))
+    .slice(0, 8);
+
+  return {
+    generatedAt: nowIso(),
+    questionBankId: bank.id,
+    questionBankTitle: bank.title,
+    totalAnswers,
+    incorrectAnswers: incorrectAnswers.length,
+    incorrectRate: totalAnswers ? Math.round((incorrectAnswers.length / totalAnswers) * 100) : 0,
+    mostMissedConcept,
+    concepts,
+    weakQuestions,
+    suggestedAction: mostMissedConcept
+      ? `Review ${mostMissedConcept.knowledgePoint} and create a short follow-up practice.`
+      : '尚無足夠答題資料，建議先用此題庫建立一次即時測驗。',
+    recommendedFollowUp: mostMissedConcept
+      ? `5-minute warm-up quiz for ${mostMissedConcept.knowledgePoint}`
+      : '先累積學生作答資料'
+  };
+}
+
+function createQuestionBank({ principal, metadata, questions, legalAcknowledged }) {
+  const timestamp = nowIso();
+  const id = createId('qb');
+  const title = sanitizeCell(metadata.title || metadata.name || '未命名題庫');
+  const bank = {
+    id,
+    title,
+    name: title,
+    description: sanitizeCell(metadata.description || ''),
+    ownerTeacherId: principal.userId,
+    ownerTeacherName: principal.displayName || principal.email || principal.userId,
+    createdBy: principal.userId,
+    updatedBy: principal.userId,
+    organizationId: sanitizeCell(metadata.organizationId || principal.organizationId),
+    schoolId: sanitizeCell(metadata.schoolId || principal.schoolId),
+    subject: sanitizeCell(metadata.subject || ''),
+    gradeLevel: sanitizeCell(metadata.gradeLevel || ''),
+    course: sanitizeCell(metadata.course || ''),
+    unit: sanitizeCell(metadata.unit || ''),
+    chapter: sanitizeCell(metadata.chapter || ''),
+    knowledgePoints: Array.isArray(metadata.knowledgePoints)
+      ? metadata.knowledgePoints.map(sanitizeCell).filter(Boolean)
+      : sanitizeCell(metadata.knowledgePoints || '').split(/[，,]/).map((item) => item.trim()).filter(Boolean),
+    tags: Array.isArray(metadata.tags) ? metadata.tags.map(sanitizeCell).filter(Boolean) : sanitizeCell(metadata.tags || '').split(/[，,]/).map((tag) => tag.trim()).filter(Boolean),
+    visibility: sanitizeCell(metadata.visibility || 'private'),
+    usageScenarios: Array.isArray(metadata.usageScenarios) ? metadata.usageScenarios.map(sanitizeCell).filter(Boolean) : [],
+    version: sanitizeCell(metadata.version || '1.0'),
+    rightsRiskStatus: sanitizeCell(metadata.rightsRiskStatus || 'unchecked'),
+    sharingSettings: { allowExport: Boolean(metadata.allowExport), allowCopy: Boolean(metadata.allowCopy) },
+    permissionMetadata: { ownerOnlyEdit: true, sharedUsersReadOnlyByDefault: true },
+    legalAcknowledgedAt: legalAcknowledged ? timestamp : null,
+    legalAcknowledgedBy: legalAcknowledged ? principal.userId : null,
+    status: 'active',
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    deletedAt: null,
+    originalQuestionBankId: metadata.originalQuestionBankId || null,
+    originalOwnerTeacherId: metadata.originalOwnerTeacherId || null,
+    copiedFrom: metadata.copiedFrom || null,
+    copiedAt: metadata.copiedAt || null,
+    attributionNotice: metadata.attributionNotice || '',
+    versions: [],
+    questions
+  };
+  bank.versions.push(createVersionRecord(bank, principal, bank.version, 'Version 1.0', 'Question bank created.'));
+  return bank;
+}
+
+const excelUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_UPLOAD_BYTES },
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    if (ext !== '.xlsx') return cb(new Error('Unsupported file format. Please upload an .xlsx file.'));
+    cb(null, true);
+  }
+});
+
+app.use('/api/question-banks', requirePrincipal);
+app.use('/api/admin', requirePrincipal);
+
+app.get('/api/question-banks/template', async (req, res) => {
+  const excelBuffer = await workbookBufferFromRows([
+    {
+      type: 'multiple_choice',
+      question: 'Sample question prompt',
+      optionA: 'Option A',
+      optionB: 'Option B',
+      optionC: 'Option C',
+      optionD: 'Option D',
+      answer: 'B',
+      difficulty: 'medium',
+      course: 'Course name',
+      chapter: 'Chapter name',
+      section: 'Section name',
+      tags: 'tag1,tag2',
+      explanation: 'Optional explanation',
+      knowledgePoint: 'Knowledge point',
+      teachingGoal: 'Teaching goal',
+      estimatedSolvingTime: '60',
+      sourceNote: 'Source or rights note'
+    }
+  ], 'Question Bank Template');
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', 'attachment; filename="question-bank-template.xlsx"');
+  return res.send(excelBuffer);
+});
+
+app.get('/api/question-banks', (req, res) => {
+  const store = readStore();
+  const banks = store.questionBanks
+    .filter((bank) => getPermission(store, bank, req.principal).canView)
+    .map((bank) => publicBank(store, bank, req.principal));
+  res.json(banks);
+});
+
+app.get('/api/question-banks/:id', (req, res) => {
+  const store = readStore();
+  const bank = findBankOr404(store, req.params.id, res);
+  if (!bank) return;
+  const permission = getPermission(store, bank, req.principal);
+  if (!permission.canView) return res.status(403).json({ error: 'You do not have access to this question bank.' });
+  addAudit(store, req.principal, 'VIEW_QUESTION_BANK', 'questionBank', bank.id, { targetQuestionBankId: bank.id });
+  writeStore(store);
+  res.json(publicBank(store, bank, req.principal));
+});
+
+app.post('/api/question-banks/validate-preview', rateLimitMutations, (req, res) => {
+  res.json(validateQuestions(req.body.questions || [], req.principal, req.body.defaults || {}));
+});
+
+app.post('/api/question-banks/import/preview', rateLimitMutations, (req, res) => {
+  excelUpload.single('file')(req, res, async (error) => {
+    if (error) return res.status(400).json({ error: error.message });
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded.' });
+
+    try {
+      const defaults = req.body.defaults ? JSON.parse(req.body.defaults) : {};
+      res.json(validateQuestions(await parseWorkbookExcelJs(req.file.buffer), req.principal, defaults));
+    } catch (parseError) {
+      res.status(400).json({ error: parseError.message });
+    }
+  });
+});
+
+app.post('/api/question-banks/import/commit', rateLimitMutations, (req, res) => {
+  const { metadata = {}, rows = [], legalAcknowledged } = req.body;
+  if (!legalAcknowledged) return res.status(400).json({ error: 'Legal acknowledgement is required before import.' });
+
+  const preview = validateQuestions(rows.map((row) => row.question || row), req.principal, metadata);
+  if (preview.summary.invalidRows > 0) return res.status(422).json({ error: 'Import contains validation errors.', preview });
+
+  const store = readStore();
+  const bank = createQuestionBank({ principal: req.principal, metadata, questions: preview.rows.map((row) => row.question), legalAcknowledged });
+  store.questionBanks.push(bank);
+  addAudit(store, req.principal, 'IMPORT_QUESTION_BANK', 'questionBank', bank.id, {
+    targetQuestionBankId: bank.id,
+    summary: preview.summary,
+    legalAcknowledged: true
+  });
+  writeStore(store);
+  res.status(201).json(publicBank(store, bank, req.principal));
+});
+
+app.post('/api/question-banks', rateLimitMutations, (req, res) => {
+  const { metadata = {}, questions = [], legalAcknowledged } = req.body;
+  if (!legalAcknowledged) return res.status(400).json({ error: 'Legal acknowledgement is required.' });
+
+  const preview = validateQuestions(questions, req.principal, metadata);
+  if (preview.summary.invalidRows > 0) return res.status(422).json({ error: 'Question bank contains validation errors.', preview });
+
+  const store = readStore();
+  const bank = createQuestionBank({ principal: req.principal, metadata, questions: preview.rows.map((row) => row.question), legalAcknowledged });
+  store.questionBanks.push(bank);
+  addAudit(store, req.principal, 'CREATE_QUESTION_BANK', 'questionBank', bank.id, { targetQuestionBankId: bank.id, count: bank.questions.length });
+  writeStore(store);
+  res.status(201).json(publicBank(store, bank, req.principal));
+});
+
+app.patch('/api/question-banks/:id', rateLimitMutations, (req, res) => {
+  const store = readStore();
+  const bank = findBankOr404(store, req.params.id, res);
+  if (!bank) return;
+  const permission = getPermission(store, bank, req.principal);
+  if (!permission.canEdit) return res.status(403).json({ error: 'Only the owner or admin can edit this question bank.' });
+
+  const before = { title: bank.title, tags: bank.tags, chapter: bank.chapter, visibility: bank.visibility };
+  ['title', 'description', 'subject', 'gradeLevel', 'course', 'chapter', 'visibility'].forEach((field) => {
+    if (req.body[field] !== undefined) bank[field] = sanitizeCell(req.body[field]);
+  });
+  if (req.body.tags !== undefined) bank.tags = Array.isArray(req.body.tags) ? req.body.tags.map(sanitizeCell) : sanitizeCell(req.body.tags).split(/[，,]/).filter(Boolean);
+  bank.name = bank.title;
+  bank.updatedAt = nowIso();
+  bank.updatedBy = req.principal.userId;
+  addAudit(store, req.principal, 'UPDATE_QUESTION_BANK_METADATA', 'questionBank', bank.id, {
+    targetQuestionBankId: bank.id,
+    before,
+    after: { title: bank.title, tags: bank.tags, chapter: bank.chapter, visibility: bank.visibility }
+  });
+  writeStore(store);
+  res.json(publicBank(store, bank, req.principal));
+});
+
+app.post('/api/question-banks/:id/questions', rateLimitMutations, (req, res) => {
+  const store = readStore();
+  const bank = findBankOr404(store, req.params.id, res);
+  if (!bank) return;
+  if (!getPermission(store, bank, req.principal).canEdit) return res.status(403).json({ error: 'Only the owner or admin can add questions.' });
+
+  const preview = validateQuestions([req.body], req.principal, bank);
+  if (preview.summary.invalidRows > 0) return res.status(422).json({ error: 'Question has validation errors.', preview });
+  const question = preview.rows[0].question;
+  bank.questions.push(question);
+  bank.updatedAt = nowIso();
+  bank.updatedBy = req.principal.userId;
+  addAudit(store, req.principal, 'ADD_QUESTION', 'question', question.id, { targetQuestionBankId: bank.id, targetQuestionId: question.id });
+  writeStore(store);
+  res.status(201).json(question);
+});
+
+app.patch('/api/question-banks/:id/questions/:questionId', rateLimitMutations, (req, res) => {
+  const store = readStore();
+  const bank = findBankOr404(store, req.params.id, res);
+  if (!bank) return;
+  if (!getPermission(store, bank, req.principal).canEdit) return res.status(403).json({ error: 'Only the owner or admin can edit questions.' });
+
+  const questionIndex = (bank.questions || []).findIndex((question) => question.id === req.params.questionId && !question.deletedAt);
+  if (questionIndex === -1) return res.status(404).json({ error: 'Question not found.' });
+  const before = bank.questions[questionIndex];
+  bank.questions[questionIndex] = normalizeQuestion({ ...before, ...req.body, id: before.id, createdAt: before.createdAt }, bank);
+  bank.updatedAt = nowIso();
+  bank.updatedBy = req.principal.userId;
+  addAudit(store, req.principal, 'UPDATE_QUESTION', 'question', before.id, {
+    targetQuestionBankId: bank.id,
+    targetQuestionId: before.id,
+    before,
+    after: bank.questions[questionIndex]
+  });
+  writeStore(store);
+  res.json(bank.questions[questionIndex]);
+});
+
+app.delete('/api/question-banks/:id/questions/:questionId', rateLimitMutations, (req, res) => {
+  const store = readStore();
+  const bank = findBankOr404(store, req.params.id, res);
+  if (!bank) return;
+  if (!getPermission(store, bank, req.principal).canEdit) return res.status(403).json({ error: 'Only the owner or admin can delete questions.' });
+
+  const question = (bank.questions || []).find((item) => item.id === req.params.questionId && !item.deletedAt);
+  if (!question) return res.status(404).json({ error: 'Question not found.' });
+  question.deletedAt = nowIso();
+  question.updatedAt = nowIso();
+  bank.updatedAt = nowIso();
+  bank.updatedBy = req.principal.userId;
+  addAudit(store, req.principal, 'DELETE_QUESTION', 'question', question.id, { targetQuestionBankId: bank.id, targetQuestionId: question.id, reason: req.body?.reason });
+  writeStore(store);
+  res.json({ ok: true });
+});
+
+app.delete('/api/question-banks/:id', rateLimitMutations, (req, res) => {
+  const store = readStore();
+  const bank = findBankOr404(store, req.params.id, res);
+  if (!bank) return;
+  if (!getPermission(store, bank, req.principal).canDelete) return res.status(403).json({ error: 'Only the owner or admin can delete this question bank.' });
+
+  bank.deletedAt = nowIso();
+  bank.status = 'deleted';
+  bank.updatedAt = nowIso();
+  bank.updatedBy = req.principal.userId;
+  addAudit(store, req.principal, 'DELETE_QUESTION_BANK', 'questionBank', bank.id, { targetQuestionBankId: bank.id, reason: req.body?.reason });
+  writeStore(store);
+  res.json({ ok: true });
+});
+
+app.post('/api/question-banks/:id/restore', rateLimitMutations, (req, res) => {
+  const store = readStore();
+  const bank = findBankOr404(store, req.params.id, res);
+  if (!bank) return;
+  const canRestore = isAdmin(req.principal) || bank.ownerTeacherId === req.principal.userId;
+  if (!canRestore) return res.status(403).json({ error: 'Only the owner or admin can restore this question bank.' });
+  const beforeSnapshot = snapshotQuestionBank(bank);
+  bank.deletedAt = null;
+  bank.status = 'active';
+  bank.updatedAt = nowIso();
+  bank.updatedBy = req.principal.userId;
+  addAudit(store, req.principal, 'RESTORE_QUESTION_BANK', 'questionBank', bank.id, {
+    targetQuestionBankId: bank.id,
+    beforeSnapshot,
+    afterSnapshot: snapshotQuestionBank(bank),
+    reason: sanitizeCell(req.body?.reason || '')
+  });
+  writeStore(store);
+  res.json(publicBank(store, bank, req.principal));
+});
+
+app.post('/api/question-banks/:id/share', rateLimitMutations, (req, res) => {
+  const store = readStore();
+  const bank = findBankOr404(store, req.params.id, res);
+  if (!bank) return;
+  if (!getPermission(store, bank, req.principal).canShare) return res.status(403).json({ error: 'Only the owner can share this question bank.' });
+  if (!req.body.legalAcknowledged) return res.status(400).json({ error: 'Legal acknowledgement is required before sharing.' });
+
+  const sharedWithTeacherId = sanitizeCell(req.body.sharedWithTeacherId || req.body.email);
+  if (!sharedWithTeacherId) return res.status(400).json({ error: 'A teacher id or email is required.' });
+
+  const share = {
+    id: createId('share'),
+    questionBankId: bank.id,
+    ownerTeacherId: bank.ownerTeacherId,
+    sharedWithTeacherId,
+    sharedWithTeacherName: sanitizeCell(req.body.sharedWithTeacherName || sharedWithTeacherId),
+    permissionLevel: sanitizeCell(req.body.permissionLevel || 'use_readonly'),
+    canUse: true,
+    canExport: Boolean(req.body.canExport),
+    canCopy: Boolean(req.body.canCopy),
+    expiresAt: req.body.expiresAt || null,
+    createdAt: nowIso(),
+    revokedAt: null,
+    createdBy: req.principal.userId
+  };
+  store.shares.push(share);
+  addAudit(store, req.principal, 'SHARE_QUESTION_BANK', 'questionBankShare', share.id, { targetQuestionBankId: bank.id, share });
+  writeStore(store);
+  res.status(201).json(share);
+});
+
+app.delete('/api/question-banks/:id/share/:shareId', rateLimitMutations, (req, res) => {
+  const store = readStore();
+  const bank = findBankOr404(store, req.params.id, res);
+  if (!bank) return;
+  if (!getPermission(store, bank, req.principal).canShare) return res.status(403).json({ error: 'Only the owner can revoke sharing.' });
+
+  const share = store.shares.find((item) => item.id === req.params.shareId && item.questionBankId === bank.id && !item.revokedAt);
+  if (!share) return res.status(404).json({ error: 'Share not found.' });
+  share.revokedAt = nowIso();
+  addAudit(store, req.principal, 'REVOKE_QUESTION_BANK_SHARE', 'questionBankShare', share.id, { targetQuestionBankId: bank.id, share });
+  writeStore(store);
+  res.json({ ok: true });
+});
+
+app.post('/api/question-banks/:id/export', rateLimitMutations, async (req, res) => {
+  const store = readStore();
+  const bank = findBankOr404(store, req.params.id, res);
+  if (!bank) return;
+  if (!getPermission(store, bank, req.principal).canExport) return res.status(403).json({ error: 'Export is not allowed for this question bank.' });
+
+  const rows = (bank.questions || []).filter((question) => !question.deletedAt).map((question) => ({
+    題型: question.type,
+    題目: question.prompt,
+    選項A: question.options?.A || '',
+    選項B: question.options?.B || '',
+    選項C: question.options?.C || '',
+    選項D: question.options?.D || '',
+    答案: question.answer,
+    難易度: question.difficulty,
+    課程: question.course,
+    章節: question.chapter,
+    小節: question.section,
+    標籤: (question.tags || []).join(','),
+    解析: question.explanation
+  }));
+  const excelBuffer = await workbookBufferFromRows(rows, 'Question Bank Export');
+  addAudit(store, req.principal, 'EXPORT_QUESTION_BANK', 'questionBank', bank.id, { targetQuestionBankId: bank.id, count: rows.length });
+  writeStore(store);
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(bank.title)}.xlsx"`);
+  return res.send(excelBuffer);
+});
+
+app.post('/api/question-banks/:id/copy', rateLimitMutations, (req, res) => {
+  const store = readStore();
+  const source = findBankOr404(store, req.params.id, res);
+  if (!source) return;
+  if (!getPermission(store, source, req.principal).canCopy) return res.status(403).json({ error: 'Copying is not allowed for this question bank.' });
+
+  const metadata = {
+    ...source,
+    title: `${source.title}（副本）`,
+    originalQuestionBankId: source.id,
+    originalOwnerTeacherId: source.ownerTeacherId,
+    copiedFrom: source.id,
+    copiedAt: nowIso(),
+    attributionNotice: `本題庫複製自 ${source.ownerTeacherName || source.ownerTeacherId} 的「${source.title}」，分享或複製不代表轉讓底層智慧財產權。`
+  };
+  const questions = (source.questions || []).filter((question) => !question.deletedAt).map((question) => normalizeQuestion({ ...question, id: createId('q') }, source));
+  const bank = createQuestionBank({ principal: req.principal, metadata, questions, legalAcknowledged: true });
+  store.questionBanks.push(bank);
+  addAudit(store, req.principal, 'COPY_QUESTION_BANK', 'questionBank', bank.id, { targetQuestionBankId: bank.id, sourceQuestionBankId: source.id });
+  writeStore(store);
+  res.status(201).json(publicBank(store, bank, req.principal));
+});
+
+app.post('/api/question-banks/:id/schedule', rateLimitMutations, (req, res) => {
+  const store = readStore();
+  const bank = findBankOr404(store, req.params.id, res);
+  if (!bank) return;
+  if (!getPermission(store, bank, req.principal).canUse) return res.status(403).json({ error: 'You cannot use this question bank in class or assignments.' });
+  addAudit(store, req.principal, 'SCHEDULE_QUESTION_BANK', 'questionBank', bank.id, { targetQuestionBankId: bank.id, context: req.body || {} });
+  writeStore(store);
+  res.json({ ok: true });
+});
+
+app.post('/api/question-banks/:id/activities', rateLimitMutations, (req, res) => {
+  const store = readStore();
+  const bank = findBankOr404(store, req.params.id, res);
+  if (!bank) return;
+  const permission = getPermission(store, bank, req.principal);
+  if (!permission.canUse) return res.status(403).json({ error: 'You cannot create classroom activities from this question bank.' });
+
+  try {
+    const activity = generateActivityFromQuestionBank(bank, req.principal, req.body || {});
+    store.activities.unshift(activity);
+    addAudit(store, req.principal, 'CREATE_ACTIVITY_FROM_QUESTION_BANK', 'activity', activity.id, {
+      targetQuestionBankId: bank.id,
+      activityId: activity.id,
+      activityType: activity.activityType,
+      questionCount: activity.questionCount,
+      sharedAccess: !permission.isOwner && Boolean(permission.share)
+    });
+    writeStore(store);
+    res.status(201).json(activity);
+  } catch (error) {
+    res.status(error.status || 400).json({ error: error.message });
+  }
+});
+
+app.get('/api/question-banks/:id/activities', (req, res) => {
+  const store = readStore();
+  const bank = findBankOr404(store, req.params.id, res);
+  if (!bank) return;
+  if (!getPermission(store, bank, req.principal).canUse) return res.status(403).json({ error: 'You cannot view activities for this question bank.' });
+  res.json((store.activities || []).filter((activity) => activity.questionBankId === bank.id && activity.createdBy === req.principal.userId));
+});
+
+app.get('/api/question-banks/:id/weakness-report', (req, res) => {
+  const store = readStore();
+  const bank = findBankOr404(store, req.params.id, res);
+  if (!bank) return;
+  if (!getPermission(store, bank, req.principal).canUse) return res.status(403).json({ error: 'You cannot view learning reports for this question bank.' });
+  const report = buildWeaknessReport(store, bank, req.principal);
+  addAudit(store, req.principal, 'VIEW_CLASS_WEAKNESS_REPORT', 'questionBank', bank.id, {
+    targetQuestionBankId: bank.id,
+    totalAnswers: report.totalAnswers,
+    incorrectRate: report.incorrectRate
+  });
+  writeStore(store);
+  res.json(report);
+});
+
+app.get('/api/question-banks/:id/wrong-answers', (req, res) => {
+  const store = readStore();
+  const bank = findBankOr404(store, req.params.id, res);
+  if (!bank) return;
+  if (!getPermission(store, bank, req.principal).canUse) return res.status(403).json({ error: 'You cannot view wrong answers for this question bank.' });
+  const studentId = sanitizeCell(req.query.studentId || '');
+  const answers = (store.studentAnswers || []).filter((answer) => (
+    answer.questionBankId === bank.id &&
+    !answer.isCorrect &&
+    answer.teacherUserId === req.principal.userId &&
+    (!studentId || answer.studentId === studentId)
+  ));
+  res.json(answers.slice(0, 200));
+});
+
+app.get('/api/question-banks/:id/health-report', (req, res) => {
+  const store = readStore();
+  const bank = findBankOr404(store, req.params.id, res);
+  if (!bank) return;
+  const permission = getPermission(store, bank, req.principal);
+  if (!permission.canView) return res.status(403).json({ error: 'You do not have access to this question bank.' });
+
+  const report = generateQuestionBankHealthReport(bank);
+  addAudit(store, req.principal, 'RUN_AI_HEALTH_REPORT', 'questionBank', bank.id, {
+    targetQuestionBankId: bank.id,
+    qualityScore: report.qualityScore,
+    needsReview: report.totals.needsReview
+  });
+  writeStore(store);
+  res.json(report);
+});
+
+app.post('/api/question-banks/:id/ai-preview', rateLimitMutations, (req, res) => {
+  const store = readStore();
+  const bank = findBankOr404(store, req.params.id, res);
+  if (!bank) return;
+  const permission = getPermission(store, bank, req.principal);
+  if (!permission.canEdit) return res.status(403).json({ error: 'Only the owner can run AI modification previews for this question bank.' });
+
+  const actionType = sanitizeCell(req.body.actionType || '');
+  const allowedActions = ['auto_tag', 'generate_explanations', 'improve_clarity', 'check_rights_risk'];
+  if (!allowedActions.includes(actionType)) return res.status(400).json({ error: 'Unsupported AI preview action.' });
+
+  const preview = createAiPreview(bank, actionType);
+  addAudit(store, req.principal, 'RUN_AI_PREVIEW', 'questionBank', bank.id, {
+    targetQuestionBankId: bank.id,
+    actionType,
+    previewItemCount: preview.items.length
+  });
+  writeStore(store);
+  res.json(preview);
+});
+
+app.post('/api/question-banks/:id/ai-preview/apply', rateLimitMutations, (req, res) => {
+  const store = readStore();
+  const bank = findBankOr404(store, req.params.id, res);
+  if (!bank) return;
+  const permission = getPermission(store, bank, req.principal);
+  if (!permission.canEdit) return res.status(403).json({ error: 'Only the owner can apply AI-assisted changes to this question bank.' });
+  if (!req.body.teacherConfirmed) return res.status(400).json({ error: 'Teacher confirmation is required before applying AI-assisted changes.' });
+  if (!req.body.legalAcknowledged) return res.status(400).json({ error: 'Rights and policy acknowledgement is required before applying AI-assisted changes.' });
+
+  const actionType = sanitizeCell(req.body.actionType || '');
+  const allowedActions = ['auto_tag', 'generate_explanations', 'improve_clarity', 'check_rights_risk'];
+  if (!allowedActions.includes(actionType)) return res.status(400).json({ error: 'Unsupported AI preview action.' });
+
+  ensureVersionHistory(bank, req.principal);
+  const preview = createAiPreview(bank, actionType);
+  const { beforeSnapshot, updatedQuestionIds } = applyAiPreviewToBank(bank, preview);
+  const nextVersion = nextMinorVersion(bank.version);
+  bank.version = nextVersion;
+  bank.updatedAt = nowIso();
+  bank.updatedBy = req.principal.userId;
+  const versionRecord = createVersionRecord(
+    bank,
+    req.principal,
+    nextVersion,
+    `AI ${actionType}`,
+    `Teacher confirmed AI-assisted ${actionType} changes for ${updatedQuestionIds.length} questions.`
+  );
+  bank.versions.unshift(versionRecord);
+  const afterSnapshot = snapshotQuestionBank(bank);
+
+  addAudit(store, req.principal, 'APPLY_AI_MODIFICATION', 'questionBank', bank.id, {
+    targetQuestionBankId: bank.id,
+    actionType,
+    versionNumber: nextVersion,
+    updatedQuestionIds,
+    beforeSnapshot,
+    afterSnapshot,
+    legalAcknowledged: true,
+    teacherConfirmed: true
+  });
+  writeStore(store);
+  res.json({
+    bank: publicBank(store, bank, req.principal),
+    version: versionRecord,
+    updatedQuestionIds
+  });
+});
+
+app.get('/api/question-banks/:id/versions', (req, res) => {
+  const store = readStore();
+  const bank = findBankOr404(store, req.params.id, res);
+  if (!bank) return;
+  const permission = getPermission(store, bank, req.principal);
+  if (!permission.isOwner && !permission.isAdmin) return res.status(403).json({ error: 'Only owner or admin can view version history.' });
+  ensureVersionHistory(bank, req.principal);
+  writeStore(store);
+  res.json(bank.versions || []);
+});
+
+app.get('/api/question-banks/:id/versions/:versionId/compare', (req, res) => {
+  const store = readStore();
+  const bank = findBankOr404(store, req.params.id, res);
+  if (!bank) return;
+  const permission = getPermission(store, bank, req.principal);
+  if (!permission.isOwner && !permission.isAdmin) return res.status(403).json({ error: 'Only owner or admin can compare version history.' });
+  ensureVersionHistory(bank, req.principal);
+  const version = (bank.versions || []).find((item) => item.id === req.params.versionId);
+  if (!version) return res.status(404).json({ error: 'Version not found.' });
+  writeStore(store);
+  res.json({
+    version,
+    comparison: compareQuestionBankSnapshots(snapshotQuestionBank(bank), version.snapshot)
+  });
+});
+
+app.post('/api/question-banks/:id/versions/:versionId/restore', rateLimitMutations, (req, res) => {
+  const store = readStore();
+  const bank = findBankOr404(store, req.params.id, res);
+  if (!bank) return;
+  const canRestore = isAdmin(req.principal) || bank.ownerTeacherId === req.principal.userId;
+  if (!canRestore) return res.status(403).json({ error: 'Only owner or admin can restore a question bank version.' });
+  ensureVersionHistory(bank, req.principal);
+  const version = (bank.versions || []).find((item) => item.id === req.params.versionId);
+  if (!version) return res.status(404).json({ error: 'Version not found.' });
+
+  const beforeSnapshot = snapshotQuestionBank(bank);
+  restoreBankFromSnapshot(bank, version.snapshot);
+  const nextVersion = nextMinorVersion(bank.version);
+  bank.version = nextVersion;
+  bank.updatedAt = nowIso();
+  bank.updatedBy = req.principal.userId;
+  const restoredVersion = createVersionRecord(
+    bank,
+    req.principal,
+    nextVersion,
+    `Restored ${version.versionNumber}`,
+    `Restored from ${version.versionName || version.versionNumber}.`
+  );
+  bank.versions.unshift(restoredVersion);
+  addAudit(store, req.principal, 'RESTORE_QUESTION_BANK_VERSION', 'questionBank', bank.id, {
+    targetQuestionBankId: bank.id,
+    restoredFromVersionId: version.id,
+    restoredFromVersionNumber: version.versionNumber,
+    beforeSnapshot,
+    afterSnapshot: snapshotQuestionBank(bank),
+    reason: sanitizeCell(req.body?.reason || '')
+  });
+  writeStore(store);
+  res.json({
+    bank: publicBank(store, bank, req.principal),
+    version: restoredVersion
+  });
+});
+
+app.get('/api/question-banks/:id/audit', (req, res) => {
+  const store = readStore();
+  const bank = findBankOr404(store, req.params.id, res);
+  if (!bank) return;
+  const permission = getPermission(store, bank, req.principal);
+  if (!permission.isOwner && !permission.isAdmin) return res.status(403).json({ error: 'Only owner or admin can view audit logs.' });
+  res.json(store.auditLogs.filter((log) => log.targetQuestionBankId === bank.id));
+});
+
+app.get('/api/admin/question-banks', requireAdmin, (req, res) => {
+  const store = readStore();
+  res.json(store.questionBanks.map((bank) => publicBank(store, bank, req.principal)));
+});
+
+app.get('/api/admin/audit-logs', requireAdmin, (req, res) => {
+  const store = readStore();
+  res.json(store.auditLogs.slice(0, 1000));
+});
+
+app.post('/api/admin/question-banks/:id/status', requireAdmin, rateLimitMutations, (req, res) => {
+  const store = readStore();
+  const bank = findBankOr404(store, req.params.id, res);
+  if (!bank) return;
+  const nextStatus = sanitizeCell(req.body.status || 'active');
+  if (!['active', 'draft', 'locked', 'suspended', 'deleted', 'rights-review-needed'].includes(nextStatus)) return res.status(400).json({ error: 'Unsupported status.' });
+  const before = bank.status;
+  bank.status = nextStatus;
+  bank.deletedAt = nextStatus === 'deleted' ? (bank.deletedAt || nowIso()) : null;
+  bank.rightsRiskStatus = nextStatus === 'rights-review-needed' ? 'review_needed' : bank.rightsRiskStatus;
+  bank.updatedAt = nowIso();
+  bank.updatedBy = req.principal.userId;
+  addAudit(store, req.principal, 'ADMIN_UPDATE_QUESTION_BANK_STATUS', 'questionBank', bank.id, {
+    targetQuestionBankId: bank.id,
+    before,
+    after: nextStatus,
+    reason: sanitizeCell(req.body.reason || ''),
+    note: sanitizeCell(req.body.note || '')
+  });
+  writeStore(store);
+  res.json(publicBank(store, bank, req.principal));
+});
+
+// Legacy endpoints retained for older clients.
+function getLegacyBanks() {
+  try {
+    return JSON.parse(fs.readFileSync(legacyBanksFilePath, 'utf8'));
   } catch(e) {
     return [];
   }
 }
 
-function saveBank(name, questions) {
-  const banks = getBanks();
-  const newBank = {
-    id: Date.now().toString(),
-    name: name,
-    date: new Date().toISOString(),
-    questions: questions
-  };
-  banks.push(newBank);
-  fs.writeFileSync(banksFilePath, JSON.stringify(banks));
-  return newBank;
-}
-
 app.get('/api/banks', (req, res) => {
-  const banks = getBanks();
-  // only send metadata, not full array
-  res.json(banks.map(b => ({ id: b.id, name: b.name, date: b.date, count: b.questions.length })));
+  const banks = getLegacyBanks();
+  res.json(banks.map((bank) => ({ id: bank.id, name: bank.name, date: bank.date, count: bank.questions?.length || 0 })));
 });
 
 app.get('/api/banks/:id', (req, res) => {
-  const banks = getBanks();
-  const bank = banks.find(b => b.id === req.params.id);
-  if (bank) {
-    res.json(bank);
-  } else {
-    res.status(404).json({ error: 'Bank not found' });
-  }
+  const banks = getLegacyBanks();
+  const bank = banks.find((item) => item.id === req.params.id);
+  if (bank) return res.json(bank);
+  res.status(404).json({ error: 'Bank not found' });
 });
 
-// --- Upload Logic ---
-const upload = multer({ storage: multer.memoryStorage() });
-
-app.post('/api/upload', upload.single('file'), (req, res) => {
+app.post('/api/upload', excelUpload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).send('No file uploaded.');
   try {
-    const workbook = xlsx.read(req.file.buffer, { type: 'buffer' });
-    const sheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[sheetName];
-    
-    // 使用 header: 1 取得 2D 陣列
-    const rows = xlsx.utils.sheet_to_json(sheet, { header: 1 });
-    let parsedQuestions = [];
-    
-    // 1. 尋找標題列 (掃描前 20 列)
-    let headerRowIdx = -1;
-    let colMap = { q: -1, ans: -1, a: -1, b: -1, c: -1, d: -1, chapter: -1, section: -1 };
-    
-    for (let i = 0; i < Math.min(rows.length, 20); i++) {
-      const row = rows[i];
-      if (!row || !Array.isArray(row)) continue;
-      
-      let foundQ = -1, foundAns = -1, foundA = -1, foundB = -1, foundC = -1, foundD = -1, foundChapter = -1, foundSection = -1;
-      
-      for (let c = 0; c < row.length; c++) {
-        // 移除所有空格和星號等特殊符號來增加容錯
-        const cell = String(row[c]).toLowerCase().replace(/[\*\s]/g, '').trim();
-        if (cell.includes('題幹') || cell.includes('題目') || cell.includes('question')) foundQ = c;
-        else if (cell === '答案' || cell === '解答' || cell.includes('answer')) foundAns = c;
-        else if (cell.includes('選項-a') || cell.includes('選項a') || cell === 'a' || cell === 'opta') foundA = c;
-        else if (cell.includes('選項-b') || cell.includes('選項b') || cell === 'b' || cell === 'optb') foundB = c;
-        else if (cell.includes('選項-c') || cell.includes('選項c') || cell === 'c' || cell === 'optc') foundC = c;
-        else if (cell.includes('選項-d') || cell.includes('選項d') || cell === 'd' || cell === 'optd') foundD = c;
-        else if (cell.includes('章節') || cell.includes('chapter')) foundChapter = c;
-        else if (cell.includes('小節') || cell.includes('section')) foundSection = c;
-      }
-      
-      // 如果找到題目和答案，就可以認定它是標題列了
-      if (foundQ !== -1 && foundAns !== -1) {
-        headerRowIdx = i;
-        colMap = { q: foundQ, ans: foundAns, a: foundA, b: foundB, c: foundC, d: foundD, chapter: foundChapter, section: foundSection };
-        break;
-      }
-    }
-
-    if (headerRowIdx === -1) {
-      return res.status(400).send('無法辨識題庫格式。請確保至少包含「題幹/題目」、「答案」等標題列！');
-    }
-
-    // 2. 從標題列的下一行開始擷取資料
-    for (let i = headerRowIdx + 1; i < rows.length; i++) {
-      const row = rows[i];
-      if (!row || row.length === 0) continue;
-      
-      const getCellStr = (val) => (val != null ? String(val).trim() : '');
-      const qText = getCellStr(row[colMap.q]);
-      
-      // 如果沒有題目內文，跳過
-      if (!qText) continue;
-      
-      const rawAnsStr = getCellStr(row[colMap.ans]);
-      const rawAns = rawAnsStr.toUpperCase();
-      const cleanAns = rawAns.replace(/[^A-D]/g, ''); 
-      
-      let optA = getCellStr(row[colMap.a]);
-      let optB = getCellStr(row[colMap.b]);
-      let optC = getCellStr(row[colMap.c]);
-      let optD = getCellStr(row[colMap.d]);
-      
-      const chapter = colMap.chapter !== -1 ? getCellStr(row[colMap.chapter]) || '未分類' : '未分類';
-      const section = colMap.section !== -1 ? getCellStr(row[colMap.section]) || '未分類' : '未分類';
-      
-      const isTFText = (val) => ['O','X','是','否','對','錯','TRUE','FALSE'].includes(val.toUpperCase());
-      const isTrueFalse = (!optC && !optD) || (isTFText(optA) && isTFText(optB)) || (!optA && !optB);
-
-      let finalAnswer = cleanAns ? cleanAns[0] : rawAns;
-
-      if (isTrueFalse) {
-          if (!optA) optA = 'O (是)';
-          if (!optB) optB = 'X (否)';
-          if (['O', '是', '對', 'TRUE', 'A'].includes(rawAnsStr.toUpperCase())) finalAnswer = 'A';
-          else if (['X', '否', '錯', 'FALSE', 'B'].includes(rawAnsStr.toUpperCase())) finalAnswer = 'B';
-      }
-
-      if (!cleanAns && rawAnsStr && !isTrueFalse) {
-          if (rawAns === optA.toUpperCase()) finalAnswer = 'A';
-          else if (rawAns === optB.toUpperCase()) finalAnswer = 'B';
-          else if (rawAns === optC.toUpperCase()) finalAnswer = 'C';
-          else if (rawAns === optD.toUpperCase()) finalAnswer = 'D';
-      }
-
-      parsedQuestions.push({
-        Question: qText,
-        OptA: optA,
-        OptB: optB,
-        OptC: optC,
-        OptD: optD,
-        Answer: finalAnswer,
-        Chapter: chapter,
-        Section: section,
-        Type: isTrueFalse ? 'true_false' : 'multiple_choice'
-      });
-    }
-
-    if (parsedQuestions.length === 0) return res.status(400).send('在此檔案中找不到任何題目內容，請檢查格式是否大於一行。');
-
-    res.json({ questions: parsedQuestions });
+    const principal = await getPrincipal(req);
+    const preview = validateQuestions(await parseWorkbookExcelJs(req.file.buffer), principal, {});
+    res.json({ questions: preview.rows.filter((row) => row.valid).map((row) => row.question), preview });
   } catch (err) {
-    console.error(err);
-    res.status(500).send('Error parsing excel file: ' + err.message);
+    res.status(400).send(`Error parsing excel file: ${err.message}`);
   }
 });
 
-// --- Socket.IO Room & Game Logic ---
+app.post('/api/student-answers/bulk', rateLimitMutations, (req, res) => {
+  const answers = Array.isArray(req.body.answers) ? req.body.answers.slice(0, 300) : [];
+  if (!answers.length) return res.status(400).json({ error: 'No student answers provided.' });
+
+  const store = readStore();
+  const recorded = answers.map((answer) => recordStudentAnswer(store, {
+    ...answer,
+    studentId: answer.studentId || req.body.studentId,
+    studentName: answer.studentName || req.body.studentName,
+    teacherUserId: answer.teacherUserId || req.body.teacherUserId,
+    classId: answer.classId || req.body.classId,
+    activityId: answer.activityId || req.body.activityId,
+    questionBankId: answer.questionBankId || req.body.questionBankId
+  }));
+  writeStore(store);
+  res.status(201).json({ ok: true, count: recorded.length });
+});
+
 const rooms = {};
 
 function generateRoomCode() {
@@ -186,34 +1806,37 @@ function generateRoomCode() {
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
-  socket.on('create_room', ({ questions, limit }) => {
+  socket.on('create_room', ({ questions, limit, teacherUserId, activityId, questionBankId }) => {
     const shuffled = questions.sort(() => 0.5 - Math.random());
     let selected = shuffled.slice(0, limit || 10);
-    
+
     if (selected.length === 0) {
       socket.emit('error', 'No questions to play.');
       return;
     }
 
-    selected = selected.map(q => ({
-      ...q,
-      Answer: String(q.Answer || '').trim().toUpperCase()
+    selected = selected.map((question) => ({
+      ...question,
+      Answer: String(question.Answer || question.answer || '').trim().toUpperCase()
     }));
 
     const roomId = generateRoomCode();
     rooms[roomId] = {
       id: roomId,
       teacherId: socket.id,
-      status: 'waiting', 
+      teacherUserId: sanitizeCell(teacherUserId || ''),
+      activityId: sanitizeCell(activityId || ''),
+      questionBankId: sanitizeCell(questionBankId || selected[0]?.questionBankId || ''),
+      status: 'waiting',
       questions: selected,
       currentQuestionIndex: -1,
-      players: {}, 
+      players: {},
       answeredCount: 0,
       timeLimit: 60,
       timer: null,
       questionStartTime: 0
     };
-    
+
     socket.join(roomId);
     socket.emit('room_created', roomId);
   });
@@ -230,7 +1853,7 @@ io.on('connection', (socket) => {
       streak: 0,
       answers: []
     };
-    
+
     socket.join(roomId);
     socket.emit('joined_room', { roomId, nickname });
     io.to(room.teacherId).emit('player_joined', Object.values(room.players));
@@ -258,29 +1881,24 @@ io.on('connection', (socket) => {
     if (!player) return;
 
     const qIndex = room.currentQuestionIndex;
-    if (player.answers.some(a => a.qIndex === qIndex)) return;
+    if (player.answers.some((answer) => answer.qIndex === qIndex)) return;
 
     const question = room.questions[qIndex];
-    const correctOption = String(question.Answer).trim().toUpperCase();
+    const correctOption = String(question.Answer || question.answer || '').trim().toUpperCase();
     const cleanSelectedOption = String(selectedOption).trim().toUpperCase();
-    const isCorrect = (cleanSelectedOption === correctOption);
-    
+    const isCorrect = cleanSelectedOption === correctOption;
     const timeTaken = (Date.now() - room.questionStartTime) / 1000;
     let points = 0;
-    
+
     if (isCorrect) {
       player.streak += 1;
-      
       const totalPlayers = Object.keys(room.players).length || 1;
       const timeRatio = Math.max(0, 1 - (timeTaken / room.timeLimit));
       const orderRatio = Math.max(0, 1 - (room.answeredCount / totalPlayers));
-      
       const questionBaseScore = 1000 * (0.5 * timeRatio + 0.5 * orderRatio);
       const streakMultiplier = 1 + (player.streak - 1) * 0.2;
-      
       points = Math.round(questionBaseScore * streakMultiplier);
-      points = Math.max(100, points); // guaranteed minimum score if correct
-      
+      points = Math.max(100, points);
       player.score += points;
     } else {
       player.streak = 0;
@@ -293,6 +1911,28 @@ io.on('connection', (socket) => {
       score: points,
       timeTaken
     });
+    try {
+      const store = readStore();
+      recordStudentAnswer(store, {
+        studentId: socket.id,
+        studentName: player.nickname,
+        teacherUserId: room.teacherUserId,
+        classId: room.id,
+        roomId: room.id,
+        activityId: room.activityId,
+        questionBankId: room.questionBankId || question.questionBankId,
+        questionId: question.id,
+        question,
+        selectedAnswer: cleanSelectedOption,
+        correctAnswer: correctOption,
+        isCorrect,
+        timeSpent: timeTaken,
+        score: points
+      });
+      writeStore(store);
+    } catch (error) {
+      console.error('Unable to record student answer:', error);
+    }
     room.answeredCount += 1;
 
     socket.emit('answer_feedback', {
@@ -313,15 +1953,15 @@ io.on('connection', (socket) => {
 
   function nextQuestion(room) {
     if (room.timerInterval) clearInterval(room.timerInterval);
-    
+
     room.currentQuestionIndex += 1;
     if (room.currentQuestionIndex >= room.questions.length) {
       room.status = 'game_over';
       io.to(room.id).emit('game_over', {
-        players: Object.values(room.players).map(p => ({
-          nickname: p.nickname,
-          score: p.score,
-          answers: p.answers
+        players: Object.values(room.players).map((player) => ({
+          nickname: player.nickname,
+          score: player.score,
+          answers: player.answers
         }))
       });
       return;
@@ -330,30 +1970,30 @@ io.on('connection', (socket) => {
     room.status = 'playing';
     room.answeredCount = 0;
     room.questionStartTime = Date.now();
-    
-    const question = room.questions[room.currentQuestionIndex];
-    io.to(room.teacherId).emit('new_question', {
-      qIndex: room.currentQuestionIndex,
-      total: room.questions.length,
-      question: question.Question,
-      options: { A: question.OptA, B: question.OptB, C: question.OptC, D: question.OptD },
-      timeLimit: room.timeLimit
-    });
 
-    io.to(room.id).emit('new_question_student', {
+    const question = room.questions[room.currentQuestionIndex];
+    const payload = {
       qIndex: room.currentQuestionIndex,
       total: room.questions.length,
-      question: question.Question,
-      options: { A: question.OptA, B: question.OptB, C: question.OptC, D: question.OptD },
+      question: question.Question || question.prompt,
+      options: {
+        A: question.OptA || question.options?.A,
+        B: question.OptB || question.options?.B,
+        C: question.OptC || question.options?.C,
+        D: question.OptD || question.options?.D
+      },
       timeLimit: room.timeLimit
-    });
+    };
+
+    io.to(room.teacherId).emit('new_question', payload);
+    io.to(room.id).emit('new_question_student', payload);
 
     let timeLeft = room.timeLimit;
     const interval = setInterval(() => {
       timeLeft -= 1;
       const totalPlayers = Object.keys(room.players).length;
       if (totalPlayers > 0 && room.answeredCount >= totalPlayers / 2) {
-         timeLeft -= 1;
+        timeLeft -= 1;
       }
       io.to(room.id).emit('tick', timeLeft);
 
@@ -370,29 +2010,27 @@ io.on('connection', (socket) => {
       clearInterval(room.timerInterval);
       room.timerInterval = null;
     }
+
     room.status = 'question_result';
     const question = room.questions[room.currentQuestionIndex];
-    
     const distribution = { A: 0, B: 0, C: 0, D: 0 };
-    Object.values(room.players).forEach(p => {
-       const ans = p.answers.find(a => a.qIndex === room.currentQuestionIndex);
-       if (ans && ans.selected) {
-           const sel = ans.selected.toUpperCase();
-           if (distribution[sel] !== undefined) {
-               distribution[sel]++;
-           }
-       }
+    Object.values(room.players).forEach((player) => {
+      const answer = player.answers.find((item) => item.qIndex === room.currentQuestionIndex);
+      if (answer && answer.selected) {
+        const selected = answer.selected.toUpperCase();
+        if (distribution[selected] !== undefined) distribution[selected] += 1;
+      }
     });
 
     const leaderboard = Object.values(room.players)
       .sort((a, b) => b.score - a.score)
       .slice(0, 5)
-      .map(p => ({ nickname: p.nickname, score: p.score }));
+      .map((player) => ({ nickname: player.nickname, score: player.score }));
 
     io.to(room.id).emit('question_result', {
-      correctOption: question.Answer,
-      leaderboard: leaderboard,
-      distribution: distribution
+      correctOption: question.Answer || question.answer,
+      leaderboard,
+      distribution
     });
   }
 

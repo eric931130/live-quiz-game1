@@ -1,8 +1,52 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    // Question bank authority lives in the backend API. Teachers should not
+    // bypass server-side ownership, sharing, legal acknowledgement, or audit checks.
+    match /QuizBanks/{bankId} {
+      allow read, write: if false;
+    }
+
+    match /QuestionBankShares/{shareId} {
+      allow read, write: if false;
+    }
+
+    match /QuestionBankAuditLogs/{logId} {
+      allow read, write: if false;
+    }
+
+    match /Users/{userId} {
+      allow read: if signedIn();
+      allow create, update: if isSelf(userId);
+      allow delete: if false;
+    }
+
+    // Existing classroom flows still use Firestore directly in this app.
+    match /Assignments/{assignmentId} {
+      allow read: if true;
+      allow create, update, delete: if signedIn();
+    }
+
+    match /AssignmentResults/{resultId} {
+      allow read, create: if true;
+      allow update, delete: if signedIn();
+    }
+
+    match /ClassroomDiscussions/{messageId} {
+      allow read, create: if true;
+      allow update, delete: if signedIn();
+    }
+
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
   }
 }

@@ -4,13 +4,13 @@ import { getFirestore } from "firebase/firestore";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyBWTe05Veeo12Fo9yFVeZ0mgk-GDm3Z39w",
-  authDomain: "empath-os.firebaseapp.com",
-  projectId: "empath-os",
-  storageBucket: "empath-os.firebasestorage.app",
-  messagingSenderId: "723285383886",
-  appId: "1:723285383886:web:d28a8e8142ce190bb38e9f",
-  measurementId: "G-TL3EHQY14W"
+  apiKey: "AIzaSyAhA2OgpI8UWTSv0ZV9Je61G1b6Lo15490",
+  authDomain: "teach999-53c2d.firebaseapp.com",
+  projectId: "teach999-53c2d",
+  storageBucket: "teach999-53c2d.firebasestorage.app",
+  messagingSenderId: "405133175597",
+  appId: "1:405133175597:web:302a4ed2a32b96fb16c1a4",
+  measurementId: "G-C60VFTTFP0"
 };
 
 const app = initializeApp(firebaseConfig);

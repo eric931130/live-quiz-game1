@@ -8,7 +8,7 @@ export default function ParticleButton({ onClick, children, className, disabled,
     // Generate some particles
     const rect = e.currentTarget.getBoundingClientRect();
     const newParticles = Array.from({ length: 15 }).map((_, i) => {
-      const colors = ['#4CAF50', '#03A9F4', '#FF9800', '#FBC02D', '#C62828'];
+      const colors = ['#F7E5AD', '#D6A84F', '#B88A3D', '#8A6420', '#FFF0BD'];
       return {
         id: Date.now() + i,
         x: e.clientX - rect.left,

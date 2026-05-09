@@ -1,0 +1,11 @@
+{
+  "name": "live-quiz-game",
+  "private": true,
+  "scripts": {
+    "build": "npm --prefix frontend run build",
+    "deploy:hosting": "npm run build && firebase deploy --only hosting",
+    "smoke:backend": "node scripts/smoke-backend-health.mjs",
+    "smoke:hosting": "node scripts/smoke-hosting.mjs",
+    "smoke:question-bank-api": "node scripts/smoke-question-bank-api.mjs"
+  }
+}

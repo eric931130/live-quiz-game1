@@ -3,8 +3,20 @@ services:
     name: empath-os-backend
     env: node
     rootDir: backend
-    buildCommand: npm install
+    buildCommand: npm ci --omit=dev
     startCommand: npm start
     envVars:
       - key: NODE_VERSION
         value: 20
+      - key: ADMIN_USER_IDS
+        sync: false
+      - key: ADMIN_EMAILS
+        sync: false
+      - key: ADMIN_API_SECRET
+        sync: false
+      - key: FIREBASE_PROJECT_ID
+        value: teach999-53c2d
+      - key: FIREBASE_SERVICE_ACCOUNT_JSON
+        sync: false
+      - key: REQUIRE_FIREBASE_AUTH
+        value: "false"
