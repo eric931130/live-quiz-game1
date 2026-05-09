@@ -1,4 +1,6 @@
-﻿const API_BASE = window.location.hostname === 'localhost'
+﻿const isLocalDevHost = ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
+
+const API_BASE = isLocalDevHost
   ? 'http://localhost:3001'
   : 'https://live-quiz-game1.onrender.com';
 

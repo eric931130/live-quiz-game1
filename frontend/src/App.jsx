@@ -11,6 +11,16 @@ const TeacherDashboard = lazy(() => import('./components/TeacherDashboard'));
 const StudentView = lazy(() => import('./components/StudentView'));
 const AuthModal = lazy(() => import('./components/AuthModal'));
 const TermsModal = lazy(() => import('./components/TermsModal'));
+// Dev-only smoke path; Vite removes this from production unless explicitly enabled in dev.
+const E2E_TEACHER_ACCESS = import.meta.env.DEV && import.meta.env.VITE_E2E_TEACHER_ACCESS === 'true';
+const E2E_TEACHER_USER = {
+  uid: 'e2e-teacher',
+  email: 'e2e-teacher@example.test',
+  displayName: 'E2E Teacher',
+  role: 'teacher',
+  schoolId: 'e2e-school',
+  getIdToken: async () => null
+};
 
 function RouteFallback({ label = '載入中...' }) {
   return (
@@ -67,7 +77,7 @@ function App() {
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
+      setUser(currentUser || (E2E_TEACHER_ACCESS ? E2E_TEACHER_USER : null));
       setLoading(false);
     });
     return () => unsubscribe();
@@ -75,6 +85,10 @@ function App() {
 
   useEffect(() => {
     if (loading) return;
+    if (E2E_TEACHER_ACCESS && !role) {
+       setRole('teacher');
+       return;
+    }
     const params = new URLSearchParams(window.location.search);
     const code = params.get('code');
     if (code && !role) {
@@ -85,6 +99,11 @@ function App() {
   }, [loading, user, role]);
 
   const handleLogout = async () => {
+    if (E2E_TEACHER_ACCESS) {
+      setRole(null);
+      setUser(E2E_TEACHER_USER);
+      return;
+    }
     await signOut(auth);
     setRole(null);
   };
@@ -98,6 +117,7 @@ function App() {
     setRole('teacher');
 
     try {
+       if (E2E_TEACHER_ACCESS) return;
        await setDoc(doc(db, 'Users', user.uid), { role: 'teacher', email: user.email }, { merge: true });
     } catch(err) {
        console.error("權限驗證失敗", err);
