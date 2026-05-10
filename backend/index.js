@@ -2780,6 +2780,9 @@ app.get('/api/peer-learning/teacher/queue', requireTeacher, (req, res) => {
   const wrongExchanges = (store.wrongQuestionExchanges || [])
     .filter((item) => item.status === 'flagged')
     .map((item) => ({ ...publicWrongQuestionExchange(item, req.principal), targetType: 'wrongExchange' }));
+  const learningGuilds = (store.learningGuilds || [])
+    .filter((item) => item.status === 'flagged' || item.moderationLocked)
+    .map((item) => ({ ...publicLearningGuild(item, req.principal), targetType: 'learningGuild' }));
   res.json({
     explanations,
     helpRequests,
@@ -2788,6 +2791,7 @@ app.get('/api/peer-learning/teacher/queue', requireTeacher, (req, res) => {
     peerChallenges,
     peerReviews,
     wrongExchanges,
+    learningGuilds,
     moderationLogs: (store.moderationLogs || []).slice(0, 120)
   });
 });
@@ -2804,6 +2808,14 @@ app.post('/api/peer-learning/teacher/moderate', requireTeacher, rateLimitMutatio
   const store = readStore();
   const target = moderationTarget(store, targetType, targetId);
   if (!target) return res.status(404).json({ error: 'Moderation target not found.' });
+  if (targetType === 'learningGuild' && ['lock', 'unlock'].includes(action)) {
+    target.moderationLocked = action === 'lock';
+    target.updatedAt = nowIso();
+    target.teacherReviewNote = sanitizeCell(req.body.reason || '');
+    addModerationLog(store, req.principal, `MODERATE_${action.toUpperCase()}`, targetType, targetId, req.body.reason || '');
+    writeStore(store);
+    return res.json({ ok: true, target });
+  }
   const statusByAction = {
     approve: 'approved',
     feature: 'approved',

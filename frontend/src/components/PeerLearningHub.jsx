@@ -245,6 +245,10 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
     await peerLearningApi.addGuildProgress(user, guildId, { xp: 8, note: 'Completed a structured peer learning mission.' });
   });
 
+  const reportContent = (targetType, targetId) => runStudentAction(async () => {
+    await peerLearningApi.report(user, { targetType, targetId, reason: 'Student safety report' });
+  });
+
   const createGuild = async () => {
     setBusy(true);
     setError('');
@@ -296,7 +300,8 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
       (queue?.studentQuestions?.length || 0) +
       (queue?.peerChallenges?.length || 0) +
       (queue?.peerReviews?.length || 0) +
-      (queue?.wrongExchanges?.length || 0);
+      (queue?.wrongExchanges?.length || 0) +
+      (queue?.learningGuilds?.length || 0);
 
     return (
       <section className="peer-learning-hub teacher-mode">
@@ -397,6 +402,58 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
                 </div>
               </div>
             ))}
+
+            {(queue?.peerChallenges || []).map((item) => (
+              <div className="peer-review-item" key={item.id}>
+                <div className="peer-item-top"><strong>Flagged challenge</strong><StatusBadge status={item.status} /></div>
+                <p>{item.challengerName} vs {item.opponentName}</p>
+                <small>{item.mode} · reports: {item.reportCount || 0}</small>
+                <div className="peer-action-row">
+                  <button onClick={() => moderate('peerChallenge', item.id, 'approve')}>Clear flag</button>
+                  <button className="danger" onClick={() => moderate('peerChallenge', item.id, 'hide')}>Hide</button>
+                  <button className="danger" onClick={() => moderate('peerChallenge', item.id, 'delete')}>Delete</button>
+                </div>
+              </div>
+            ))}
+
+            {(queue?.peerReviews || []).map((item) => (
+              <div className="peer-review-item" key={item.id}>
+                <div className="peer-item-top"><strong>Flagged peer review</strong><StatusBadge status={item.status} /></div>
+                <p>{item.feedbackText || item.submissionText}</p>
+                <small>{item.reviewerName} → {item.revieweeName} · reports: {item.reportCount || 0}</small>
+                <div className="peer-action-row">
+                  <button onClick={() => moderate('peerReview', item.id, 'approve')}>Clear flag</button>
+                  <button className="danger" onClick={() => moderate('peerReview', item.id, 'hide')}>Hide</button>
+                  <button className="danger" onClick={() => moderate('peerReview', item.id, 'delete')}>Delete</button>
+                </div>
+              </div>
+            ))}
+
+            {(queue?.wrongExchanges || []).map((item) => (
+              <div className="peer-review-item" key={item.id}>
+                <div className="peer-item-top"><strong>Flagged wrong-question exchange</strong><StatusBadge status={item.status} /></div>
+                <p>{item.knowledgePoint || 'Review concept'}</p>
+                <small>{item.studentAName} x {item.studentBName} · reports: {item.reportCount || 0}</small>
+                <div className="peer-action-row">
+                  <button onClick={() => moderate('wrongExchange', item.id, 'approve')}>Clear flag</button>
+                  <button className="danger" onClick={() => moderate('wrongExchange', item.id, 'hide')}>Hide</button>
+                  <button className="danger" onClick={() => moderate('wrongExchange', item.id, 'delete')}>Delete</button>
+                </div>
+              </div>
+            ))}
+
+            {(queue?.learningGuilds || []).map((item) => (
+              <div className="peer-review-item" key={item.id}>
+                <div className="peer-item-top"><strong>Learning guild</strong><StatusBadge status={item.status} /></div>
+                <p>{item.name} · {item.weeklyGoal}</p>
+                <small>{(item.members || []).length} members · locked: {item.moderationLocked ? 'yes' : 'no'}</small>
+                <div className="peer-action-row">
+                  <button onClick={() => moderate('learningGuild', item.id, item.moderationLocked ? 'unlock' : 'lock')}>{item.moderationLocked ? 'Unlock' : 'Lock'}</button>
+                  <button onClick={() => moderate('learningGuild', item.id, 'approve')}>Clear flag</button>
+                  <button className="danger" onClick={() => moderate('learningGuild', item.id, 'delete')}>Delete</button>
+                </div>
+              </div>
+            ))}
           </div>
 
           <div className="peer-panel">
@@ -487,6 +544,9 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
               <div className="peer-item-top"><strong>{item.mode}</strong><StatusBadge status={item.status} /></div>
               <small>{item.challengerName} vs {item.opponentName}</small>
               <p className="peer-muted">{item.fairnessNote}</p>
+              <div className="peer-action-row">
+                <button onClick={() => reportContent('peerChallenge', item.id)}><Flag size={14} /> Report</button>
+              </div>
               {item.status === 'pending' && item.opponentStudentId === userId && (
                 <div className="peer-action-row">
                   <button onClick={() => respondChallenge(item.id, 'accept')}>Accept</button>
@@ -526,6 +586,9 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
                 </div>
               )}
               {item.status === 'submitted' && <p className="peer-muted">{item.feedbackText}</p>}
+              <div className="peer-action-row">
+                <button onClick={() => reportContent('peerReview', item.id)}><Flag size={14} /> Report</button>
+              </div>
             </div>
           ))}
         </div>
@@ -542,6 +605,9 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
             <div className="peer-review-item" key={item.id}>
               <div className="peer-item-top"><strong>{item.knowledgePoint || 'Review concept'}</strong><StatusBadge status={item.status} /></div>
               <small>{item.studentAName} x {item.studentBName}</small>
+              <div className="peer-action-row">
+                <button onClick={() => reportContent('wrongExchange', item.id)}><Flag size={14} /> Report</button>
+              </div>
               {item.status !== 'completed' && (
                 <div className="peer-response-composer">
                   <textarea value={wrongExchangeReflections[item.id] || ''} onChange={(event) => setWrongExchangeReflections({ ...wrongExchangeReflections, [item.id]: event.target.value })} placeholder="What did you repair or understand after the exchange?" />
@@ -567,6 +633,7 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
               <div className="peer-action-row">
                 <button onClick={() => joinGuild(guild.id)}>Join</button>
                 <button onClick={() => addGuildProgress(guild.id)}>Add progress</button>
+                <button onClick={() => reportContent('learningGuild', guild.id)}><Flag size={14} /> Report</button>
               </div>
             </div>
           ))}
@@ -605,9 +672,15 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
                 <div className="peer-help-response" key={response.id}>
                   <small>{response.responderName} · {response.responseType}</small>
                   <p>{response.content}</p>
-                  {item.studentId === userId && <button onClick={() => peerLearningApi.markHelpful(user, response.id).then(loadStudent)}>Mark helpful</button>}
+                  <div className="peer-action-row">
+                    {item.studentId === userId && <button onClick={() => peerLearningApi.markHelpful(user, response.id).then(loadStudent)}>Mark helpful</button>}
+                    <button onClick={() => reportContent('helpResponse', response.id)}><Flag size={14} /> Report</button>
+                  </div>
                 </div>
               ))}
+              <div className="peer-action-row">
+                <button onClick={() => reportContent('helpRequest', item.id)}><Flag size={14} /> Report request</button>
+              </div>
               {item.status !== 'resolved' && (
                 <div className="peer-response-composer">
                   <select value={responseTypes[item.id] || 'hint'} onChange={(event) => setResponseTypes({ ...responseTypes, [item.id]: event.target.value })}>

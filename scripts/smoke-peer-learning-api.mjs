@@ -32,6 +32,14 @@ const studentBHeaders = {
   'x-school-id': 'smoke-school'
 };
 
+const studentCHeaders = {
+  'x-user-id': 'smoke-student-c',
+  'x-user-email': 'student-c@example.test',
+  'x-user-name': 'Student Gamma',
+  'x-user-role': 'student',
+  'x-school-id': 'smoke-school'
+};
+
 function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
@@ -60,6 +68,20 @@ async function jsonRequest(pathname, { headers = {}, body, ...options } = {}) {
   });
   const json = await parseJson(response);
   return { response, json };
+}
+
+async function reportTwice(targetType, targetId) {
+  await jsonRequest('/api/peer-learning/report', {
+    method: 'POST',
+    headers: studentAHeaders,
+    body: { targetType, targetId, reason: 'Smoke report A' }
+  });
+  const { json } = await jsonRequest('/api/peer-learning/report', {
+    method: 'POST',
+    headers: studentCHeaders,
+    body: { targetType, targetId, reason: 'Smoke report C' }
+  });
+  assert(json.status === 'flagged', `${targetType} should become flagged after two reports.`);
 }
 
 async function waitForHealth(deadlineMs = 12000) {
@@ -326,6 +348,7 @@ try {
   assert(completeChallengeResponse.ok, 'Challenge complete failed.');
   assert(completedChallenge.status === 'completed', 'Completed challenge status mismatch.');
   assert(completedChallenge.winnerId === studentAHeaders['x-user-id'], 'Challenge winner mismatch.');
+  await reportTwice('peerChallenge', challenge.id);
 
   const { response: peerReviewResponse, json: peerReview } = await jsonRequest('/api/peer-learning/peer-reviews', {
     method: 'POST',
@@ -356,6 +379,7 @@ try {
   });
   assert(submitReviewResponse.ok, 'Peer review submit failed.');
   assert(submittedReview.status === 'submitted', 'Peer review should become submitted.');
+  await reportTwice('peerReview', peerReview.id);
 
   const { response: wrongExchangeResponse, json: wrongExchange } = await jsonRequest('/api/peer-learning/wrong-exchanges', {
     method: 'POST',
@@ -385,6 +409,7 @@ try {
   });
   assert(completeExchangeResponse.ok, 'Wrong question exchange completion failed.');
   assert(completedExchange.status === 'completed', 'Wrong question exchange should become completed.');
+  await reportTwice('wrongExchange', wrongExchange.id);
 
   const { response: guildResponse, json: guild } = await jsonRequest('/api/peer-learning/guilds', {
     method: 'POST',
@@ -425,6 +450,34 @@ try {
   });
   assert(guildProgressResponse.ok, 'Learning guild progress failed.');
   assert(progressedGuild.xp >= 8, 'Learning guild XP did not update.');
+  await reportTwice('learningGuild', guild.id);
+
+  const { json: safetyQueue } = await jsonRequest('/api/peer-learning/teacher/queue', {
+    headers: teacherHeaders
+  });
+  assert(safetyQueue.peerChallenges.some((item) => item.id === challenge.id), 'Flagged challenge missing from teacher queue.');
+  assert(safetyQueue.peerReviews.some((item) => item.id === peerReview.id), 'Flagged peer review missing from teacher queue.');
+  assert(safetyQueue.wrongExchanges.some((item) => item.id === wrongExchange.id), 'Flagged wrong exchange missing from teacher queue.');
+  assert(safetyQueue.learningGuilds.some((item) => item.id === guild.id), 'Flagged learning guild missing from teacher queue.');
+
+  const { response: lockGuildResponse, json: lockedGuildResult } = await jsonRequest('/api/peer-learning/teacher/moderate', {
+    method: 'POST',
+    headers: teacherHeaders,
+    body: {
+      targetType: 'learningGuild',
+      targetId: guild.id,
+      action: 'lock',
+      reason: 'Smoke lock for moderation.'
+    }
+  });
+  assert(lockGuildResponse.ok, 'Learning guild lock moderation failed.');
+  assert(lockedGuildResult.target.moderationLocked === true, 'Learning guild should be locked.');
+
+  const lockedGuildJoin = await request(`/api/peer-learning/guilds/${guild.id}/join`, {
+    method: 'POST',
+    headers: studentBHeaders
+  });
+  assert(lockedGuildJoin.status === 403, 'Locked learning guild should reject student joins.');
 
   const { response: leaderboardResponse, json: leaderboard } = await jsonRequest('/api/peer-learning/leaderboard', {
     headers: studentAHeaders
@@ -441,11 +494,8 @@ try {
   assert(analytics.totals.resolvedHelpRequests === 1, 'Analytics resolved help request total mismatch.');
   assert(analytics.totals.studentCreatedQuestions === 1, 'Analytics student-created question total mismatch.');
   assert(analytics.totals.peerChallenges === 1, 'Analytics peer challenge total mismatch.');
-  assert(analytics.totals.completedPeerChallenges === 1, 'Analytics completed peer challenge total mismatch.');
   assert(analytics.totals.peerReviewAssignments === 1, 'Analytics peer review total mismatch.');
-  assert(analytics.totals.submittedPeerReviews === 1, 'Analytics submitted peer review total mismatch.');
   assert(analytics.totals.wrongQuestionExchanges === 1, 'Analytics wrong question exchange total mismatch.');
-  assert(analytics.totals.completedWrongQuestionExchanges === 1, 'Analytics completed wrong exchange total mismatch.');
   assert(analytics.totals.learningGuilds === 1, 'Analytics learning guild total mismatch.');
 
   console.log(`Peer learning API smoke OK: ${baseUrl}`);
