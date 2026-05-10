@@ -1162,6 +1162,42 @@ function addModerationLog(store, principal, actionType, targetType, targetId, re
   return log;
 }
 
+function hydrateModerationLog(store, log) {
+  const target = moderationTarget(store, log.targetType, log.targetId);
+  return {
+    ...log,
+    targetStatus: target?.status || '',
+    targetClassId: target?.classId || '',
+    targetSummary: sanitizeCell(target?.name || target?.prompt || target?.message || target?.content || target?.knowledgePoint || target?.mode || '')
+  };
+}
+
+function filteredModerationLogs(store, query = {}) {
+  const classId = sanitizeCell(query.classId || '');
+  const targetType = sanitizeCell(query.targetType || '');
+  const actionType = sanitizeCell(query.actionType || '');
+  const actorUserId = sanitizeCell(query.actorUserId || '');
+  const limit = Math.max(1, Math.min(1000, Number(query.limit || 250)));
+  return (store.moderationLogs || [])
+    .map((log) => hydrateModerationLog(store, log))
+    .filter((log) => !classId || log.targetClassId === classId)
+    .filter((log) => !targetType || log.targetType === targetType)
+    .filter((log) => !actionType || log.actionType === actionType)
+    .filter((log) => !actorUserId || log.actorUserId === actorUserId)
+    .slice(0, limit);
+}
+
+function csvValue(value) {
+  const text = String(value ?? '');
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function moderationLogsCsv(logs) {
+  const headers = ['createdAt', 'actorUserId', 'actorRole', 'actionType', 'targetType', 'targetId', 'targetStatus', 'targetClassId', 'reason', 'targetSummary'];
+  const rows = logs.map((log) => headers.map((header) => csvValue(log[header])).join(','));
+  return [headers.join(','), ...rows].join('\n');
+}
+
 function publicPeerExplanation(explanation, principal) {
   const canModerate = isTeacherRole(principal);
   return {
@@ -2799,6 +2835,21 @@ app.get('/api/peer-learning/teacher/queue', requireTeacher, (req, res) => {
 app.get('/api/peer-learning/teacher/analytics', requireTeacher, (req, res) => {
   const store = readStore();
   res.json(computePeerLearningAnalytics(store));
+});
+
+app.get('/api/peer-learning/teacher/moderation-logs', requireTeacher, (req, res) => {
+  const store = readStore();
+  res.json({
+    logs: filteredModerationLogs(store, req.query)
+  });
+});
+
+app.get('/api/peer-learning/teacher/moderation-logs/export', requireTeacher, (req, res) => {
+  const store = readStore();
+  const logs = filteredModerationLogs(store, req.query);
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="peer-learning-moderation-logs-${Date.now()}.csv"`);
+  res.send(moderationLogsCsv(logs));
 });
 
 app.post('/api/peer-learning/teacher/moderate', requireTeacher, rateLimitMutations, (req, res) => {

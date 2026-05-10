@@ -479,6 +479,27 @@ try {
   });
   assert(lockedGuildJoin.status === 403, 'Locked learning guild should reject student joins.');
 
+  const studentLogs = await request('/api/peer-learning/teacher/moderation-logs', {
+    headers: studentAHeaders
+  });
+  assert(studentLogs.status === 403, 'Student should not access teacher moderation logs.');
+
+  const { response: logsResponse, json: logsData } = await jsonRequest('/api/peer-learning/teacher/moderation-logs?limit=50', {
+    headers: teacherHeaders
+  });
+  assert(logsResponse.ok, 'Teacher moderation logs failed.');
+  assert(Array.isArray(logsData.logs), 'Moderation logs response should include logs array.');
+  assert(logsData.logs.some((log) => log.actionType === 'REPORT_CONTENT'), 'Moderation logs should include report events.');
+  assert(logsData.logs.some((log) => log.actionType === 'MODERATE_LOCK'), 'Moderation logs should include guild lock event.');
+
+  const exportLogsResponse = await request('/api/peer-learning/teacher/moderation-logs/export?limit=50', {
+    headers: teacherHeaders
+  });
+  assert(exportLogsResponse.ok, 'Teacher moderation log export failed.');
+  assert((exportLogsResponse.headers.get('content-type') || '').includes('text/csv'), 'Moderation log export should be CSV.');
+  const exportedCsv = await exportLogsResponse.text();
+  assert(exportedCsv.includes('actionType') && exportedCsv.includes('REPORT_CONTENT'), 'Moderation log CSV should include headers and report events.');
+
   const { response: leaderboardResponse, json: leaderboard } = await jsonRequest('/api/peer-learning/leaderboard', {
     headers: studentAHeaders
   });

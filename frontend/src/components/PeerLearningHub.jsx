@@ -65,6 +65,7 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
   const [queue, setQueue] = useState(null);
   const [analytics, setAnalytics] = useState(null);
   const [leaderboard, setLeaderboard] = useState(null);
+  const [moderationLogs, setModerationLogs] = useState([]);
   const [settingsDraft, setSettingsDraft] = useState(null);
   const [settingsClassId, setSettingsClassId] = useState(classId || '');
   const [explanationText, setExplanationText] = useState('');
@@ -106,14 +107,16 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
   };
 
   const loadTeacher = async () => {
-    const [queueData, analyticsData, settingsData] = await Promise.all([
+    const [queueData, analyticsData, settingsData, logsData] = await Promise.all([
       peerLearningApi.teacherQueue(user),
       peerLearningApi.teacherAnalytics(user),
-      peerLearningApi.settings(user, { classId: settingsClassId })
+      peerLearningApi.settings(user, { classId: settingsClassId }),
+      peerLearningApi.moderationLogs(user, { classId: settingsClassId, limit: 20 })
     ]);
     setQueue(queueData);
     setAnalytics(analyticsData);
     setSettingsDraft(settingsData);
+    setModerationLogs(logsData.logs || []);
   };
 
   const load = async () => {
@@ -273,6 +276,27 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
       });
       setSettingsDraft(next);
       await loadTeacher();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const exportModerationLogs = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      const csv = await peerLearningApi.exportModerationLogs(user, { classId: settingsClassId, limit: 1000 });
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `peer-learning-moderation-logs-${settingsClassId || 'default'}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -475,6 +499,22 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
             <input value={guildDraft.name} onChange={(event) => setGuildDraft({ ...guildDraft, name: event.target.value })} placeholder="Guild name" />
             <input value={guildDraft.weeklyGoal} onChange={(event) => setGuildDraft({ ...guildDraft, weeklyGoal: event.target.value })} placeholder="Weekly goal" />
             <button disabled={busy || guildDraft.name.trim().length < 2} onClick={createGuild}>Create guild</button>
+            <h4><ShieldCheck size={18} /> Moderation Logs</h4>
+            <div className="peer-action-row">
+              <button disabled={busy} onClick={exportModerationLogs}>Export CSV</button>
+              <button disabled={busy} onClick={load}>Refresh logs</button>
+            </div>
+            <div className="peer-log-list">
+              {moderationLogs.length === 0 && <p className="peer-empty">No moderation logs for this filter yet.</p>}
+              {moderationLogs.map((log) => (
+                <div className="peer-log-row" key={log.id}>
+                  <strong>{log.actionType}</strong>
+                  <span>{log.targetType} · {log.targetStatus || 'open'}</span>
+                  <small>{new Date(log.createdAt).toLocaleString()} · {log.actorUserId}</small>
+                  {log.reason && <small>{log.reason}</small>}
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </section>

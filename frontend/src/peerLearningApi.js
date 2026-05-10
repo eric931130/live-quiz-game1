@@ -44,6 +44,20 @@ function queryString(params = {}) {
   return text ? `?${text}` : '';
 }
 
+async function parseTextResponse(response) {
+  if (!response.ok) {
+    let message = `Request failed (${response.status})`;
+    try {
+      const error = await response.json();
+      message = error.error || message;
+    } catch {
+      message = await response.text();
+    }
+    throw new Error(message);
+  }
+  return response.text();
+}
+
 export const peerLearningApi = {
   async overview(user, params = {}) {
     const response = await fetch(`${API_BASE}/api/peer-learning/overview${queryString(params)}`, {
@@ -283,6 +297,20 @@ export const peerLearningApi = {
       headers: await headersFor(user, {}, 'teacher')
     });
     return parseResponse(response);
+  },
+
+  async moderationLogs(user, params = {}) {
+    const response = await fetch(`${API_BASE}/api/peer-learning/teacher/moderation-logs${queryString(params)}`, {
+      headers: await headersFor(user, {}, 'teacher')
+    });
+    return parseResponse(response);
+  },
+
+  async exportModerationLogs(user, params = {}) {
+    const response = await fetch(`${API_BASE}/api/peer-learning/teacher/moderation-logs/export${queryString(params)}`, {
+      headers: await headersFor(user, {}, 'teacher')
+    });
+    return parseTextResponse(response);
   },
 
   async moderate(user, payload) {
