@@ -110,6 +110,9 @@ app.get('/api/health', (req, res) => {
       shares: store.shares.length,
       activities: store.activities.length,
       studentAnswers: store.studentAnswers.length,
+      peerExplanations: store.peerExplanations.length,
+      helpRequests: store.helpRequests.length,
+      helpResponses: store.helpResponses.length,
       auditLogs: store.auditLogs.length
     }
   });
@@ -125,7 +128,7 @@ function createId(prefix) {
 
 function readStore() {
   if (!fs.existsSync(storeFilePath)) {
-    fs.writeFileSync(storeFilePath, JSON.stringify({ questionBanks: [], shares: [], auditLogs: [], activities: [], studentAnswers: [], questionAnalytics: [] }, null, 2));
+    fs.writeFileSync(storeFilePath, JSON.stringify({ questionBanks: [], shares: [], auditLogs: [], activities: [], studentAnswers: [], questionAnalytics: [], peerExplanations: [], helpRequests: [], helpResponses: [], moderationLogs: [] }, null, 2));
   }
 
   try {
@@ -136,11 +139,15 @@ function readStore() {
       auditLogs: Array.isArray(parsed.auditLogs) ? parsed.auditLogs : [],
       activities: Array.isArray(parsed.activities) ? parsed.activities : [],
       studentAnswers: Array.isArray(parsed.studentAnswers) ? parsed.studentAnswers : [],
-      questionAnalytics: Array.isArray(parsed.questionAnalytics) ? parsed.questionAnalytics : []
+      questionAnalytics: Array.isArray(parsed.questionAnalytics) ? parsed.questionAnalytics : [],
+      peerExplanations: Array.isArray(parsed.peerExplanations) ? parsed.peerExplanations : [],
+      helpRequests: Array.isArray(parsed.helpRequests) ? parsed.helpRequests : [],
+      helpResponses: Array.isArray(parsed.helpResponses) ? parsed.helpResponses : [],
+      moderationLogs: Array.isArray(parsed.moderationLogs) ? parsed.moderationLogs : []
     };
   } catch (error) {
     console.error('Unable to read question bank store:', error);
-    return { questionBanks: [], shares: [], auditLogs: [], activities: [], studentAnswers: [], questionAnalytics: [] };
+    return { questionBanks: [], shares: [], auditLogs: [], activities: [], studentAnswers: [], questionAnalytics: [], peerExplanations: [], helpRequests: [], helpResponses: [], moderationLogs: [] };
   }
 }
 
@@ -189,6 +196,15 @@ async function requirePrincipal(req, res, next) {
 
 function requireAdmin(req, res, next) {
   if (!isAdmin(req.principal)) return res.status(403).json({ error: 'Admin permission required.' });
+  next();
+}
+
+function isTeacherRole(principal) {
+  return isAdmin(principal) || ['teacher', 'instructor', 'educator'].includes(String(principal.role || '').toLowerCase());
+}
+
+function requireTeacher(req, res, next) {
+  if (!isTeacherRole(req.principal)) return res.status(403).json({ error: 'Teacher permission required.' });
   next();
 }
 
@@ -1105,6 +1121,163 @@ function buildWeaknessReport(store, bank, principal) {
   };
 }
 
+function visiblePeerExplanation(explanation, principal) {
+  return (
+    explanation.status === 'approved' ||
+    explanation.teacherFeatured ||
+    explanation.studentId === principal.userId ||
+    isTeacherRole(principal)
+  ) && explanation.status !== 'deleted';
+}
+
+function peerIdentity(principal, fallbackName = '') {
+  return sanitizeCell(principal.displayName || fallbackName || principal.email || principal.userId || 'Student');
+}
+
+function addModerationLog(store, principal, actionType, targetType, targetId, reason = '') {
+  const log = {
+    id: createId('mod'),
+    actorUserId: principal.userId,
+    actorRole: principal.role,
+    actionType,
+    targetType,
+    targetId,
+    reason: sanitizeCell(reason),
+    createdAt: nowIso()
+  };
+  store.moderationLogs.unshift(log);
+  addAudit(store, principal, `PEER_${actionType}`, targetType, targetId, { moderationLogId: log.id, reason });
+  return log;
+}
+
+function publicPeerExplanation(explanation, principal) {
+  const canModerate = isTeacherRole(principal);
+  return {
+    ...explanation,
+    studentId: canModerate || explanation.studentId === principal.userId ? explanation.studentId : undefined,
+    studentName: explanation.anonymous && !canModerate ? 'Anonymous classmate' : explanation.studentName,
+    votes: undefined,
+    myVote: (explanation.votes || []).find((vote) => vote.studentId === principal.userId)?.voteType || null,
+    helpfulCount: explanation.helpfulCount || 0,
+    clearCount: explanation.clearCount || 0,
+    needsImprovementCount: explanation.needsImprovementCount || 0
+  };
+}
+
+function publicHelpRequest(request, store, principal) {
+  const canModerate = isTeacherRole(principal);
+  const responses = (store.helpResponses || [])
+    .filter((response) => response.helpRequestId === request.id && response.status !== 'deleted')
+    .filter((response) => (
+      response.status === 'approved' ||
+      response.responderStudentId === principal.userId ||
+      request.studentId === principal.userId ||
+      canModerate
+    ))
+    .map((response) => ({
+      ...response,
+      responderStudentId: canModerate || response.responderStudentId === principal.userId ? response.responderStudentId : undefined,
+      responderName: response.anonymous && !canModerate ? 'Anonymous helper' : response.responderName
+    }));
+  return {
+    ...request,
+    studentId: canModerate || request.studentId === principal.userId ? request.studentId : undefined,
+    studentName: request.anonymous && !canModerate ? 'Anonymous classmate' : request.studentName,
+    responses
+  };
+}
+
+function computePeerLearningAnalytics(store) {
+  const explanations = (store.peerExplanations || []).filter((item) => item.status !== 'deleted');
+  const helpRequests = (store.helpRequests || []).filter((item) => item.status !== 'deleted');
+  const helpResponses = (store.helpResponses || []).filter((item) => item.status !== 'deleted');
+  const students = {};
+  const concepts = {};
+
+  function studentStat(id, name) {
+    const key = id || 'anonymous';
+    if (!students[key]) {
+      students[key] = {
+        studentId: key,
+        studentName: sanitizeCell(name || key),
+        explanationsSubmitted: 0,
+        explanationsApproved: 0,
+        helpfulVotes: 0,
+        helpRequestsCreated: 0,
+        helpRequestsResolved: 0,
+        helpResponsesSubmitted: 0,
+        helpfulResponses: 0,
+        teamworkXp: 0
+      };
+    }
+    return students[key];
+  }
+
+  explanations.forEach((explanation) => {
+    const stat = studentStat(explanation.studentId, explanation.studentName);
+    stat.explanationsSubmitted += 1;
+    if (explanation.status === 'approved') stat.explanationsApproved += 1;
+    stat.helpfulVotes += explanation.helpfulCount || 0;
+    stat.teamworkXp += 8 + (explanation.status === 'approved' ? 12 : 0) + (explanation.teacherFeatured ? 20 : 0) + ((explanation.helpfulCount || 0) * 3) + ((explanation.clearCount || 0) * 2);
+    const concept = explanation.knowledgePoint || 'Uncategorized';
+    concepts[concept] = concepts[concept] || { knowledgePoint: concept, helpRequests: 0, explanations: 0 };
+    concepts[concept].explanations += 1;
+  });
+
+  helpRequests.forEach((request) => {
+    const stat = studentStat(request.studentId, request.studentName);
+    stat.helpRequestsCreated += 1;
+    if (request.status === 'resolved') stat.helpRequestsResolved += 1;
+    stat.teamworkXp += request.status === 'resolved' ? 8 : 2;
+    const concept = request.knowledgePoint || 'Uncategorized';
+    concepts[concept] = concepts[concept] || { knowledgePoint: concept, helpRequests: 0, explanations: 0 };
+    concepts[concept].helpRequests += 1;
+  });
+
+  helpResponses.forEach((response) => {
+    const stat = studentStat(response.responderStudentId, response.responderName);
+    stat.helpResponsesSubmitted += 1;
+    if (response.helpfulMarked) stat.helpfulResponses += 1;
+    stat.teamworkXp += 6 + (response.helpfulMarked ? 12 : 0) + (response.teacherApproved ? 8 : 0);
+  });
+
+  const leaderboard = Object.values(students)
+    .sort((a, b) => b.teamworkXp - a.teamworkXp)
+    .slice(0, 20)
+    .map((item, index) => ({ ...item, rank: index + 1 }));
+
+  return {
+    generatedAt: nowIso(),
+    totals: {
+      peerExplanations: explanations.length,
+      approvedExplanations: explanations.filter((item) => item.status === 'approved').length,
+      helpRequests: helpRequests.length,
+      resolvedHelpRequests: helpRequests.filter((item) => item.status === 'resolved').length,
+      helpResponses: helpResponses.length,
+      pendingModeration: explanations.filter((item) => ['pending_review', 'flagged', 'returned_for_revision'].includes(item.status)).length +
+        helpRequests.filter((item) => item.status === 'flagged').length +
+        helpResponses.filter((item) => ['pending_review', 'flagged'].includes(item.status)).length
+    },
+    leaderboard,
+    conceptHotspots: Object.values(concepts).sort((a, b) => (b.helpRequests + b.explanations) - (a.helpRequests + a.explanations)).slice(0, 12),
+    badges: {
+      clearExplainers: leaderboard.filter((item) => item.explanationsApproved >= 2 || item.helpfulVotes >= 3).slice(0, 5),
+      helpfulClassmates: leaderboard.filter((item) => item.helpfulResponses >= 1 || item.helpResponsesSubmitted >= 2).slice(0, 5)
+    }
+  };
+}
+
+function moderationTarget(store, targetType, targetId) {
+  const collections = {
+    explanation: store.peerExplanations,
+    helpRequest: store.helpRequests,
+    helpResponse: store.helpResponses
+  };
+  const collection = collections[targetType];
+  if (!collection) return null;
+  return collection.find((item) => item.id === targetId);
+}
+
 function createQuestionBank({ principal, metadata, questions, legalAcknowledged }) {
   const timestamp = nowIso();
   const id = createId('qb');
@@ -1165,6 +1338,7 @@ const excelUpload = multer({
 
 app.use('/api/question-banks', requirePrincipal);
 app.use('/api/admin', requirePrincipal);
+app.use('/api/peer-learning', requirePrincipal);
 
 app.get('/api/question-banks/template', async (req, res) => {
   const excelBuffer = await workbookBufferFromRows([
@@ -1708,6 +1882,247 @@ app.get('/api/question-banks/:id/audit', (req, res) => {
   const permission = getPermission(store, bank, req.principal);
   if (!permission.isOwner && !permission.isAdmin) return res.status(403).json({ error: 'Only owner or admin can view audit logs.' });
   res.json(store.auditLogs.filter((log) => log.targetQuestionBankId === bank.id));
+});
+
+app.get('/api/peer-learning/overview', (req, res) => {
+  const store = readStore();
+  const questionId = sanitizeCell(req.query.questionId || '');
+  const classId = sanitizeCell(req.query.classId || '');
+  const explanations = (store.peerExplanations || [])
+    .filter((item) => (!questionId || item.questionId === questionId) && (!classId || item.classId === classId))
+    .filter((item) => visiblePeerExplanation(item, req.principal))
+    .slice(0, 80)
+    .map((item) => publicPeerExplanation(item, req.principal));
+  const helpRequests = (store.helpRequests || [])
+    .filter((item) => item.status !== 'deleted' && (!questionId || item.questionId === questionId) && (!classId || item.classId === classId))
+    .slice(0, 60)
+    .map((item) => publicHelpRequest(item, store, req.principal));
+  res.json({
+    settings: {
+      peerExplanations: true,
+      helpRequests: true,
+      moderationRequired: true,
+      freeChat: false,
+      safetyNote: 'Peer learning is structured around questions, explanations, and help requests. Teachers keep final moderation control.'
+    },
+    explanations,
+    helpRequests,
+    leaderboard: computePeerLearningAnalytics(store).leaderboard.slice(0, 10)
+  });
+});
+
+app.post('/api/peer-learning/explanations', rateLimitMutations, (req, res) => {
+  const text = sanitizeCell(req.body.explanationText || req.body.text || '');
+  if (text.length < 12) return res.status(400).json({ error: 'Explanation must include a meaningful learning hint or reasoning.' });
+  const explanation = {
+    id: createId('pexp'),
+    questionId: sanitizeCell(req.body.questionId || ''),
+    questionBankId: sanitizeCell(req.body.questionBankId || ''),
+    activityId: sanitizeCell(req.body.activityId || ''),
+    classId: sanitizeCell(req.body.classId || ''),
+    questionPrompt: sanitizeCell(req.body.questionPrompt || ''),
+    knowledgePoint: sanitizeCell(req.body.knowledgePoint || ''),
+    studentId: req.principal.userId,
+    studentName: peerIdentity(req.principal, req.body.studentName),
+    explanationType: sanitizeCell(req.body.explanationType || 'concept_explanation'),
+    explanationText: text.slice(0, 1800),
+    status: 'pending_review',
+    helpfulCount: 0,
+    clearCount: 0,
+    needsImprovementCount: 0,
+    teacherFeatured: false,
+    anonymous: Boolean(req.body.anonymous),
+    reportCount: 0,
+    votes: [],
+    createdAt: nowIso(),
+    updatedAt: nowIso()
+  };
+  const store = readStore();
+  store.peerExplanations.unshift(explanation);
+  addAudit(store, req.principal, 'SUBMIT_PEER_EXPLANATION', 'peerExplanation', explanation.id, {
+    questionId: explanation.questionId,
+    questionBankId: explanation.questionBankId,
+    status: explanation.status
+  });
+  writeStore(store);
+  res.status(201).json(publicPeerExplanation(explanation, req.principal));
+});
+
+app.post('/api/peer-learning/explanations/:id/vote', rateLimitMutations, (req, res) => {
+  const store = readStore();
+  const explanation = store.peerExplanations.find((item) => item.id === req.params.id && item.status !== 'deleted');
+  if (!explanation) return res.status(404).json({ error: 'Peer explanation not found.' });
+  if (!visiblePeerExplanation(explanation, req.principal)) return res.status(403).json({ error: 'This explanation is not available.' });
+  const voteType = sanitizeCell(req.body.voteType || '');
+  if (!['helpful', 'clear', 'needs_improvement'].includes(voteType)) return res.status(400).json({ error: 'Unsupported vote type.' });
+  explanation.votes = (explanation.votes || []).filter((vote) => vote.studentId !== req.principal.userId);
+  explanation.votes.push({ studentId: req.principal.userId, voteType, createdAt: nowIso() });
+  explanation.helpfulCount = explanation.votes.filter((vote) => vote.voteType === 'helpful').length;
+  explanation.clearCount = explanation.votes.filter((vote) => vote.voteType === 'clear').length;
+  explanation.needsImprovementCount = explanation.votes.filter((vote) => vote.voteType === 'needs_improvement').length;
+  explanation.updatedAt = nowIso();
+  addAudit(store, req.principal, 'VOTE_PEER_EXPLANATION', 'peerExplanation', explanation.id, { voteType });
+  writeStore(store);
+  res.json(publicPeerExplanation(explanation, req.principal));
+});
+
+app.post('/api/peer-learning/help-requests', rateLimitMutations, (req, res) => {
+  const message = sanitizeCell(req.body.message || '');
+  if (message.length < 8) return res.status(400).json({ error: 'Help request must describe where you are stuck.' });
+  const request = {
+    id: createId('help'),
+    studentId: req.principal.userId,
+    studentName: peerIdentity(req.principal, req.body.studentName),
+    classId: sanitizeCell(req.body.classId || ''),
+    questionId: sanitizeCell(req.body.questionId || ''),
+    questionBankId: sanitizeCell(req.body.questionBankId || ''),
+    activityId: sanitizeCell(req.body.activityId || ''),
+    questionPrompt: sanitizeCell(req.body.questionPrompt || ''),
+    knowledgePoint: sanitizeCell(req.body.knowledgePoint || ''),
+    message: message.slice(0, 1200),
+    status: 'open',
+    anonymous: Boolean(req.body.anonymous),
+    responseCount: 0,
+    reportCount: 0,
+    createdAt: nowIso(),
+    resolvedAt: null
+  };
+  const store = readStore();
+  store.helpRequests.unshift(request);
+  addAudit(store, req.principal, 'CREATE_HELP_REQUEST', 'helpRequest', request.id, {
+    questionId: request.questionId,
+    classId: request.classId,
+    knowledgePoint: request.knowledgePoint
+  });
+  writeStore(store);
+  res.status(201).json(publicHelpRequest(request, store, req.principal));
+});
+
+app.post('/api/peer-learning/help-requests/:id/responses', rateLimitMutations, (req, res) => {
+  const store = readStore();
+  const request = store.helpRequests.find((item) => item.id === req.params.id && item.status !== 'deleted');
+  if (!request) return res.status(404).json({ error: 'Help request not found.' });
+  if (request.status === 'resolved') return res.status(400).json({ error: 'This help request is already resolved.' });
+  const content = sanitizeCell(req.body.content || '');
+  if (content.length < 8) return res.status(400).json({ error: 'Help response must include a hint, example, or explanation.' });
+  const responseType = sanitizeCell(req.body.responseType || 'hint');
+  if (!['hint', 'step_explanation', 'example', 'guiding_question', 'concept_reminder'].includes(responseType)) return res.status(400).json({ error: 'Unsupported help response type.' });
+  const response = {
+    id: createId('hresp'),
+    helpRequestId: request.id,
+    responderStudentId: req.principal.userId,
+    responderName: peerIdentity(req.principal, req.body.responderName),
+    responseType,
+    content: content.slice(0, 1400),
+    status: 'pending_review',
+    helpfulMarked: false,
+    teacherApproved: false,
+    anonymous: Boolean(req.body.anonymous),
+    reportCount: 0,
+    createdAt: nowIso()
+  };
+  store.helpResponses.unshift(response);
+  request.responseCount = (request.responseCount || 0) + 1;
+  request.updatedAt = nowIso();
+  addAudit(store, req.principal, 'CREATE_HELP_RESPONSE', 'helpResponse', response.id, {
+    helpRequestId: request.id,
+    responseType
+  });
+  writeStore(store);
+  res.status(201).json(publicHelpRequest(request, store, req.principal));
+});
+
+app.post('/api/peer-learning/help-responses/:id/mark-helpful', rateLimitMutations, (req, res) => {
+  const store = readStore();
+  const response = store.helpResponses.find((item) => item.id === req.params.id && item.status !== 'deleted');
+  if (!response) return res.status(404).json({ error: 'Help response not found.' });
+  const request = store.helpRequests.find((item) => item.id === response.helpRequestId);
+  if (!request) return res.status(404).json({ error: 'Help request not found.' });
+  if (request.studentId !== req.principal.userId && !isTeacherRole(req.principal)) return res.status(403).json({ error: 'Only the requester or teacher can mark a response helpful.' });
+  response.helpfulMarked = true;
+  request.status = 'resolved';
+  request.resolvedAt = nowIso();
+  addAudit(store, req.principal, 'MARK_HELP_RESPONSE_HELPFUL', 'helpResponse', response.id, { helpRequestId: request.id });
+  writeStore(store);
+  res.json(publicHelpRequest(request, store, req.principal));
+});
+
+app.post('/api/peer-learning/report', rateLimitMutations, (req, res) => {
+  const targetType = sanitizeCell(req.body.targetType || '');
+  const targetId = sanitizeCell(req.body.targetId || '');
+  const store = readStore();
+  const target = moderationTarget(store, targetType, targetId);
+  if (!target) return res.status(404).json({ error: 'Report target not found.' });
+  target.reportCount = (target.reportCount || 0) + 1;
+  if (target.reportCount >= 2 && !['approved', 'featured'].includes(target.status)) target.status = 'flagged';
+  addModerationLog(store, req.principal, 'REPORT_CONTENT', targetType, targetId, req.body.reason || '');
+  writeStore(store);
+  res.json({ ok: true, reportCount: target.reportCount, status: target.status });
+});
+
+app.get('/api/peer-learning/leaderboard', (req, res) => {
+  const store = readStore();
+  const analytics = computePeerLearningAnalytics(store);
+  res.json({
+    generatedAt: analytics.generatedAt,
+    boards: {
+      teamworkXp: analytics.leaderboard,
+      clearExplainers: analytics.badges.clearExplainers,
+      helpfulClassmates: analytics.badges.helpfulClassmates
+    },
+    note: 'This leaderboard rewards help, explanations, and improvement-oriented behaviors rather than raw scores only.'
+  });
+});
+
+app.get('/api/peer-learning/teacher/queue', requireTeacher, (req, res) => {
+  const store = readStore();
+  const explanations = (store.peerExplanations || [])
+    .filter((item) => ['pending_review', 'flagged', 'returned_for_revision'].includes(item.status))
+    .map((item) => ({ ...publicPeerExplanation(item, req.principal), targetType: 'explanation' }));
+  const helpRequests = (store.helpRequests || [])
+    .filter((item) => item.status === 'flagged')
+    .map((item) => ({ ...publicHelpRequest(item, store, req.principal), targetType: 'helpRequest' }));
+  const helpResponses = (store.helpResponses || [])
+    .filter((item) => ['pending_review', 'flagged'].includes(item.status))
+    .map((item) => ({ ...item, targetType: 'helpResponse' }));
+  res.json({
+    explanations,
+    helpRequests,
+    helpResponses,
+    moderationLogs: (store.moderationLogs || []).slice(0, 120)
+  });
+});
+
+app.get('/api/peer-learning/teacher/analytics', requireTeacher, (req, res) => {
+  const store = readStore();
+  res.json(computePeerLearningAnalytics(store));
+});
+
+app.post('/api/peer-learning/teacher/moderate', requireTeacher, rateLimitMutations, (req, res) => {
+  const targetType = sanitizeCell(req.body.targetType || '');
+  const targetId = sanitizeCell(req.body.targetId || '');
+  const action = sanitizeCell(req.body.action || '');
+  const store = readStore();
+  const target = moderationTarget(store, targetType, targetId);
+  if (!target) return res.status(404).json({ error: 'Moderation target not found.' });
+  const statusByAction = {
+    approve: 'approved',
+    feature: 'approved',
+    hide: 'hidden',
+    reject: 'rejected',
+    return: 'returned_for_revision',
+    delete: 'deleted',
+    flag: 'flagged'
+  };
+  if (!statusByAction[action]) return res.status(400).json({ error: 'Unsupported moderation action.' });
+  target.status = statusByAction[action];
+  target.teacherReviewNote = sanitizeCell(req.body.reason || '');
+  target.updatedAt = nowIso();
+  if (targetType === 'explanation' && action === 'feature') target.teacherFeatured = true;
+  if (targetType === 'helpResponse' && action === 'approve') target.teacherApproved = true;
+  addModerationLog(store, req.principal, `MODERATE_${action.toUpperCase()}`, targetType, targetId, req.body.reason || '');
+  writeStore(store);
+  res.json({ ok: true, target });
 });
 
 app.get('/api/admin/question-banks', requireAdmin, (req, res) => {

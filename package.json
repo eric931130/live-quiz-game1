@@ -7,6 +7,7 @@
     "smoke:backend": "node scripts/smoke-backend-health.mjs",
     "smoke:browser": "node scripts/smoke-browser-ui.mjs",
     "smoke:hosting": "node scripts/smoke-hosting.mjs",
+    "smoke:peer-learning-api": "node scripts/smoke-peer-learning-api.mjs",
     "smoke:question-bank-api": "node scripts/smoke-question-bank-api.mjs",
     "smoke:teacher-ui": "node scripts/smoke-teacher-ui-local.mjs"
   },

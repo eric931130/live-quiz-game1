@@ -10,6 +10,7 @@ import { questionBankApi } from '../questionBankApi';
 
 const QuestionBankDashboard = lazy(() => import('./QuestionBankDashboard'));
 const AdminQuestionBankControlPanel = lazy(() => import('./AdminQuestionBankControlPanel'));
+const PeerLearningHub = lazy(() => import('./PeerLearningHub'));
 
 const SOCKET_URL = window.location.hostname === 'localhost' 
   ? 'http://localhost:3001' 
@@ -562,6 +563,12 @@ export default function TeacherDashboard({ onGoBack, user }) {
            >
               💬 課堂討論
            </button>
+           <button
+             onClick={() => setDashboardMode('peer_learning')}
+             style={{ flex: 1, minWidth: '160px', padding: '1rem', borderRadius: '8px', border: 'none', background: dashboardMode === 'peer_learning' ? 'var(--primary-color)' : 'transparent', color: dashboardMode === 'peer_learning' ? 'white' : 'var(--text-main)', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.3s' }}
+           >
+              同儕學習
+           </button>
            {canUseAdminPanel && (
              <button
                onClick={() => setDashboardMode('admin_governance')}
@@ -629,6 +636,12 @@ export default function TeacherDashboard({ onGoBack, user }) {
             <Suspense fallback={<DashboardChunkFallback label="載入平台治理控制台..." />}>
               <LazyErrorBoundary title="平台治理控制台載入失敗">
                 <AdminQuestionBankControlPanel user={user} />
+              </LazyErrorBoundary>
+            </Suspense>
+         ) : dashboardMode === 'peer_learning' ? (
+            <Suspense fallback={<DashboardChunkFallback label="載入同儕學習審核..." />}>
+              <LazyErrorBoundary title="同儕學習面板載入失敗">
+                <PeerLearningHub mode="teacher" user={user} />
               </LazyErrorBoundary>
             </Suspense>
          ) : dashboardMode === 'classroom_discussion' ? (

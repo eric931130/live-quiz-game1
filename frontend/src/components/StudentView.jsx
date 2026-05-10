@@ -5,6 +5,7 @@ import { Play, ArrowLeft, CheckCircle2, XCircle, Flame, Trophy, ListChecks, Chec
 import { db, auth } from '../firebase';
 import { signInAnonymously, setPersistence, inMemoryPersistence, updateProfile } from 'firebase/auth';
 import ParticleButton from './ParticleButton';
+import PeerLearningHub from './PeerLearningHub';
 
 const SOCKET_URL = window.location.hostname === 'localhost' 
   ? 'http://localhost:3001' 
@@ -373,6 +374,38 @@ export default function StudentView({ onGoBack, currentUser, initialCode }) {
      }
   };
 
+  const buildPeerQuestionContext = () => {
+     const assignmentQuestion = isAssignmentMode ? assignmentQuestions[currentAQuestionIndex] : null;
+     const prompt = assignmentQuestion?.Question || assignmentQuestion?.prompt || currentQuestion?.question || '';
+     return {
+       questionId: assignmentQuestion?.id || currentQuestion?.questionId || currentQuestion?.qIndex || `${roomCode || assignment?.id || 'live'}_${currentAQuestionIndex}`,
+       questionBankId: assignmentQuestion?.questionBankId || assignment?.questionBankId || '',
+       activityId: assignment?.activityId || '',
+       classId: assignment?.id || roomCode || '',
+       prompt,
+       question: prompt,
+       knowledgePoint: assignmentQuestion?.knowledgePoint || assignmentQuestion?.Chapter || assignmentQuestion?.chapter || '',
+       qIndex: currentQuestion?.qIndex
+     };
+  };
+
+  const peerLearningUser = currentUser || {
+    uid: studentId || nickname || 'guest-student',
+    displayName: nickname || 'Guest Student',
+    role: 'student',
+    schoolId: 'default-school'
+  };
+
+  const renderPeerLearningPanel = (panelClassId = roomCode) => (
+    <PeerLearningHub
+      mode="student"
+      user={peerLearningUser}
+      compact
+      classId={panelClassId}
+      questionContext={buildPeerQuestionContext()}
+    />
+  );
+
   if (step === 'join') {
     return (
       <div className="card student-join animate-fade-in glass-panel" style={{ padding: '3rem', borderTop: '5px solid var(--primary-dark)', borderRadius: '24px' }}>
@@ -511,6 +544,7 @@ export default function StudentView({ onGoBack, currentUser, initialCode }) {
           )}
           <p className="mt-4 text-small" style={{ color: '#666', fontWeight: 'bold' }}>請專心等待下一題 ⏳</p>
         </div>
+        {renderPeerLearningPanel(roomCode)}
       </div>
     );
   }
@@ -535,6 +569,7 @@ export default function StudentView({ onGoBack, currentUser, initialCode }) {
              {currentAQuestionIndex + 1 === assignmentQuestions.length ? '查看成績結算' : '下一題'}
           </ParticleButton>
         </div>
+        {renderPeerLearningPanel(assignment?.id || roomCode)}
       </div>
     );
   }
