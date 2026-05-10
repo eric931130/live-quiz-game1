@@ -115,6 +115,9 @@ app.get('/api/health', (req, res) => {
       helpResponses: store.helpResponses.length,
       studentCreatedQuestions: store.studentCreatedQuestions.length,
       peerChallenges: store.peerChallenges.length,
+      peerReviewAssignments: store.peerReviewAssignments.length,
+      wrongQuestionExchanges: store.wrongQuestionExchanges.length,
+      learningGuilds: store.learningGuilds.length,
       auditLogs: store.auditLogs.length
     }
   });
@@ -130,7 +133,7 @@ function createId(prefix) {
 
 function readStore() {
   if (!fs.existsSync(storeFilePath)) {
-    fs.writeFileSync(storeFilePath, JSON.stringify({ questionBanks: [], shares: [], auditLogs: [], activities: [], studentAnswers: [], questionAnalytics: [], peerExplanations: [], helpRequests: [], helpResponses: [], studentCreatedQuestions: [], peerChallenges: [], moderationLogs: [] }, null, 2));
+    fs.writeFileSync(storeFilePath, JSON.stringify({ questionBanks: [], shares: [], auditLogs: [], activities: [], studentAnswers: [], questionAnalytics: [], peerExplanations: [], helpRequests: [], helpResponses: [], studentCreatedQuestions: [], peerChallenges: [], peerReviewAssignments: [], wrongQuestionExchanges: [], learningGuilds: [], moderationLogs: [] }, null, 2));
   }
 
   try {
@@ -147,11 +150,14 @@ function readStore() {
       helpResponses: Array.isArray(parsed.helpResponses) ? parsed.helpResponses : [],
       studentCreatedQuestions: Array.isArray(parsed.studentCreatedQuestions) ? parsed.studentCreatedQuestions : [],
       peerChallenges: Array.isArray(parsed.peerChallenges) ? parsed.peerChallenges : [],
+      peerReviewAssignments: Array.isArray(parsed.peerReviewAssignments) ? parsed.peerReviewAssignments : [],
+      wrongQuestionExchanges: Array.isArray(parsed.wrongQuestionExchanges) ? parsed.wrongQuestionExchanges : [],
+      learningGuilds: Array.isArray(parsed.learningGuilds) ? parsed.learningGuilds : [],
       moderationLogs: Array.isArray(parsed.moderationLogs) ? parsed.moderationLogs : []
     };
   } catch (error) {
     console.error('Unable to read question bank store:', error);
-    return { questionBanks: [], shares: [], auditLogs: [], activities: [], studentAnswers: [], questionAnalytics: [], peerExplanations: [], helpRequests: [], helpResponses: [], studentCreatedQuestions: [], peerChallenges: [], moderationLogs: [] };
+    return { questionBanks: [], shares: [], auditLogs: [], activities: [], studentAnswers: [], questionAnalytics: [], peerExplanations: [], helpRequests: [], helpResponses: [], studentCreatedQuestions: [], peerChallenges: [], peerReviewAssignments: [], wrongQuestionExchanges: [], learningGuilds: [], moderationLogs: [] };
   }
 }
 
@@ -1223,12 +1229,50 @@ function publicPeerChallenge(challenge, principal) {
   };
 }
 
+function publicPeerReviewAssignment(assignment, principal) {
+  const canModerate = isTeacherRole(principal);
+  const isParticipant = [assignment.reviewerStudentId, assignment.revieweeStudentId].includes(principal.userId);
+  if (!canModerate && !isParticipant && assignment.status !== 'submitted') return null;
+  return {
+    ...assignment,
+    reviewerStudentId: canModerate || assignment.reviewerStudentId === principal.userId ? assignment.reviewerStudentId : undefined,
+    revieweeStudentId: canModerate || assignment.revieweeStudentId === principal.userId ? assignment.revieweeStudentId : undefined,
+    reviewerName: assignment.anonymous && !canModerate && assignment.revieweeStudentId === principal.userId ? 'Anonymous reviewer' : assignment.reviewerName,
+    revieweeName: assignment.anonymous && !canModerate && assignment.reviewerStudentId === principal.userId ? 'Anonymous classmate' : assignment.revieweeName
+  };
+}
+
+function publicWrongQuestionExchange(exchange, principal) {
+  const canModerate = isTeacherRole(principal);
+  const isParticipant = [exchange.studentAId, exchange.studentBId].includes(principal.userId);
+  if (!canModerate && !isParticipant && exchange.status !== 'completed') return null;
+  return {
+    ...exchange,
+    studentAId: canModerate || exchange.studentAId === principal.userId ? exchange.studentAId : undefined,
+    studentBId: canModerate || exchange.studentBId === principal.userId ? exchange.studentBId : undefined
+  };
+}
+
+function publicLearningGuild(guild, principal) {
+  const canModerate = isTeacherRole(principal);
+  return {
+    ...guild,
+    members: (guild.members || []).map((member) => ({
+      ...member,
+      studentId: canModerate || member.studentId === principal.userId ? member.studentId : undefined
+    }))
+  };
+}
+
 function computePeerLearningAnalytics(store) {
   const explanations = (store.peerExplanations || []).filter((item) => item.status !== 'deleted');
   const helpRequests = (store.helpRequests || []).filter((item) => item.status !== 'deleted');
   const helpResponses = (store.helpResponses || []).filter((item) => item.status !== 'deleted');
   const studentQuestions = (store.studentCreatedQuestions || []).filter((item) => item.status !== 'deleted');
   const peerChallenges = (store.peerChallenges || []).filter((item) => item.status !== 'deleted');
+  const peerReviews = (store.peerReviewAssignments || []).filter((item) => item.status !== 'deleted');
+  const wrongExchanges = (store.wrongQuestionExchanges || []).filter((item) => item.status !== 'deleted');
+  const guilds = (store.learningGuilds || []).filter((item) => item.status !== 'deleted');
   const students = {};
   const concepts = {};
 
@@ -1248,6 +1292,9 @@ function computePeerLearningAnalytics(store) {
         studentQuestionsCreated: 0,
         studentQuestionsApproved: 0,
         challengesCompleted: 0,
+        peerReviewsCompleted: 0,
+        wrongExchangesCompleted: 0,
+        guildXp: 0,
         teamworkXp: 0
       };
     }
@@ -1302,6 +1349,34 @@ function computePeerLearningAnalytics(store) {
     });
   });
 
+  peerReviews.forEach((assignment) => {
+    const reviewer = studentStat(assignment.reviewerStudentId, assignment.reviewerName);
+    if (assignment.status === 'submitted') reviewer.peerReviewsCompleted += 1;
+    reviewer.teamworkXp += assignment.status === 'submitted' ? 14 : 4;
+    if (assignment.revieweeStudentId) studentStat(assignment.revieweeStudentId, assignment.revieweeName);
+  });
+
+  wrongExchanges.forEach((exchange) => {
+    if (exchange.status !== 'completed') return;
+    [exchange.studentAId, exchange.studentBId].filter(Boolean).forEach((studentId) => {
+      const name = studentId === exchange.studentAId ? exchange.studentAName : exchange.studentBName;
+      const stat = studentStat(studentId, name);
+      stat.wrongExchangesCompleted += 1;
+      stat.teamworkXp += 16;
+    });
+    const concept = exchange.knowledgePoint || 'Uncategorized';
+    concepts[concept] = concepts[concept] || { knowledgePoint: concept, helpRequests: 0, explanations: 0, studentQuestions: 0, wrongExchanges: 0 };
+    concepts[concept].wrongExchanges = (concepts[concept].wrongExchanges || 0) + 1;
+  });
+
+  guilds.forEach((guild) => {
+    (guild.members || []).forEach((member) => {
+      const stat = studentStat(member.studentId, member.studentName);
+      stat.guildXp += Number(member.xp || 0);
+      stat.teamworkXp += Number(member.xp || 0);
+    });
+  });
+
   const leaderboard = Object.values(students)
     .sort((a, b) => b.teamworkXp - a.teamworkXp)
     .slice(0, 20)
@@ -1319,20 +1394,29 @@ function computePeerLearningAnalytics(store) {
       approvedStudentQuestions: studentQuestions.filter((item) => ['approved', 'added_to_teacher_bank'].includes(item.status)).length,
       peerChallenges: peerChallenges.length,
       completedPeerChallenges: peerChallenges.filter((item) => item.status === 'completed').length,
+      peerReviewAssignments: peerReviews.length,
+      submittedPeerReviews: peerReviews.filter((item) => item.status === 'submitted').length,
+      wrongQuestionExchanges: wrongExchanges.length,
+      completedWrongQuestionExchanges: wrongExchanges.filter((item) => item.status === 'completed').length,
+      learningGuilds: guilds.length,
       pendingModeration: explanations.filter((item) => ['pending_review', 'flagged', 'returned_for_revision'].includes(item.status)).length +
         helpRequests.filter((item) => item.status === 'flagged').length +
         helpResponses.filter((item) => ['pending_review', 'flagged'].includes(item.status)).length +
         studentQuestions.filter((item) => ['pending_review', 'flagged', 'returned_for_revision'].includes(item.status)).length +
-        peerChallenges.filter((item) => item.status === 'flagged').length
+        peerChallenges.filter((item) => item.status === 'flagged').length +
+        peerReviews.filter((item) => item.status === 'flagged').length +
+        wrongExchanges.filter((item) => item.status === 'flagged').length
     },
     leaderboard,
     conceptHotspots: Object.values(concepts)
-      .sort((a, b) => ((b.helpRequests || 0) + (b.explanations || 0) + (b.studentQuestions || 0)) - ((a.helpRequests || 0) + (a.explanations || 0) + (a.studentQuestions || 0)))
+      .sort((a, b) => ((b.helpRequests || 0) + (b.explanations || 0) + (b.studentQuestions || 0) + (b.wrongExchanges || 0)) - ((a.helpRequests || 0) + (a.explanations || 0) + (a.studentQuestions || 0) + (a.wrongExchanges || 0)))
       .slice(0, 12),
     badges: {
       clearExplainers: leaderboard.filter((item) => item.explanationsApproved >= 2 || item.helpfulVotes >= 3).slice(0, 5),
       helpfulClassmates: leaderboard.filter((item) => item.helpfulResponses >= 1 || item.helpResponsesSubmitted >= 2).slice(0, 5),
-      questionDesigners: leaderboard.filter((item) => item.studentQuestionsApproved >= 1 || item.studentQuestionsCreated >= 2).slice(0, 5)
+      questionDesigners: leaderboard.filter((item) => item.studentQuestionsApproved >= 1 || item.studentQuestionsCreated >= 2).slice(0, 5),
+      peerReviewers: leaderboard.filter((item) => item.peerReviewsCompleted >= 1).slice(0, 5),
+      wrongQuestionRepair: leaderboard.filter((item) => item.wrongExchangesCompleted >= 1).slice(0, 5)
     }
   };
 }
@@ -1343,7 +1427,10 @@ function moderationTarget(store, targetType, targetId) {
     helpRequest: store.helpRequests,
     helpResponse: store.helpResponses,
     studentQuestion: store.studentCreatedQuestions,
-    peerChallenge: store.peerChallenges
+    peerChallenge: store.peerChallenges,
+    peerReview: store.peerReviewAssignments,
+    wrongExchange: store.wrongQuestionExchanges,
+    learningGuild: store.learningGuilds
   };
   const collection = collections[targetType];
   if (!collection) return null;
@@ -1989,6 +2076,20 @@ app.get('/api/peer-learning/overview', (req, res) => {
       .map((item) => publicPeerChallenge(item, req.principal))
       .filter(Boolean)
       .slice(0, 30),
+    peerReviews: (store.peerReviewAssignments || [])
+      .filter((item) => item.status !== 'deleted' && (!classId || item.classId === classId))
+      .map((item) => publicPeerReviewAssignment(item, req.principal))
+      .filter(Boolean)
+      .slice(0, 30),
+    wrongExchanges: (store.wrongQuestionExchanges || [])
+      .filter((item) => item.status !== 'deleted' && (!classId || item.classId === classId))
+      .map((item) => publicWrongQuestionExchange(item, req.principal))
+      .filter(Boolean)
+      .slice(0, 30),
+    learningGuilds: (store.learningGuilds || [])
+      .filter((item) => item.status !== 'deleted' && (!classId || item.classId === classId))
+      .map((item) => publicLearningGuild(item, req.principal))
+      .slice(0, 20),
     leaderboard: computePeerLearningAnalytics(store).leaderboard.slice(0, 10)
   });
 });
@@ -2304,6 +2405,214 @@ app.post('/api/peer-learning/challenges/:id/complete', rateLimitMutations, (req,
   res.json(publicPeerChallenge(challenge, req.principal));
 });
 
+app.get('/api/peer-learning/peer-reviews', (req, res) => {
+  const store = readStore();
+  const classId = sanitizeCell(req.query.classId || '');
+  const reviews = (store.peerReviewAssignments || [])
+    .filter((item) => item.status !== 'deleted')
+    .filter((item) => !classId || item.classId === classId)
+    .map((item) => publicPeerReviewAssignment(item, req.principal))
+    .filter(Boolean)
+    .slice(0, 100);
+  res.json({ reviews });
+});
+
+app.post('/api/peer-learning/peer-reviews', rateLimitMutations, (req, res) => {
+  const reviewerStudentId = sanitizeCell(req.body.reviewerStudentId || '');
+  const submissionText = sanitizeCell(req.body.submissionText || '');
+  if (!reviewerStudentId) return res.status(400).json({ error: 'Reviewer student id is required.' });
+  if (submissionText.length < 12) return res.status(400).json({ error: 'Peer review assignment must include a submission to review.' });
+  const assignment = {
+    id: createId('prev'),
+    activityId: sanitizeCell(req.body.activityId || ''),
+    classId: sanitizeCell(req.body.classId || ''),
+    submissionId: sanitizeCell(req.body.submissionId || createId('sub')),
+    submissionText: submissionText.slice(0, 3000),
+    reviewerStudentId,
+    reviewerName: sanitizeCell(req.body.reviewerName || reviewerStudentId),
+    revieweeStudentId: req.principal.userId,
+    revieweeName: peerIdentity(req.principal, req.body.revieweeName),
+    rubricScores: {},
+    feedbackText: '',
+    status: 'assigned',
+    anonymous: req.body.anonymous !== false,
+    reportCount: 0,
+    createdAt: nowIso(),
+    submittedAt: null
+  };
+  const store = readStore();
+  store.peerReviewAssignments.unshift(assignment);
+  addAudit(store, req.principal, 'CREATE_PEER_REVIEW_ASSIGNMENT', 'peerReview', assignment.id, {
+    classId: assignment.classId,
+    reviewerStudentId
+  });
+  writeStore(store);
+  res.status(201).json(publicPeerReviewAssignment(assignment, req.principal));
+});
+
+app.post('/api/peer-learning/peer-reviews/:id/submit', rateLimitMutations, (req, res) => {
+  const store = readStore();
+  const assignment = store.peerReviewAssignments.find((item) => item.id === req.params.id && item.status !== 'deleted');
+  if (!assignment) return res.status(404).json({ error: 'Peer review assignment not found.' });
+  if (assignment.reviewerStudentId !== req.principal.userId && !isTeacherRole(req.principal)) return res.status(403).json({ error: 'Only the assigned reviewer or teacher can submit this review.' });
+  const feedbackText = sanitizeCell(req.body.feedbackText || '');
+  if (feedbackText.length < 12) return res.status(400).json({ error: 'Peer review feedback must be constructive and specific.' });
+  const rawScores = req.body.rubricScores && typeof req.body.rubricScores === 'object' ? req.body.rubricScores : {};
+  const rubricScores = {};
+  ['accuracy', 'reasoning', 'clarity', 'evidence', 'completeness'].forEach((key) => {
+    const score = Math.max(1, Math.min(5, Number(rawScores[key] || 3)));
+    rubricScores[key] = score;
+  });
+  assignment.rubricScores = rubricScores;
+  assignment.feedbackText = feedbackText.slice(0, 2000);
+  assignment.status = 'submitted';
+  assignment.submittedAt = nowIso();
+  addAudit(store, req.principal, 'SUBMIT_PEER_REVIEW', 'peerReview', assignment.id, { rubricScores });
+  writeStore(store);
+  res.json(publicPeerReviewAssignment(assignment, req.principal));
+});
+
+app.get('/api/peer-learning/wrong-exchanges', (req, res) => {
+  const store = readStore();
+  const classId = sanitizeCell(req.query.classId || '');
+  const exchanges = (store.wrongQuestionExchanges || [])
+    .filter((item) => item.status !== 'deleted')
+    .filter((item) => !classId || item.classId === classId)
+    .map((item) => publicWrongQuestionExchange(item, req.principal))
+    .filter(Boolean)
+    .slice(0, 100);
+  res.json({ exchanges });
+});
+
+app.post('/api/peer-learning/wrong-exchanges', rateLimitMutations, (req, res) => {
+  const studentBId = sanitizeCell(req.body.partnerStudentId || req.body.studentBId || '');
+  if (!studentBId) return res.status(400).json({ error: 'Partner student id is required for wrong question exchange.' });
+  const exchange = {
+    id: createId('wqx'),
+    classId: sanitizeCell(req.body.classId || ''),
+    studentAId: req.principal.userId,
+    studentAName: peerIdentity(req.principal, req.body.studentAName),
+    studentBId,
+    studentBName: sanitizeCell(req.body.partnerName || req.body.studentBName || studentBId),
+    knowledgePoint: sanitizeCell(req.body.knowledgePoint || ''),
+    questionAId: sanitizeCell(req.body.questionAId || req.body.questionId || ''),
+    questionBId: sanitizeCell(req.body.questionBId || ''),
+    status: 'pending',
+    reflectionA: '',
+    reflectionB: '',
+    reportCount: 0,
+    createdAt: nowIso(),
+    completedAt: null
+  };
+  const store = readStore();
+  store.wrongQuestionExchanges.unshift(exchange);
+  addAudit(store, req.principal, 'CREATE_WRONG_QUESTION_EXCHANGE', 'wrongExchange', exchange.id, {
+    classId: exchange.classId,
+    partnerStudentId: studentBId,
+    knowledgePoint: exchange.knowledgePoint
+  });
+  writeStore(store);
+  res.status(201).json(publicWrongQuestionExchange(exchange, req.principal));
+});
+
+app.post('/api/peer-learning/wrong-exchanges/:id/complete', rateLimitMutations, (req, res) => {
+  const store = readStore();
+  const exchange = store.wrongQuestionExchanges.find((item) => item.id === req.params.id && item.status !== 'deleted');
+  if (!exchange) return res.status(404).json({ error: 'Wrong question exchange not found.' });
+  const isParticipant = [exchange.studentAId, exchange.studentBId].includes(req.principal.userId);
+  if (!isParticipant && !isTeacherRole(req.principal)) return res.status(403).json({ error: 'Only participants or teacher can complete this exchange.' });
+  const reflection = sanitizeCell(req.body.reflection || '');
+  if (reflection.length < 8) return res.status(400).json({ error: 'Reflection is required to complete a wrong question exchange.' });
+  if (req.principal.userId === exchange.studentAId) exchange.reflectionA = reflection;
+  if (req.principal.userId === exchange.studentBId) exchange.reflectionB = reflection;
+  if (isTeacherRole(req.principal)) {
+    exchange.reflectionA = exchange.reflectionA || reflection;
+    exchange.reflectionB = exchange.reflectionB || reflection;
+  }
+  exchange.status = exchange.reflectionA && exchange.reflectionB ? 'completed' : 'in_progress';
+  exchange.completedAt = exchange.status === 'completed' ? nowIso() : null;
+  addAudit(store, req.principal, 'UPDATE_WRONG_QUESTION_EXCHANGE', 'wrongExchange', exchange.id, {
+    status: exchange.status
+  });
+  writeStore(store);
+  res.json(publicWrongQuestionExchange(exchange, req.principal));
+});
+
+app.get('/api/peer-learning/guilds', (req, res) => {
+  const store = readStore();
+  const classId = sanitizeCell(req.query.classId || '');
+  const guilds = (store.learningGuilds || [])
+    .filter((item) => item.status !== 'deleted')
+    .filter((item) => !classId || item.classId === classId)
+    .map((item) => publicLearningGuild(item, req.principal));
+  res.json({ guilds });
+});
+
+app.post('/api/peer-learning/guilds', requireTeacher, rateLimitMutations, (req, res) => {
+  const name = sanitizeCell(req.body.name || '');
+  if (name.length < 2) return res.status(400).json({ error: 'Learning guild name is required.' });
+  const guild = {
+    id: createId('guild'),
+    classId: sanitizeCell(req.body.classId || ''),
+    name,
+    badge: sanitizeCell(req.body.badge || 'Gold Study Guild'),
+    weeklyGoal: sanitizeCell(req.body.weeklyGoal || 'Complete one collaborative review mission.'),
+    members: [],
+    xp: 0,
+    status: 'active',
+    moderationLocked: false,
+    createdBy: req.principal.userId,
+    createdAt: nowIso(),
+    updatedAt: nowIso()
+  };
+  const store = readStore();
+  store.learningGuilds.unshift(guild);
+  addAudit(store, req.principal, 'CREATE_LEARNING_GUILD', 'learningGuild', guild.id, {
+    classId: guild.classId,
+    name: guild.name
+  });
+  writeStore(store);
+  res.status(201).json(publicLearningGuild(guild, req.principal));
+});
+
+app.post('/api/peer-learning/guilds/:id/join', rateLimitMutations, (req, res) => {
+  const store = readStore();
+  const guild = store.learningGuilds.find((item) => item.id === req.params.id && item.status !== 'deleted');
+  if (!guild) return res.status(404).json({ error: 'Learning guild not found.' });
+  if (guild.moderationLocked && !isTeacherRole(req.principal)) return res.status(403).json({ error: 'This learning guild is locked by the teacher.' });
+  guild.members = guild.members || [];
+  if (!guild.members.some((member) => member.studentId === req.principal.userId)) {
+    guild.members.push({
+      studentId: req.principal.userId,
+      studentName: peerIdentity(req.principal, req.body?.studentName),
+      role: sanitizeCell(req.body?.role || 'member'),
+      xp: 0,
+      joinedAt: nowIso()
+    });
+  }
+  guild.updatedAt = nowIso();
+  addAudit(store, req.principal, 'JOIN_LEARNING_GUILD', 'learningGuild', guild.id, {});
+  writeStore(store);
+  res.json(publicLearningGuild(guild, req.principal));
+});
+
+app.post('/api/peer-learning/guilds/:id/progress', rateLimitMutations, (req, res) => {
+  const store = readStore();
+  const guild = store.learningGuilds.find((item) => item.id === req.params.id && item.status !== 'deleted');
+  if (!guild) return res.status(404).json({ error: 'Learning guild not found.' });
+  const canModerate = isTeacherRole(req.principal);
+  const member = (guild.members || []).find((item) => item.studentId === req.principal.userId);
+  if (!member && !canModerate) return res.status(403).json({ error: 'Join this learning guild before adding progress.' });
+  const xp = Math.max(0, Math.min(50, Number(req.body?.xp || 5)));
+  guild.xp = Number(guild.xp || 0) + xp;
+  if (member) member.xp = Number(member.xp || 0) + xp;
+  guild.lastProgressNote = sanitizeCell(req.body?.note || '');
+  guild.updatedAt = nowIso();
+  addAudit(store, req.principal, 'ADD_LEARNING_GUILD_PROGRESS', 'learningGuild', guild.id, { xp });
+  writeStore(store);
+  res.json(publicLearningGuild(guild, req.principal));
+});
+
 app.post('/api/peer-learning/report', rateLimitMutations, (req, res) => {
   const targetType = sanitizeCell(req.body.targetType || '');
   const targetId = sanitizeCell(req.body.targetId || '');
@@ -2348,12 +2657,20 @@ app.get('/api/peer-learning/teacher/queue', requireTeacher, (req, res) => {
   const peerChallenges = (store.peerChallenges || [])
     .filter((item) => item.status === 'flagged')
     .map((item) => ({ ...publicPeerChallenge(item, req.principal), targetType: 'peerChallenge' }));
+  const peerReviews = (store.peerReviewAssignments || [])
+    .filter((item) => item.status === 'flagged')
+    .map((item) => ({ ...publicPeerReviewAssignment(item, req.principal), targetType: 'peerReview' }));
+  const wrongExchanges = (store.wrongQuestionExchanges || [])
+    .filter((item) => item.status === 'flagged')
+    .map((item) => ({ ...publicWrongQuestionExchange(item, req.principal), targetType: 'wrongExchange' }));
   res.json({
     explanations,
     helpRequests,
     helpResponses,
     studentQuestions,
     peerChallenges,
+    peerReviews,
+    wrongExchanges,
     moderationLogs: (store.moderationLogs || []).slice(0, 120)
   });
 });

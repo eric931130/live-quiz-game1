@@ -138,6 +138,90 @@ export const peerLearningApi = {
     return parseResponse(response);
   },
 
+  async peerReviews(user, params = {}) {
+    const response = await fetch(`${API_BASE}/api/peer-learning/peer-reviews${queryString(params)}`, {
+      headers: await headersFor(user)
+    });
+    return parseResponse(response);
+  },
+
+  async createPeerReview(user, payload) {
+    const response = await fetch(`${API_BASE}/api/peer-learning/peer-reviews`, {
+      method: 'POST',
+      headers: await headersFor(user, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify(payload || {})
+    });
+    return parseResponse(response);
+  },
+
+  async submitPeerReview(user, reviewId, payload) {
+    const response = await fetch(`${API_BASE}/api/peer-learning/peer-reviews/${reviewId}/submit`, {
+      method: 'POST',
+      headers: await headersFor(user, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify(payload || {})
+    });
+    return parseResponse(response);
+  },
+
+  async wrongExchanges(user, params = {}) {
+    const response = await fetch(`${API_BASE}/api/peer-learning/wrong-exchanges${queryString(params)}`, {
+      headers: await headersFor(user)
+    });
+    return parseResponse(response);
+  },
+
+  async createWrongExchange(user, payload) {
+    const response = await fetch(`${API_BASE}/api/peer-learning/wrong-exchanges`, {
+      method: 'POST',
+      headers: await headersFor(user, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify(payload || {})
+    });
+    return parseResponse(response);
+  },
+
+  async completeWrongExchange(user, exchangeId, payload) {
+    const response = await fetch(`${API_BASE}/api/peer-learning/wrong-exchanges/${exchangeId}/complete`, {
+      method: 'POST',
+      headers: await headersFor(user, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify(payload || {})
+    });
+    return parseResponse(response);
+  },
+
+  async guilds(user, params = {}) {
+    const response = await fetch(`${API_BASE}/api/peer-learning/guilds${queryString(params)}`, {
+      headers: await headersFor(user)
+    });
+    return parseResponse(response);
+  },
+
+  async createGuild(user, payload) {
+    const response = await fetch(`${API_BASE}/api/peer-learning/guilds`, {
+      method: 'POST',
+      headers: await headersFor(user, { 'Content-Type': 'application/json' }, 'teacher'),
+      body: JSON.stringify(payload || {})
+    });
+    return parseResponse(response);
+  },
+
+  async joinGuild(user, guildId, payload = {}) {
+    const response = await fetch(`${API_BASE}/api/peer-learning/guilds/${guildId}/join`, {
+      method: 'POST',
+      headers: await headersFor(user, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify(payload || {})
+    });
+    return parseResponse(response);
+  },
+
+  async addGuildProgress(user, guildId, payload = {}) {
+    const response = await fetch(`${API_BASE}/api/peer-learning/guilds/${guildId}/progress`, {
+      method: 'POST',
+      headers: await headersFor(user, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify(payload || {})
+    });
+    return parseResponse(response);
+  },
+
   async respondToHelp(user, helpRequestId, payload) {
     const response = await fetch(`${API_BASE}/api/peer-learning/help-requests/${helpRequestId}/responses`, {
       method: 'POST',
