@@ -65,6 +65,8 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
   const [queue, setQueue] = useState(null);
   const [analytics, setAnalytics] = useState(null);
   const [leaderboard, setLeaderboard] = useState(null);
+  const [settingsDraft, setSettingsDraft] = useState(null);
+  const [settingsClassId, setSettingsClassId] = useState(classId || '');
   const [explanationText, setExplanationText] = useState('');
   const [helpMessage, setHelpMessage] = useState('');
   const [responseDrafts, setResponseDrafts] = useState({});
@@ -104,12 +106,14 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
   };
 
   const loadTeacher = async () => {
-    const [queueData, analyticsData] = await Promise.all([
+    const [queueData, analyticsData, settingsData] = await Promise.all([
       peerLearningApi.teacherQueue(user),
-      peerLearningApi.teacherAnalytics(user)
+      peerLearningApi.teacherAnalytics(user),
+      peerLearningApi.settings(user, { classId: settingsClassId })
     ]);
     setQueue(queueData);
     setAnalytics(analyticsData);
+    setSettingsDraft(settingsData);
   };
 
   const load = async () => {
@@ -124,7 +128,7 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
 
   useEffect(() => {
     load();
-  }, [mode, query.questionId, query.classId]);
+  }, [mode, query.questionId, query.classId, settingsClassId]);
 
   const runStudentAction = async (action) => {
     setBusy(true);
@@ -255,6 +259,23 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
     }
   };
 
+  const updateSettings = async (patch = settingsDraft) => {
+    setBusy(true);
+    setError('');
+    try {
+      const next = await peerLearningApi.updateSettings(user, {
+        ...(patch || {}),
+        classId: settingsClassId
+      });
+      setSettingsDraft(next);
+      await loadTeacher();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const moderate = async (targetType, targetId, action) => {
     setBusy(true);
     setError('');
@@ -289,6 +310,36 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
         </div>
         <SafetyNotice />
         {error && <div className="peer-error"><AlertTriangle size={16} /> {error}</div>}
+
+        <div className="peer-panel">
+          <h4><ShieldCheck size={18} /> Peer Learning Controls</h4>
+          <div className="peer-form-row">
+            <input value={settingsClassId} onChange={(event) => setSettingsClassId(event.target.value)} placeholder="Class ID or room code; blank means default" />
+            <button disabled={busy} onClick={() => updateSettings(settingsDraft)}>Save controls</button>
+          </div>
+          <div className="peer-settings-grid">
+            {[
+              ['peerExplanations', 'Peer explanations'],
+              ['helpRequests', 'Help requests'],
+              ['studentQuestions', 'Student-created questions'],
+              ['peerChallenges', 'Peer challenges'],
+              ['peerReviews', 'Peer reviews'],
+              ['wrongExchanges', 'Wrong question exchange'],
+              ['learningGuilds', 'Learning guilds'],
+              ['allowAnonymous', 'Allow anonymous display']
+            ].map(([key, label]) => (
+              <label key={key} className="peer-toggle">
+                <input
+                  type="checkbox"
+                  checked={settingsDraft?.[key] !== false}
+                  onChange={(event) => setSettingsDraft({ ...(settingsDraft || {}), [key]: event.target.checked })}
+                />
+                <span>{label}</span>
+              </label>
+            ))}
+          </div>
+          <p className="peer-muted">These controls are enforced by backend APIs. Disabled features are hidden from students and rejected server-side.</p>
+        </div>
 
         <div className="peer-analytics-grid">
           <div><strong>{analytics?.totals?.peerExplanations || 0}</strong><span>Explanations</span></div>
@@ -373,6 +424,9 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
     );
   }
 
+  const studentSettings = overview?.settings || {};
+  const featureEnabled = (key) => studentSettings[key] !== false;
+
   return (
     <section className={`peer-learning-hub student-mode ${compact ? 'compact' : ''}`}>
       <div className="peer-hub-header">
@@ -386,19 +440,24 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
       {error && <div className="peer-error"><AlertTriangle size={16} /> {error}</div>}
 
       <div className="peer-student-grid">
+        {featureEnabled('peerExplanations') && (
         <div className="peer-panel">
           <h4><MessageSquareText size={18} /> Peer Explanation</h4>
           <textarea value={explanationText} onChange={(event) => setExplanationText(event.target.value)} placeholder="Explain the key idea with a hint, example, or steps." />
           <button className="primary-btn" disabled={busy || explanationText.trim().length < 12} onClick={submitExplanation}>Submit for review</button>
         </div>
+        )}
+        {featureEnabled('helpRequests') && (
         <div className="peer-panel">
           <h4><HelpCircle size={18} /> Ask for Help</h4>
           <textarea value={helpMessage} onChange={(event) => setHelpMessage(event.target.value)} placeholder="Describe where you are stuck. Ask for a hint, not just the answer." />
           <button className="secondary-gold-outline-btn" disabled={busy || helpMessage.trim().length < 8} onClick={createHelpRequest}>Create help request</button>
         </div>
+        )}
       </div>
 
       <div className="peer-student-grid">
+        {featureEnabled('studentQuestions') && (
         <div className="peer-panel">
           <h4><BookOpenCheck size={18} /> Student-Created Question</h4>
           <input value={studentQuestionDraft.prompt} onChange={(event) => setStudentQuestionDraft({ ...studentQuestionDraft, prompt: event.target.value })} placeholder="Question prompt" />
@@ -415,7 +474,9 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
           <textarea value={studentQuestionDraft.creationReason} onChange={(event) => setStudentQuestionDraft({ ...studentQuestionDraft, creationReason: event.target.value })} placeholder="Why did you design this question?" />
           <button disabled={busy || studentQuestionDraft.prompt.trim().length < 8 || studentQuestionDraft.answer.trim().length < 1} onClick={submitStudentQuestion}>Submit for review</button>
         </div>
+        )}
 
+        {featureEnabled('peerChallenges') && (
         <div className="peer-panel">
           <h4><Trophy size={18} /> Peer Challenge</h4>
           <input value={challengeDraft.opponentStudentId} onChange={(event) => setChallengeDraft({ ...challengeDraft, opponentStudentId: event.target.value })} placeholder="Opponent student ID; leave blank for random" />
@@ -443,9 +504,11 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
             </div>
           ))}
         </div>
+        )}
       </div>
 
       <div className="peer-student-grid">
+        {featureEnabled('peerReviews') && (
         <div className="peer-panel">
           <h4><MessageSquareText size={18} /> Peer Review</h4>
           <input value={peerReviewDraft.reviewerStudentId} onChange={(event) => setPeerReviewDraft({ ...peerReviewDraft, reviewerStudentId: event.target.value })} placeholder="Reviewer student ID" />
@@ -466,7 +529,9 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
             </div>
           ))}
         </div>
+        )}
 
+        {featureEnabled('wrongExchanges') && (
         <div className="peer-panel">
           <h4><HandHeart size={18} /> Wrong Question Exchange</h4>
           <input value={wrongExchangeDraft.partnerStudentId} onChange={(event) => setWrongExchangeDraft({ ...wrongExchangeDraft, partnerStudentId: event.target.value })} placeholder="Partner student ID" />
@@ -486,9 +551,11 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
             </div>
           ))}
         </div>
+        )}
       </div>
 
       <div className="peer-two-column">
+        {featureEnabled('learningGuilds') && (
         <div className="peer-panel">
           <h4><Users size={18} /> Learning Guilds</h4>
           {(overview?.learningGuilds || []).length === 0 && <p className="peer-empty">No learning guilds yet.</p>}
@@ -504,7 +571,9 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
             </div>
           ))}
         </div>
+        )}
 
+        {featureEnabled('peerExplanations') && (
         <div className="peer-panel">
           <h4><Star size={18} /> Featured Explanations</h4>
           {(overview?.explanations || []).length === 0 && <p className="peer-empty">No explanations for this question yet.</p>}
@@ -520,9 +589,11 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
             </div>
           ))}
         </div>
+        )}
       </div>
 
       <div className="peer-two-column">
+        {featureEnabled('helpRequests') && (
         <div className="peer-panel">
           <h4><HandHeart size={18} /> Help Requests</h4>
           {(overview?.helpRequests || []).length === 0 && <p className="peer-empty">No help requests for this question yet.</p>}
@@ -549,6 +620,7 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
             </div>
           ))}
         </div>
+        )}
 
         <div className="peer-panel">
           <h4><Trophy size={18} /> Healthy Collaboration Leaderboard</h4>

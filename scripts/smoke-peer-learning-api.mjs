@@ -106,6 +106,64 @@ try {
     knowledgePoint: 'Addition'
   };
 
+  const settingsClassId = 'smoke-settings-class';
+  const { response: defaultSettingsResponse, json: defaultSettings } = await jsonRequest(`/api/peer-learning/settings?classId=${settingsClassId}`, {
+    headers: teacherHeaders
+  });
+  assert(defaultSettingsResponse.ok, 'Default peer learning settings failed.');
+  assert(defaultSettings.studentQuestions === true, 'Student questions should be enabled by default.');
+
+  const studentSettingsUpdate = await request('/api/peer-learning/settings', {
+    method: 'PUT',
+    headers: {
+      ...studentAHeaders,
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify({ classId: settingsClassId, studentQuestions: false })
+  });
+  assert(studentSettingsUpdate.status === 403, 'Student should not update peer learning settings.');
+
+  const { response: disableSettingsResponse, json: disabledSettings } = await jsonRequest('/api/peer-learning/settings', {
+    method: 'PUT',
+    headers: teacherHeaders,
+    body: {
+      classId: settingsClassId,
+      studentQuestions: false,
+      peerChallenges: false
+    }
+  });
+  assert(disableSettingsResponse.ok, 'Teacher settings update failed.');
+  assert(disabledSettings.studentQuestions === false, 'Student questions setting did not disable.');
+
+  const disabledStudentQuestion = await request('/api/peer-learning/student-questions', {
+    method: 'POST',
+    headers: {
+      ...studentAHeaders,
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify({
+      classId: settingsClassId,
+      prompt: 'This should be blocked by teacher settings.',
+      type: 'short_answer',
+      answer: 'Blocked'
+    })
+  });
+  assert(disabledStudentQuestion.status === 403, 'Disabled student question creation should be rejected server-side.');
+
+  const disabledChallenge = await request('/api/peer-learning/challenges', {
+    method: 'POST',
+    headers: {
+      ...studentAHeaders,
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify({
+      classId: settingsClassId,
+      opponentStudentId: studentBHeaders['x-user-id'],
+      mode: 'one_v_one'
+    })
+  });
+  assert(disabledChallenge.status === 403, 'Disabled peer challenge creation should be rejected server-side.');
+
   const { response: explanationResponse, json: explanation } = await jsonRequest('/api/peer-learning/explanations', {
     method: 'POST',
     headers: studentAHeaders,

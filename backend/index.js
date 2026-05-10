@@ -118,6 +118,7 @@ app.get('/api/health', (req, res) => {
       peerReviewAssignments: store.peerReviewAssignments.length,
       wrongQuestionExchanges: store.wrongQuestionExchanges.length,
       learningGuilds: store.learningGuilds.length,
+      peerLearningSettings: store.peerLearningSettings.length,
       auditLogs: store.auditLogs.length
     }
   });
@@ -133,7 +134,7 @@ function createId(prefix) {
 
 function readStore() {
   if (!fs.existsSync(storeFilePath)) {
-    fs.writeFileSync(storeFilePath, JSON.stringify({ questionBanks: [], shares: [], auditLogs: [], activities: [], studentAnswers: [], questionAnalytics: [], peerExplanations: [], helpRequests: [], helpResponses: [], studentCreatedQuestions: [], peerChallenges: [], peerReviewAssignments: [], wrongQuestionExchanges: [], learningGuilds: [], moderationLogs: [] }, null, 2));
+    fs.writeFileSync(storeFilePath, JSON.stringify({ questionBanks: [], shares: [], auditLogs: [], activities: [], studentAnswers: [], questionAnalytics: [], peerExplanations: [], helpRequests: [], helpResponses: [], studentCreatedQuestions: [], peerChallenges: [], peerReviewAssignments: [], wrongQuestionExchanges: [], learningGuilds: [], peerLearningSettings: [], moderationLogs: [] }, null, 2));
   }
 
   try {
@@ -153,11 +154,12 @@ function readStore() {
       peerReviewAssignments: Array.isArray(parsed.peerReviewAssignments) ? parsed.peerReviewAssignments : [],
       wrongQuestionExchanges: Array.isArray(parsed.wrongQuestionExchanges) ? parsed.wrongQuestionExchanges : [],
       learningGuilds: Array.isArray(parsed.learningGuilds) ? parsed.learningGuilds : [],
+      peerLearningSettings: Array.isArray(parsed.peerLearningSettings) ? parsed.peerLearningSettings : [],
       moderationLogs: Array.isArray(parsed.moderationLogs) ? parsed.moderationLogs : []
     };
   } catch (error) {
     console.error('Unable to read question bank store:', error);
-    return { questionBanks: [], shares: [], auditLogs: [], activities: [], studentAnswers: [], questionAnalytics: [], peerExplanations: [], helpRequests: [], helpResponses: [], studentCreatedQuestions: [], peerChallenges: [], peerReviewAssignments: [], wrongQuestionExchanges: [], learningGuilds: [], moderationLogs: [] };
+    return { questionBanks: [], shares: [], auditLogs: [], activities: [], studentAnswers: [], questionAnalytics: [], peerExplanations: [], helpRequests: [], helpResponses: [], studentCreatedQuestions: [], peerChallenges: [], peerReviewAssignments: [], wrongQuestionExchanges: [], learningGuilds: [], peerLearningSettings: [], moderationLogs: [] };
   }
 }
 
@@ -1264,6 +1266,72 @@ function publicLearningGuild(guild, principal) {
   };
 }
 
+const PEER_LEARNING_SETTING_KEYS = [
+  'peerExplanations',
+  'helpRequests',
+  'studentQuestions',
+  'peerChallenges',
+  'peerReviews',
+  'wrongExchanges',
+  'learningGuilds',
+  'allowAnonymous',
+  'moderationRequired'
+];
+
+function defaultPeerLearningSettings(classId = '') {
+  return {
+    classId: sanitizeCell(classId || ''),
+    peerExplanations: true,
+    helpRequests: true,
+    studentQuestions: true,
+    peerChallenges: true,
+    peerReviews: true,
+    wrongExchanges: true,
+    learningGuilds: true,
+    allowAnonymous: false,
+    moderationRequired: true,
+    freeChat: false,
+    safetyNote: 'Peer learning is structured around questions, explanations, reviews, wrong-question repair, and guild missions. Teachers keep final moderation control.'
+  };
+}
+
+function getPeerLearningSettings(store, classId = '') {
+  const normalizedClassId = sanitizeCell(classId || '');
+  const saved = (store.peerLearningSettings || []).find((item) => item.classId === normalizedClassId);
+  return {
+    ...defaultPeerLearningSettings(normalizedClassId),
+    ...(saved || {})
+  };
+}
+
+function upsertPeerLearningSettings(store, classId, patch, principal) {
+  const normalizedClassId = sanitizeCell(classId || '');
+  const next = getPeerLearningSettings(store, normalizedClassId);
+  PEER_LEARNING_SETTING_KEYS.forEach((key) => {
+    if (typeof patch[key] === 'boolean') next[key] = patch[key];
+  });
+  next.updatedAt = nowIso();
+  next.updatedBy = principal.userId;
+  const existingIndex = (store.peerLearningSettings || []).findIndex((item) => item.classId === normalizedClassId);
+  if (existingIndex >= 0) store.peerLearningSettings[existingIndex] = next;
+  else {
+    store.peerLearningSettings = store.peerLearningSettings || [];
+    store.peerLearningSettings.unshift({ ...next, createdAt: nowIso(), createdBy: principal.userId });
+  }
+  return next;
+}
+
+function ensurePeerFeatureEnabled(store, classId, feature, principal) {
+  const settings = getPeerLearningSettings(store, classId);
+  if (settings[feature] !== false) return { ok: true, settings };
+  return {
+    ok: false,
+    status: 403,
+    error: `${feature} is disabled by the teacher for this class.`,
+    settings
+  };
+}
+
 function computePeerLearningAnalytics(store) {
   const explanations = (store.peerExplanations || []).filter((item) => item.status !== 'deleted');
   const helpRequests = (store.helpRequests || []).filter((item) => item.status !== 'deleted');
@@ -2047,6 +2115,7 @@ app.get('/api/peer-learning/overview', (req, res) => {
   const store = readStore();
   const questionId = sanitizeCell(req.query.questionId || '');
   const classId = sanitizeCell(req.query.classId || '');
+  const settings = getPeerLearningSettings(store, classId);
   const explanations = (store.peerExplanations || [])
     .filter((item) => (!questionId || item.questionId === questionId) && (!classId || item.classId === classId))
     .filter((item) => visiblePeerExplanation(item, req.principal))
@@ -2057,44 +2126,61 @@ app.get('/api/peer-learning/overview', (req, res) => {
     .slice(0, 60)
     .map((item) => publicHelpRequest(item, store, req.principal));
   res.json({
-    settings: {
-      peerExplanations: true,
-      helpRequests: true,
-      moderationRequired: true,
-      freeChat: false,
-      safetyNote: 'Peer learning is structured around questions, explanations, and help requests. Teachers keep final moderation control.'
-    },
-    explanations,
-    helpRequests,
-    studentQuestions: (store.studentCreatedQuestions || [])
+    settings,
+    explanations: settings.peerExplanations ? explanations : [],
+    helpRequests: settings.helpRequests ? helpRequests : [],
+    studentQuestions: settings.studentQuestions ? (store.studentCreatedQuestions || [])
       .filter((item) => (!questionId || item.questionId === questionId) && (!classId || item.classId === classId))
       .filter((item) => visibleStudentQuestion(item, req.principal))
       .slice(0, 40)
-      .map((item) => publicStudentQuestion(item, req.principal)),
-    challenges: (store.peerChallenges || [])
+      .map((item) => publicStudentQuestion(item, req.principal)) : [],
+    challenges: settings.peerChallenges ? (store.peerChallenges || [])
       .filter((item) => item.status !== 'deleted' && (!classId || item.classId === classId))
       .map((item) => publicPeerChallenge(item, req.principal))
       .filter(Boolean)
-      .slice(0, 30),
-    peerReviews: (store.peerReviewAssignments || [])
+      .slice(0, 30) : [],
+    peerReviews: settings.peerReviews ? (store.peerReviewAssignments || [])
       .filter((item) => item.status !== 'deleted' && (!classId || item.classId === classId))
       .map((item) => publicPeerReviewAssignment(item, req.principal))
       .filter(Boolean)
-      .slice(0, 30),
-    wrongExchanges: (store.wrongQuestionExchanges || [])
+      .slice(0, 30) : [],
+    wrongExchanges: settings.wrongExchanges ? (store.wrongQuestionExchanges || [])
       .filter((item) => item.status !== 'deleted' && (!classId || item.classId === classId))
       .map((item) => publicWrongQuestionExchange(item, req.principal))
       .filter(Boolean)
-      .slice(0, 30),
-    learningGuilds: (store.learningGuilds || [])
+      .slice(0, 30) : [],
+    learningGuilds: settings.learningGuilds ? (store.learningGuilds || [])
       .filter((item) => item.status !== 'deleted' && (!classId || item.classId === classId))
       .map((item) => publicLearningGuild(item, req.principal))
-      .slice(0, 20),
+      .slice(0, 20) : [],
     leaderboard: computePeerLearningAnalytics(store).leaderboard.slice(0, 10)
   });
 });
 
+app.get('/api/peer-learning/settings', (req, res) => {
+  const store = readStore();
+  const classId = sanitizeCell(req.query.classId || '');
+  res.json(getPeerLearningSettings(store, classId));
+});
+
+app.put('/api/peer-learning/settings', requireTeacher, rateLimitMutations, (req, res) => {
+  const classId = sanitizeCell(req.body.classId || req.query.classId || '');
+  const store = readStore();
+  const before = getPeerLearningSettings(store, classId);
+  const settings = upsertPeerLearningSettings(store, classId, req.body || {}, req.principal);
+  addAudit(store, req.principal, 'UPDATE_PEER_LEARNING_SETTINGS', 'peerLearningSettings', classId || 'global', {
+    classId,
+    before,
+    after: settings
+  });
+  writeStore(store);
+  res.json(settings);
+});
+
 app.post('/api/peer-learning/explanations', rateLimitMutations, (req, res) => {
+  const store = readStore();
+  const feature = ensurePeerFeatureEnabled(store, req.body.classId || '', 'peerExplanations', req.principal);
+  if (!feature.ok) return res.status(feature.status).json({ error: feature.error, settings: feature.settings });
   const text = sanitizeCell(req.body.explanationText || req.body.text || '');
   if (text.length < 12) return res.status(400).json({ error: 'Explanation must include a meaningful learning hint or reasoning.' });
   const explanation = {
@@ -2120,7 +2206,6 @@ app.post('/api/peer-learning/explanations', rateLimitMutations, (req, res) => {
     createdAt: nowIso(),
     updatedAt: nowIso()
   };
-  const store = readStore();
   store.peerExplanations.unshift(explanation);
   addAudit(store, req.principal, 'SUBMIT_PEER_EXPLANATION', 'peerExplanation', explanation.id, {
     questionId: explanation.questionId,
@@ -2135,6 +2220,8 @@ app.post('/api/peer-learning/explanations/:id/vote', rateLimitMutations, (req, r
   const store = readStore();
   const explanation = store.peerExplanations.find((item) => item.id === req.params.id && item.status !== 'deleted');
   if (!explanation) return res.status(404).json({ error: 'Peer explanation not found.' });
+  const feature = ensurePeerFeatureEnabled(store, explanation.classId || '', 'peerExplanations', req.principal);
+  if (!feature.ok) return res.status(feature.status).json({ error: feature.error, settings: feature.settings });
   if (!visiblePeerExplanation(explanation, req.principal)) return res.status(403).json({ error: 'This explanation is not available.' });
   const voteType = sanitizeCell(req.body.voteType || '');
   if (!['helpful', 'clear', 'needs_improvement'].includes(voteType)) return res.status(400).json({ error: 'Unsupported vote type.' });
@@ -2150,6 +2237,9 @@ app.post('/api/peer-learning/explanations/:id/vote', rateLimitMutations, (req, r
 });
 
 app.post('/api/peer-learning/help-requests', rateLimitMutations, (req, res) => {
+  const store = readStore();
+  const feature = ensurePeerFeatureEnabled(store, req.body.classId || '', 'helpRequests', req.principal);
+  if (!feature.ok) return res.status(feature.status).json({ error: feature.error, settings: feature.settings });
   const message = sanitizeCell(req.body.message || '');
   if (message.length < 8) return res.status(400).json({ error: 'Help request must describe where you are stuck.' });
   const request = {
@@ -2170,7 +2260,6 @@ app.post('/api/peer-learning/help-requests', rateLimitMutations, (req, res) => {
     createdAt: nowIso(),
     resolvedAt: null
   };
-  const store = readStore();
   store.helpRequests.unshift(request);
   addAudit(store, req.principal, 'CREATE_HELP_REQUEST', 'helpRequest', request.id, {
     questionId: request.questionId,
@@ -2185,6 +2274,8 @@ app.post('/api/peer-learning/help-requests/:id/responses', rateLimitMutations, (
   const store = readStore();
   const request = store.helpRequests.find((item) => item.id === req.params.id && item.status !== 'deleted');
   if (!request) return res.status(404).json({ error: 'Help request not found.' });
+  const feature = ensurePeerFeatureEnabled(store, request.classId || '', 'helpRequests', req.principal);
+  if (!feature.ok) return res.status(feature.status).json({ error: feature.error, settings: feature.settings });
   if (request.status === 'resolved') return res.status(400).json({ error: 'This help request is already resolved.' });
   const content = sanitizeCell(req.body.content || '');
   if (content.length < 8) return res.status(400).json({ error: 'Help response must include a hint, example, or explanation.' });
@@ -2221,6 +2312,8 @@ app.post('/api/peer-learning/help-responses/:id/mark-helpful', rateLimitMutation
   if (!response) return res.status(404).json({ error: 'Help response not found.' });
   const request = store.helpRequests.find((item) => item.id === response.helpRequestId);
   if (!request) return res.status(404).json({ error: 'Help request not found.' });
+  const feature = ensurePeerFeatureEnabled(store, request.classId || '', 'helpRequests', req.principal);
+  if (!feature.ok) return res.status(feature.status).json({ error: feature.error, settings: feature.settings });
   if (request.studentId !== req.principal.userId && !isTeacherRole(req.principal)) return res.status(403).json({ error: 'Only the requester or teacher can mark a response helpful.' });
   response.helpfulMarked = true;
   request.status = 'resolved';
@@ -2245,6 +2338,9 @@ app.get('/api/peer-learning/student-questions', (req, res) => {
 });
 
 app.post('/api/peer-learning/student-questions', rateLimitMutations, (req, res) => {
+  const store = readStore();
+  const feature = ensurePeerFeatureEnabled(store, req.body.classId || '', 'studentQuestions', req.principal);
+  if (!feature.ok) return res.status(feature.status).json({ error: feature.error, settings: feature.settings });
   const prompt = sanitizeCell(req.body.prompt || req.body.questionPrompt || '');
   const answer = sanitizeCell(req.body.answer || '');
   if (prompt.length < 8) return res.status(400).json({ error: 'Student-created question must include a clear prompt.' });
@@ -2283,7 +2379,6 @@ app.post('/api/peer-learning/student-questions', rateLimitMutations, (req, res) 
     createdAt: nowIso(),
     updatedAt: nowIso()
   };
-  const store = readStore();
   store.studentCreatedQuestions.unshift(studentQuestion);
   addAudit(store, req.principal, 'SUBMIT_STUDENT_CREATED_QUESTION', 'studentQuestion', studentQuestion.id, {
     classId: studentQuestion.classId,
@@ -2298,6 +2393,8 @@ app.post('/api/peer-learning/student-questions/:id/vote', rateLimitMutations, (r
   const store = readStore();
   const studentQuestion = store.studentCreatedQuestions.find((item) => item.id === req.params.id && item.status !== 'deleted');
   if (!studentQuestion) return res.status(404).json({ error: 'Student-created question not found.' });
+  const feature = ensurePeerFeatureEnabled(store, studentQuestion.classId || '', 'studentQuestions', req.principal);
+  if (!feature.ok) return res.status(feature.status).json({ error: feature.error, settings: feature.settings });
   if (!visibleStudentQuestion(studentQuestion, req.principal)) return res.status(403).json({ error: 'This student-created question is not available.' });
   const clarity = Math.max(0, Math.min(5, Number(req.body.clarity || 0)));
   const correctness = Math.max(0, Math.min(5, Number(req.body.correctness || 0)));
@@ -2327,6 +2424,9 @@ app.get('/api/peer-learning/challenges', (req, res) => {
 });
 
 app.post('/api/peer-learning/challenges', rateLimitMutations, (req, res) => {
+  const store = readStore();
+  const feature = ensurePeerFeatureEnabled(store, req.body.classId || '', 'peerChallenges', req.principal);
+  if (!feature.ok) return res.status(feature.status).json({ error: feature.error, settings: feature.settings });
   const opponentStudentId = sanitizeCell(req.body.opponentStudentId || '');
   const mode = sanitizeCell(req.body.mode || 'one_v_one');
   if (!['one_v_one', 'random', 'rematch', 'weakness'].includes(mode)) return res.status(400).json({ error: 'Unsupported peer challenge mode.' });
@@ -2350,7 +2450,6 @@ app.post('/api/peer-learning/challenges', rateLimitMutations, (req, res) => {
     createdAt: nowIso(),
     completedAt: null
   };
-  const store = readStore();
   store.peerChallenges.unshift(challenge);
   addAudit(store, req.principal, 'CREATE_PEER_CHALLENGE', 'peerChallenge', challenge.id, {
     classId: challenge.classId,
@@ -2365,6 +2464,8 @@ app.post('/api/peer-learning/challenges/:id/respond', rateLimitMutations, (req, 
   const store = readStore();
   const challenge = store.peerChallenges.find((item) => item.id === req.params.id && item.status !== 'deleted');
   if (!challenge) return res.status(404).json({ error: 'Peer challenge not found.' });
+  const feature = ensurePeerFeatureEnabled(store, challenge.classId || '', 'peerChallenges', req.principal);
+  if (!feature.ok) return res.status(feature.status).json({ error: feature.error, settings: feature.settings });
   if (challenge.opponentStudentId !== req.principal.userId && !isTeacherRole(req.principal)) return res.status(403).json({ error: 'Only the challenged student or teacher can respond.' });
   const action = sanitizeCell(req.body.action || '');
   if (!['accept', 'decline'].includes(action)) return res.status(400).json({ error: 'Unsupported challenge response.' });
@@ -2379,6 +2480,8 @@ app.post('/api/peer-learning/challenges/:id/complete', rateLimitMutations, (req,
   const store = readStore();
   const challenge = store.peerChallenges.find((item) => item.id === req.params.id && item.status !== 'deleted');
   if (!challenge) return res.status(404).json({ error: 'Peer challenge not found.' });
+  const feature = ensurePeerFeatureEnabled(store, challenge.classId || '', 'peerChallenges', req.principal);
+  if (!feature.ok) return res.status(feature.status).json({ error: feature.error, settings: feature.settings });
   const isParticipant = [challenge.challengerStudentId, challenge.opponentStudentId].includes(req.principal.userId);
   if (!isParticipant && !isTeacherRole(req.principal)) return res.status(403).json({ error: 'Only participants or teacher can complete this challenge.' });
   const scores = req.body.scores && typeof req.body.scores === 'object' ? req.body.scores : {};
@@ -2418,6 +2521,9 @@ app.get('/api/peer-learning/peer-reviews', (req, res) => {
 });
 
 app.post('/api/peer-learning/peer-reviews', rateLimitMutations, (req, res) => {
+  const store = readStore();
+  const feature = ensurePeerFeatureEnabled(store, req.body.classId || '', 'peerReviews', req.principal);
+  if (!feature.ok) return res.status(feature.status).json({ error: feature.error, settings: feature.settings });
   const reviewerStudentId = sanitizeCell(req.body.reviewerStudentId || '');
   const submissionText = sanitizeCell(req.body.submissionText || '');
   if (!reviewerStudentId) return res.status(400).json({ error: 'Reviewer student id is required.' });
@@ -2440,7 +2546,6 @@ app.post('/api/peer-learning/peer-reviews', rateLimitMutations, (req, res) => {
     createdAt: nowIso(),
     submittedAt: null
   };
-  const store = readStore();
   store.peerReviewAssignments.unshift(assignment);
   addAudit(store, req.principal, 'CREATE_PEER_REVIEW_ASSIGNMENT', 'peerReview', assignment.id, {
     classId: assignment.classId,
@@ -2454,6 +2559,8 @@ app.post('/api/peer-learning/peer-reviews/:id/submit', rateLimitMutations, (req,
   const store = readStore();
   const assignment = store.peerReviewAssignments.find((item) => item.id === req.params.id && item.status !== 'deleted');
   if (!assignment) return res.status(404).json({ error: 'Peer review assignment not found.' });
+  const feature = ensurePeerFeatureEnabled(store, assignment.classId || '', 'peerReviews', req.principal);
+  if (!feature.ok) return res.status(feature.status).json({ error: feature.error, settings: feature.settings });
   if (assignment.reviewerStudentId !== req.principal.userId && !isTeacherRole(req.principal)) return res.status(403).json({ error: 'Only the assigned reviewer or teacher can submit this review.' });
   const feedbackText = sanitizeCell(req.body.feedbackText || '');
   if (feedbackText.length < 12) return res.status(400).json({ error: 'Peer review feedback must be constructive and specific.' });
@@ -2485,6 +2592,9 @@ app.get('/api/peer-learning/wrong-exchanges', (req, res) => {
 });
 
 app.post('/api/peer-learning/wrong-exchanges', rateLimitMutations, (req, res) => {
+  const store = readStore();
+  const feature = ensurePeerFeatureEnabled(store, req.body.classId || '', 'wrongExchanges', req.principal);
+  if (!feature.ok) return res.status(feature.status).json({ error: feature.error, settings: feature.settings });
   const studentBId = sanitizeCell(req.body.partnerStudentId || req.body.studentBId || '');
   if (!studentBId) return res.status(400).json({ error: 'Partner student id is required for wrong question exchange.' });
   const exchange = {
@@ -2504,7 +2614,6 @@ app.post('/api/peer-learning/wrong-exchanges', rateLimitMutations, (req, res) =>
     createdAt: nowIso(),
     completedAt: null
   };
-  const store = readStore();
   store.wrongQuestionExchanges.unshift(exchange);
   addAudit(store, req.principal, 'CREATE_WRONG_QUESTION_EXCHANGE', 'wrongExchange', exchange.id, {
     classId: exchange.classId,
@@ -2519,6 +2628,8 @@ app.post('/api/peer-learning/wrong-exchanges/:id/complete', rateLimitMutations, 
   const store = readStore();
   const exchange = store.wrongQuestionExchanges.find((item) => item.id === req.params.id && item.status !== 'deleted');
   if (!exchange) return res.status(404).json({ error: 'Wrong question exchange not found.' });
+  const feature = ensurePeerFeatureEnabled(store, exchange.classId || '', 'wrongExchanges', req.principal);
+  if (!feature.ok) return res.status(feature.status).json({ error: feature.error, settings: feature.settings });
   const isParticipant = [exchange.studentAId, exchange.studentBId].includes(req.principal.userId);
   if (!isParticipant && !isTeacherRole(req.principal)) return res.status(403).json({ error: 'Only participants or teacher can complete this exchange.' });
   const reflection = sanitizeCell(req.body.reflection || '');
@@ -2549,6 +2660,9 @@ app.get('/api/peer-learning/guilds', (req, res) => {
 });
 
 app.post('/api/peer-learning/guilds', requireTeacher, rateLimitMutations, (req, res) => {
+  const store = readStore();
+  const feature = ensurePeerFeatureEnabled(store, req.body.classId || '', 'learningGuilds', req.principal);
+  if (!feature.ok) return res.status(feature.status).json({ error: feature.error, settings: feature.settings });
   const name = sanitizeCell(req.body.name || '');
   if (name.length < 2) return res.status(400).json({ error: 'Learning guild name is required.' });
   const guild = {
@@ -2565,7 +2679,6 @@ app.post('/api/peer-learning/guilds', requireTeacher, rateLimitMutations, (req, 
     createdAt: nowIso(),
     updatedAt: nowIso()
   };
-  const store = readStore();
   store.learningGuilds.unshift(guild);
   addAudit(store, req.principal, 'CREATE_LEARNING_GUILD', 'learningGuild', guild.id, {
     classId: guild.classId,
@@ -2579,6 +2692,8 @@ app.post('/api/peer-learning/guilds/:id/join', rateLimitMutations, (req, res) =>
   const store = readStore();
   const guild = store.learningGuilds.find((item) => item.id === req.params.id && item.status !== 'deleted');
   if (!guild) return res.status(404).json({ error: 'Learning guild not found.' });
+  const feature = ensurePeerFeatureEnabled(store, guild.classId || '', 'learningGuilds', req.principal);
+  if (!feature.ok) return res.status(feature.status).json({ error: feature.error, settings: feature.settings });
   if (guild.moderationLocked && !isTeacherRole(req.principal)) return res.status(403).json({ error: 'This learning guild is locked by the teacher.' });
   guild.members = guild.members || [];
   if (!guild.members.some((member) => member.studentId === req.principal.userId)) {
@@ -2600,6 +2715,8 @@ app.post('/api/peer-learning/guilds/:id/progress', rateLimitMutations, (req, res
   const store = readStore();
   const guild = store.learningGuilds.find((item) => item.id === req.params.id && item.status !== 'deleted');
   if (!guild) return res.status(404).json({ error: 'Learning guild not found.' });
+  const feature = ensurePeerFeatureEnabled(store, guild.classId || '', 'learningGuilds', req.principal);
+  if (!feature.ok) return res.status(feature.status).json({ error: feature.error, settings: feature.settings });
   const canModerate = isTeacherRole(req.principal);
   const member = (guild.members || []).find((item) => item.studentId === req.principal.userId);
   if (!member && !canModerate) return res.status(403).json({ error: 'Join this learning guild before adding progress.' });

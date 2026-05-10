@@ -52,6 +52,22 @@ export const peerLearningApi = {
     return parseResponse(response);
   },
 
+  async settings(user, params = {}) {
+    const response = await fetch(`${API_BASE}/api/peer-learning/settings${queryString(params)}`, {
+      headers: await headersFor(user)
+    });
+    return parseResponse(response);
+  },
+
+  async updateSettings(user, payload) {
+    const response = await fetch(`${API_BASE}/api/peer-learning/settings`, {
+      method: 'PUT',
+      headers: await headersFor(user, { 'Content-Type': 'application/json' }, 'teacher'),
+      body: JSON.stringify(payload || {})
+    });
+    return parseResponse(response);
+  },
+
   async submitExplanation(user, payload) {
     const response = await fetch(`${API_BASE}/api/peer-learning/explanations`, {
       method: 'POST',
