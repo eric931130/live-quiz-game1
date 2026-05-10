@@ -113,6 +113,8 @@ app.get('/api/health', (req, res) => {
       peerExplanations: store.peerExplanations.length,
       helpRequests: store.helpRequests.length,
       helpResponses: store.helpResponses.length,
+      studentCreatedQuestions: store.studentCreatedQuestions.length,
+      peerChallenges: store.peerChallenges.length,
       auditLogs: store.auditLogs.length
     }
   });
@@ -128,7 +130,7 @@ function createId(prefix) {
 
 function readStore() {
   if (!fs.existsSync(storeFilePath)) {
-    fs.writeFileSync(storeFilePath, JSON.stringify({ questionBanks: [], shares: [], auditLogs: [], activities: [], studentAnswers: [], questionAnalytics: [], peerExplanations: [], helpRequests: [], helpResponses: [], moderationLogs: [] }, null, 2));
+    fs.writeFileSync(storeFilePath, JSON.stringify({ questionBanks: [], shares: [], auditLogs: [], activities: [], studentAnswers: [], questionAnalytics: [], peerExplanations: [], helpRequests: [], helpResponses: [], studentCreatedQuestions: [], peerChallenges: [], moderationLogs: [] }, null, 2));
   }
 
   try {
@@ -143,11 +145,13 @@ function readStore() {
       peerExplanations: Array.isArray(parsed.peerExplanations) ? parsed.peerExplanations : [],
       helpRequests: Array.isArray(parsed.helpRequests) ? parsed.helpRequests : [],
       helpResponses: Array.isArray(parsed.helpResponses) ? parsed.helpResponses : [],
+      studentCreatedQuestions: Array.isArray(parsed.studentCreatedQuestions) ? parsed.studentCreatedQuestions : [],
+      peerChallenges: Array.isArray(parsed.peerChallenges) ? parsed.peerChallenges : [],
       moderationLogs: Array.isArray(parsed.moderationLogs) ? parsed.moderationLogs : []
     };
   } catch (error) {
     console.error('Unable to read question bank store:', error);
-    return { questionBanks: [], shares: [], auditLogs: [], activities: [], studentAnswers: [], questionAnalytics: [], peerExplanations: [], helpRequests: [], helpResponses: [], moderationLogs: [] };
+    return { questionBanks: [], shares: [], auditLogs: [], activities: [], studentAnswers: [], questionAnalytics: [], peerExplanations: [], helpRequests: [], helpResponses: [], studentCreatedQuestions: [], peerChallenges: [], moderationLogs: [] };
   }
 }
 
@@ -1187,10 +1191,44 @@ function publicHelpRequest(request, store, principal) {
   };
 }
 
+function publicStudentQuestion(question, principal) {
+  const canModerate = isTeacherRole(principal);
+  return {
+    ...question,
+    creatorStudentId: canModerate || question.creatorStudentId === principal.userId ? question.creatorStudentId : undefined,
+    creatorName: question.anonymous && !canModerate ? 'Anonymous creator' : question.creatorName,
+    votes: undefined,
+    myVote: (question.votes || []).find((vote) => vote.studentId === principal.userId) || null
+  };
+}
+
+function visibleStudentQuestion(question, principal) {
+  return (
+    question.status === 'approved' ||
+    question.status === 'added_to_teacher_bank' ||
+    question.creatorStudentId === principal.userId ||
+    isTeacherRole(principal)
+  ) && question.status !== 'deleted';
+}
+
+function publicPeerChallenge(challenge, principal) {
+  const canModerate = isTeacherRole(principal);
+  const isParticipant = [challenge.challengerStudentId, challenge.opponentStudentId].includes(principal.userId);
+  if (!canModerate && !isParticipant && challenge.status !== 'completed') return null;
+  return {
+    ...challenge,
+    challengerStudentId: canModerate || challenge.challengerStudentId === principal.userId ? challenge.challengerStudentId : undefined,
+    opponentStudentId: canModerate || challenge.opponentStudentId === principal.userId ? challenge.opponentStudentId : undefined,
+    scores: challenge.status === 'completed' || canModerate || isParticipant ? challenge.scores : undefined
+  };
+}
+
 function computePeerLearningAnalytics(store) {
   const explanations = (store.peerExplanations || []).filter((item) => item.status !== 'deleted');
   const helpRequests = (store.helpRequests || []).filter((item) => item.status !== 'deleted');
   const helpResponses = (store.helpResponses || []).filter((item) => item.status !== 'deleted');
+  const studentQuestions = (store.studentCreatedQuestions || []).filter((item) => item.status !== 'deleted');
+  const peerChallenges = (store.peerChallenges || []).filter((item) => item.status !== 'deleted');
   const students = {};
   const concepts = {};
 
@@ -1207,6 +1245,9 @@ function computePeerLearningAnalytics(store) {
         helpRequestsResolved: 0,
         helpResponsesSubmitted: 0,
         helpfulResponses: 0,
+        studentQuestionsCreated: 0,
+        studentQuestionsApproved: 0,
+        challengesCompleted: 0,
         teamworkXp: 0
       };
     }
@@ -1241,6 +1282,26 @@ function computePeerLearningAnalytics(store) {
     stat.teamworkXp += 6 + (response.helpfulMarked ? 12 : 0) + (response.teacherApproved ? 8 : 0);
   });
 
+  studentQuestions.forEach((question) => {
+    const stat = studentStat(question.creatorStudentId, question.creatorName);
+    stat.studentQuestionsCreated += 1;
+    if (['approved', 'added_to_teacher_bank'].includes(question.status)) stat.studentQuestionsApproved += 1;
+    stat.teamworkXp += 10 + (['approved', 'added_to_teacher_bank'].includes(question.status) ? 18 : 0) + Math.round(question.qualityScore || 0);
+    const concept = question.knowledgePoint || 'Uncategorized';
+    concepts[concept] = concepts[concept] || { knowledgePoint: concept, helpRequests: 0, explanations: 0, studentQuestions: 0 };
+    concepts[concept].studentQuestions = (concepts[concept].studentQuestions || 0) + 1;
+  });
+
+  peerChallenges.forEach((challenge) => {
+    if (challenge.status !== 'completed') return;
+    [challenge.challengerStudentId, challenge.opponentStudentId].filter(Boolean).forEach((studentId) => {
+      const name = studentId === challenge.challengerStudentId ? challenge.challengerName : challenge.opponentName;
+      const stat = studentStat(studentId, name);
+      stat.challengesCompleted += 1;
+      stat.teamworkXp += Number(challenge.xpAwards?.[studentId] || 10);
+    });
+  });
+
   const leaderboard = Object.values(students)
     .sort((a, b) => b.teamworkXp - a.teamworkXp)
     .slice(0, 20)
@@ -1254,15 +1315,24 @@ function computePeerLearningAnalytics(store) {
       helpRequests: helpRequests.length,
       resolvedHelpRequests: helpRequests.filter((item) => item.status === 'resolved').length,
       helpResponses: helpResponses.length,
+      studentCreatedQuestions: studentQuestions.length,
+      approvedStudentQuestions: studentQuestions.filter((item) => ['approved', 'added_to_teacher_bank'].includes(item.status)).length,
+      peerChallenges: peerChallenges.length,
+      completedPeerChallenges: peerChallenges.filter((item) => item.status === 'completed').length,
       pendingModeration: explanations.filter((item) => ['pending_review', 'flagged', 'returned_for_revision'].includes(item.status)).length +
         helpRequests.filter((item) => item.status === 'flagged').length +
-        helpResponses.filter((item) => ['pending_review', 'flagged'].includes(item.status)).length
+        helpResponses.filter((item) => ['pending_review', 'flagged'].includes(item.status)).length +
+        studentQuestions.filter((item) => ['pending_review', 'flagged', 'returned_for_revision'].includes(item.status)).length +
+        peerChallenges.filter((item) => item.status === 'flagged').length
     },
     leaderboard,
-    conceptHotspots: Object.values(concepts).sort((a, b) => (b.helpRequests + b.explanations) - (a.helpRequests + a.explanations)).slice(0, 12),
+    conceptHotspots: Object.values(concepts)
+      .sort((a, b) => ((b.helpRequests || 0) + (b.explanations || 0) + (b.studentQuestions || 0)) - ((a.helpRequests || 0) + (a.explanations || 0) + (a.studentQuestions || 0)))
+      .slice(0, 12),
     badges: {
       clearExplainers: leaderboard.filter((item) => item.explanationsApproved >= 2 || item.helpfulVotes >= 3).slice(0, 5),
-      helpfulClassmates: leaderboard.filter((item) => item.helpfulResponses >= 1 || item.helpResponsesSubmitted >= 2).slice(0, 5)
+      helpfulClassmates: leaderboard.filter((item) => item.helpfulResponses >= 1 || item.helpResponsesSubmitted >= 2).slice(0, 5),
+      questionDesigners: leaderboard.filter((item) => item.studentQuestionsApproved >= 1 || item.studentQuestionsCreated >= 2).slice(0, 5)
     }
   };
 }
@@ -1271,7 +1341,9 @@ function moderationTarget(store, targetType, targetId) {
   const collections = {
     explanation: store.peerExplanations,
     helpRequest: store.helpRequests,
-    helpResponse: store.helpResponses
+    helpResponse: store.helpResponses,
+    studentQuestion: store.studentCreatedQuestions,
+    peerChallenge: store.peerChallenges
   };
   const collection = collections[targetType];
   if (!collection) return null;
@@ -1907,6 +1979,16 @@ app.get('/api/peer-learning/overview', (req, res) => {
     },
     explanations,
     helpRequests,
+    studentQuestions: (store.studentCreatedQuestions || [])
+      .filter((item) => (!questionId || item.questionId === questionId) && (!classId || item.classId === classId))
+      .filter((item) => visibleStudentQuestion(item, req.principal))
+      .slice(0, 40)
+      .map((item) => publicStudentQuestion(item, req.principal)),
+    challenges: (store.peerChallenges || [])
+      .filter((item) => item.status !== 'deleted' && (!classId || item.classId === classId))
+      .map((item) => publicPeerChallenge(item, req.principal))
+      .filter(Boolean)
+      .slice(0, 30),
     leaderboard: computePeerLearningAnalytics(store).leaderboard.slice(0, 10)
   });
 });
@@ -2047,6 +2129,181 @@ app.post('/api/peer-learning/help-responses/:id/mark-helpful', rateLimitMutation
   res.json(publicHelpRequest(request, store, req.principal));
 });
 
+app.get('/api/peer-learning/student-questions', (req, res) => {
+  const store = readStore();
+  const classId = sanitizeCell(req.query.classId || '');
+  const questionBankId = sanitizeCell(req.query.questionBankId || '');
+  const questions = (store.studentCreatedQuestions || [])
+    .filter((item) => item.status !== 'deleted')
+    .filter((item) => !classId || item.classId === classId)
+    .filter((item) => !questionBankId || item.questionBankId === questionBankId)
+    .filter((item) => visibleStudentQuestion(item, req.principal))
+    .slice(0, 100)
+    .map((item) => publicStudentQuestion(item, req.principal));
+  res.json({ questions });
+});
+
+app.post('/api/peer-learning/student-questions', rateLimitMutations, (req, res) => {
+  const prompt = sanitizeCell(req.body.prompt || req.body.questionPrompt || '');
+  const answer = sanitizeCell(req.body.answer || '');
+  if (prompt.length < 8) return res.status(400).json({ error: 'Student-created question must include a clear prompt.' });
+  if (answer.length < 1) return res.status(400).json({ error: 'Student-created question must include an answer.' });
+  const type = sanitizeCell(req.body.type || 'multiple_choice');
+  if (!['multiple_choice', 'true_false', 'fill_blank', 'short_answer', 'matching', 'essay'].includes(type)) return res.status(400).json({ error: 'Unsupported student-created question type.' });
+  const options = req.body.options && typeof req.body.options === 'object' ? req.body.options : {};
+  const studentQuestion = {
+    id: createId('scq'),
+    creatorStudentId: req.principal.userId,
+    creatorName: peerIdentity(req.principal, req.body.creatorName),
+    classId: sanitizeCell(req.body.classId || ''),
+    questionBankId: sanitizeCell(req.body.questionBankId || ''),
+    questionId: sanitizeCell(req.body.questionId || ''),
+    prompt,
+    type,
+    options: {
+      A: sanitizeCell(options.A || req.body.optionA || ''),
+      B: sanitizeCell(options.B || req.body.optionB || ''),
+      C: sanitizeCell(options.C || req.body.optionC || ''),
+      D: sanitizeCell(options.D || req.body.optionD || '')
+    },
+    answer,
+    explanation: sanitizeCell(req.body.explanation || ''),
+    difficulty: sanitizeCell(req.body.difficulty || 'medium'),
+    knowledgePoint: sanitizeCell(req.body.knowledgePoint || ''),
+    sourceNote: sanitizeCell(req.body.sourceNote || ''),
+    creationReason: sanitizeCell(req.body.creationReason || ''),
+    suggestedUse: sanitizeCell(req.body.suggestedUse || ''),
+    status: 'pending_review',
+    teacherReviewNote: '',
+    qualityScore: 0,
+    votes: [],
+    reportCount: 0,
+    anonymous: Boolean(req.body.anonymous),
+    createdAt: nowIso(),
+    updatedAt: nowIso()
+  };
+  const store = readStore();
+  store.studentCreatedQuestions.unshift(studentQuestion);
+  addAudit(store, req.principal, 'SUBMIT_STUDENT_CREATED_QUESTION', 'studentQuestion', studentQuestion.id, {
+    classId: studentQuestion.classId,
+    questionBankId: studentQuestion.questionBankId,
+    status: studentQuestion.status
+  });
+  writeStore(store);
+  res.status(201).json(publicStudentQuestion(studentQuestion, req.principal));
+});
+
+app.post('/api/peer-learning/student-questions/:id/vote', rateLimitMutations, (req, res) => {
+  const store = readStore();
+  const studentQuestion = store.studentCreatedQuestions.find((item) => item.id === req.params.id && item.status !== 'deleted');
+  if (!studentQuestion) return res.status(404).json({ error: 'Student-created question not found.' });
+  if (!visibleStudentQuestion(studentQuestion, req.principal)) return res.status(403).json({ error: 'This student-created question is not available.' });
+  const clarity = Math.max(0, Math.min(5, Number(req.body.clarity || 0)));
+  const correctness = Math.max(0, Math.min(5, Number(req.body.correctness || 0)));
+  const helpfulness = Math.max(0, Math.min(5, Number(req.body.helpfulness || 0)));
+  const difficultyFit = Math.max(0, Math.min(5, Number(req.body.difficultyFit || 0)));
+  if (![clarity, correctness, helpfulness, difficultyFit].every((score) => score > 0)) return res.status(400).json({ error: 'Quality vote must include clarity, correctness, helpfulness, and difficulty fit scores from 1 to 5.' });
+  studentQuestion.votes = (studentQuestion.votes || []).filter((vote) => vote.studentId !== req.principal.userId);
+  studentQuestion.votes.push({ studentId: req.principal.userId, clarity, correctness, helpfulness, difficultyFit, createdAt: nowIso() });
+  const total = studentQuestion.votes.reduce((sum, vote) => sum + vote.clarity + vote.correctness + vote.helpfulness + vote.difficultyFit, 0);
+  studentQuestion.qualityScore = Math.round((total / (studentQuestion.votes.length * 20)) * 100);
+  studentQuestion.updatedAt = nowIso();
+  addAudit(store, req.principal, 'VOTE_STUDENT_CREATED_QUESTION', 'studentQuestion', studentQuestion.id, { qualityScore: studentQuestion.qualityScore });
+  writeStore(store);
+  res.json(publicStudentQuestion(studentQuestion, req.principal));
+});
+
+app.get('/api/peer-learning/challenges', (req, res) => {
+  const store = readStore();
+  const classId = sanitizeCell(req.query.classId || '');
+  const challenges = (store.peerChallenges || [])
+    .filter((item) => item.status !== 'deleted')
+    .filter((item) => !classId || item.classId === classId)
+    .map((item) => publicPeerChallenge(item, req.principal))
+    .filter(Boolean)
+    .slice(0, 80);
+  res.json({ challenges });
+});
+
+app.post('/api/peer-learning/challenges', rateLimitMutations, (req, res) => {
+  const opponentStudentId = sanitizeCell(req.body.opponentStudentId || '');
+  const mode = sanitizeCell(req.body.mode || 'one_v_one');
+  if (!['one_v_one', 'random', 'rematch', 'weakness'].includes(mode)) return res.status(400).json({ error: 'Unsupported peer challenge mode.' });
+  if (mode !== 'random' && !opponentStudentId) return res.status(400).json({ error: 'Opponent student id is required for this challenge mode.' });
+  const questionIds = Array.isArray(req.body.questionIds) ? req.body.questionIds.map(sanitizeCell).filter(Boolean).slice(0, 20) : [];
+  const challenge = {
+    id: createId('pch'),
+    classId: sanitizeCell(req.body.classId || ''),
+    challengerStudentId: req.principal.userId,
+    challengerName: peerIdentity(req.principal, req.body.challengerName),
+    opponentStudentId,
+    opponentName: sanitizeCell(req.body.opponentName || opponentStudentId || 'Random classmate'),
+    mode,
+    questionIds,
+    status: mode === 'random' ? 'matched' : 'pending',
+    winnerId: null,
+    scores: {},
+    xpAwards: {},
+    fairnessNote: 'Challenge XP rewards completion, improvement, and constructive explanations rather than public shaming.',
+    reportCount: 0,
+    createdAt: nowIso(),
+    completedAt: null
+  };
+  const store = readStore();
+  store.peerChallenges.unshift(challenge);
+  addAudit(store, req.principal, 'CREATE_PEER_CHALLENGE', 'peerChallenge', challenge.id, {
+    classId: challenge.classId,
+    opponentStudentId: challenge.opponentStudentId,
+    mode: challenge.mode
+  });
+  writeStore(store);
+  res.status(201).json(publicPeerChallenge(challenge, req.principal));
+});
+
+app.post('/api/peer-learning/challenges/:id/respond', rateLimitMutations, (req, res) => {
+  const store = readStore();
+  const challenge = store.peerChallenges.find((item) => item.id === req.params.id && item.status !== 'deleted');
+  if (!challenge) return res.status(404).json({ error: 'Peer challenge not found.' });
+  if (challenge.opponentStudentId !== req.principal.userId && !isTeacherRole(req.principal)) return res.status(403).json({ error: 'Only the challenged student or teacher can respond.' });
+  const action = sanitizeCell(req.body.action || '');
+  if (!['accept', 'decline'].includes(action)) return res.status(400).json({ error: 'Unsupported challenge response.' });
+  challenge.status = action === 'accept' ? 'accepted' : 'declined';
+  challenge.respondedAt = nowIso();
+  addAudit(store, req.principal, `${action === 'accept' ? 'ACCEPT' : 'DECLINE'}_PEER_CHALLENGE`, 'peerChallenge', challenge.id, {});
+  writeStore(store);
+  res.json(publicPeerChallenge(challenge, req.principal));
+});
+
+app.post('/api/peer-learning/challenges/:id/complete', rateLimitMutations, (req, res) => {
+  const store = readStore();
+  const challenge = store.peerChallenges.find((item) => item.id === req.params.id && item.status !== 'deleted');
+  if (!challenge) return res.status(404).json({ error: 'Peer challenge not found.' });
+  const isParticipant = [challenge.challengerStudentId, challenge.opponentStudentId].includes(req.principal.userId);
+  if (!isParticipant && !isTeacherRole(req.principal)) return res.status(403).json({ error: 'Only participants or teacher can complete this challenge.' });
+  const scores = req.body.scores && typeof req.body.scores === 'object' ? req.body.scores : {};
+  const challengerScore = Number(scores[challenge.challengerStudentId] || scores.challenger || 0);
+  const opponentScore = Number(scores[challenge.opponentStudentId] || scores.opponent || 0);
+  challenge.scores = {
+    [challenge.challengerStudentId]: Number.isFinite(challengerScore) ? challengerScore : 0,
+    [challenge.opponentStudentId]: Number.isFinite(opponentScore) ? opponentScore : 0
+  };
+  challenge.winnerId = challenge.scores[challenge.challengerStudentId] === challenge.scores[challenge.opponentStudentId]
+    ? null
+    : (challenge.scores[challenge.challengerStudentId] > challenge.scores[challenge.opponentStudentId] ? challenge.challengerStudentId : challenge.opponentStudentId);
+  challenge.xpAwards = {
+    [challenge.challengerStudentId]: 12 + (challenge.winnerId === challenge.challengerStudentId ? 6 : 0),
+    [challenge.opponentStudentId]: 12 + (challenge.winnerId === challenge.opponentStudentId ? 6 : 0)
+  };
+  challenge.status = 'completed';
+  challenge.completedAt = nowIso();
+  addAudit(store, req.principal, 'COMPLETE_PEER_CHALLENGE', 'peerChallenge', challenge.id, {
+    scores: challenge.scores,
+    winnerId: challenge.winnerId
+  });
+  writeStore(store);
+  res.json(publicPeerChallenge(challenge, req.principal));
+});
+
 app.post('/api/peer-learning/report', rateLimitMutations, (req, res) => {
   const targetType = sanitizeCell(req.body.targetType || '');
   const targetId = sanitizeCell(req.body.targetId || '');
@@ -2085,10 +2342,18 @@ app.get('/api/peer-learning/teacher/queue', requireTeacher, (req, res) => {
   const helpResponses = (store.helpResponses || [])
     .filter((item) => ['pending_review', 'flagged'].includes(item.status))
     .map((item) => ({ ...item, targetType: 'helpResponse' }));
+  const studentQuestions = (store.studentCreatedQuestions || [])
+    .filter((item) => ['pending_review', 'flagged', 'returned_for_revision'].includes(item.status))
+    .map((item) => ({ ...publicStudentQuestion(item, req.principal), targetType: 'studentQuestion' }));
+  const peerChallenges = (store.peerChallenges || [])
+    .filter((item) => item.status === 'flagged')
+    .map((item) => ({ ...publicPeerChallenge(item, req.principal), targetType: 'peerChallenge' }));
   res.json({
     explanations,
     helpRequests,
     helpResponses,
+    studentQuestions,
+    peerChallenges,
     moderationLogs: (store.moderationLogs || []).slice(0, 120)
   });
 });
@@ -2112,9 +2377,42 @@ app.post('/api/peer-learning/teacher/moderate', requireTeacher, rateLimitMutatio
     reject: 'rejected',
     return: 'returned_for_revision',
     delete: 'deleted',
-    flag: 'flagged'
+    flag: 'flagged',
+    add_to_teacher_bank: 'added_to_teacher_bank'
   };
   if (!statusByAction[action]) return res.status(400).json({ error: 'Unsupported moderation action.' });
+  if (targetType === 'studentQuestion' && action === 'add_to_teacher_bank') {
+    const bank = (store.questionBanks || []).find((item) => item.id === target.questionBankId && !item.deletedAt);
+    if (!bank) return res.status(400).json({ error: 'A target teacher question bank is required before adding this student question.' });
+    const permission = getPermission(store, bank, req.principal);
+    if (!permission.canEdit) return res.status(403).json({ error: 'Only the question bank owner or admin can add this student question to the bank.' });
+    const addedQuestion = normalizeQuestion({
+      prompt: target.prompt,
+      type: target.type,
+      optionA: target.options?.A,
+      optionB: target.options?.B,
+      optionC: target.options?.C,
+      optionD: target.options?.D,
+      answer: target.answer,
+      explanation: target.explanation,
+      difficulty: target.difficulty,
+      knowledgePoint: target.knowledgePoint,
+      teachingGoal: target.creationReason,
+      sourceNote: target.sourceNote,
+      tags: ['student-created', target.creatorName].filter(Boolean)
+    }, bank);
+    bank.questions = bank.questions || [];
+    bank.questions.push(addedQuestion);
+    bank.updatedAt = nowIso();
+    bank.updatedBy = req.principal.userId;
+    target.addedQuestionId = addedQuestion.id;
+    target.addedToTeacherBankAt = nowIso();
+    addAudit(store, req.principal, 'ADD_STUDENT_CREATED_QUESTION_TO_BANK', 'question', addedQuestion.id, {
+      targetQuestionBankId: bank.id,
+      targetQuestionId: addedQuestion.id,
+      studentQuestionId: target.id
+    });
+  }
   target.status = statusByAction[action];
   target.teacherReviewNote = sanitizeCell(req.body.reason || '');
   target.updatedAt = nowIso();

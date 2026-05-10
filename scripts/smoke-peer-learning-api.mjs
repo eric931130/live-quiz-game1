@@ -190,6 +190,85 @@ try {
   assert(markHelpfulResponse.ok, 'Requester could not mark a response helpful.');
   assert(resolvedHelpRequest.status === 'resolved', 'Help request should become resolved.');
 
+  const { response: studentQuestionResponse, json: studentQuestion } = await jsonRequest('/api/peer-learning/student-questions', {
+    method: 'POST',
+    headers: studentAHeaders,
+    body: {
+      classId: questionContext.classId,
+      questionBankId: questionContext.questionBankId,
+      prompt: 'Explain why peer-created questions should be reviewed before classmates use them.',
+      type: 'short_answer',
+      answer: 'Teacher review protects quality and safety.',
+      explanation: 'Review helps catch incorrect answers, unsafe content, and unclear wording.',
+      difficulty: 'medium',
+      knowledgePoint: 'Moderation',
+      creationReason: 'This checks whether students understand safe learning communities.'
+    }
+  });
+  assert(studentQuestionResponse.status === 201, `Student-created question failed with ${studentQuestionResponse.status}.`);
+  assert(studentQuestion.status === 'pending_review', 'Student-created question should start pending review.');
+
+  const { json: queueWithStudentQuestion } = await jsonRequest('/api/peer-learning/teacher/queue', {
+    headers: teacherHeaders
+  });
+  assert(queueWithStudentQuestion.studentQuestions.some((item) => item.id === studentQuestion.id), 'Student-created question missing from moderation queue.');
+
+  const { response: moderateStudentQuestionResponse } = await jsonRequest('/api/peer-learning/teacher/moderate', {
+    method: 'POST',
+    headers: teacherHeaders,
+    body: {
+      targetType: 'studentQuestion',
+      targetId: studentQuestion.id,
+      action: 'approve',
+      reason: 'Good student-created review question.'
+    }
+  });
+  assert(moderateStudentQuestionResponse.ok, 'Teacher student-created question moderation failed.');
+
+  const { response: voteStudentQuestionResponse, json: votedStudentQuestion } = await jsonRequest(`/api/peer-learning/student-questions/${studentQuestion.id}/vote`, {
+    method: 'POST',
+    headers: studentBHeaders,
+    body: {
+      clarity: 5,
+      correctness: 5,
+      helpfulness: 4,
+      difficultyFit: 4
+    }
+  });
+  assert(voteStudentQuestionResponse.ok, 'Student question quality vote failed.');
+  assert(votedStudentQuestion.qualityScore > 0, 'Student question quality score did not update.');
+
+  const { response: challengeResponse, json: challenge } = await jsonRequest('/api/peer-learning/challenges', {
+    method: 'POST',
+    headers: studentAHeaders,
+    body: {
+      classId: questionContext.classId,
+      opponentStudentId: studentBHeaders['x-user-id'],
+      opponentName: studentBHeaders['x-user-name'],
+      mode: 'one_v_one',
+      questionIds: [questionContext.questionId]
+    }
+  });
+  assert(challengeResponse.status === 201, `Peer challenge failed with ${challengeResponse.status}.`);
+  assert(challenge.status === 'pending', 'Direct peer challenge should start pending.');
+
+  const { response: acceptChallengeResponse, json: acceptedChallenge } = await jsonRequest(`/api/peer-learning/challenges/${challenge.id}/respond`, {
+    method: 'POST',
+    headers: studentBHeaders,
+    body: { action: 'accept' }
+  });
+  assert(acceptChallengeResponse.ok, 'Challenge accept failed.');
+  assert(acceptedChallenge.status === 'accepted', 'Accepted challenge status mismatch.');
+
+  const { response: completeChallengeResponse, json: completedChallenge } = await jsonRequest(`/api/peer-learning/challenges/${challenge.id}/complete`, {
+    method: 'POST',
+    headers: studentAHeaders,
+    body: { scores: { challenger: 4, opponent: 3 } }
+  });
+  assert(completeChallengeResponse.ok, 'Challenge complete failed.');
+  assert(completedChallenge.status === 'completed', 'Completed challenge status mismatch.');
+  assert(completedChallenge.winnerId === studentAHeaders['x-user-id'], 'Challenge winner mismatch.');
+
   const { response: leaderboardResponse, json: leaderboard } = await jsonRequest('/api/peer-learning/leaderboard', {
     headers: studentAHeaders
   });
@@ -203,6 +282,9 @@ try {
   assert(analytics.totals.peerExplanations === 1, 'Analytics peer explanation total mismatch.');
   assert(analytics.totals.helpRequests === 1, 'Analytics help request total mismatch.');
   assert(analytics.totals.resolvedHelpRequests === 1, 'Analytics resolved help request total mismatch.');
+  assert(analytics.totals.studentCreatedQuestions === 1, 'Analytics student-created question total mismatch.');
+  assert(analytics.totals.peerChallenges === 1, 'Analytics peer challenge total mismatch.');
+  assert(analytics.totals.completedPeerChallenges === 1, 'Analytics completed peer challenge total mismatch.');
 
   console.log(`Peer learning API smoke OK: ${baseUrl}`);
 } finally {

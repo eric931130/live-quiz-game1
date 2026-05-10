@@ -3246,7 +3246,7 @@ input[type="file"]::file-selector-button {
 }
 
 .peer-analytics-grid {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   margin: 1rem 0;
 }
 
@@ -3268,6 +3268,7 @@ input[type="file"]::file-selector-button {
   color: #c9bfa8;
 }
 
+.peer-panel input,
 .peer-panel textarea,
 .peer-panel select {
   width: 100%;
@@ -3280,9 +3281,25 @@ input[type="file"]::file-selector-button {
   margin: 0.45rem 0;
 }
 
+.peer-panel input::placeholder,
+.peer-panel textarea::placeholder {
+  color: rgba(201, 191, 168, 0.66);
+}
+
 .peer-panel textarea {
   min-height: 92px;
   resize: vertical;
+}
+
+.peer-form-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(120px, 180px);
+  gap: 0.6rem;
+}
+
+.peer-muted {
+  color: #c9bfa8;
+  font-size: 0.9rem;
 }
 
 .peer-panel button,

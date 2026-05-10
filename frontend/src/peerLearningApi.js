@@ -79,6 +79,65 @@ export const peerLearningApi = {
     return parseResponse(response);
   },
 
+  async listStudentQuestions(user, params = {}) {
+    const response = await fetch(`${API_BASE}/api/peer-learning/student-questions${queryString(params)}`, {
+      headers: await headersFor(user)
+    });
+    return parseResponse(response);
+  },
+
+  async submitStudentQuestion(user, payload) {
+    const response = await fetch(`${API_BASE}/api/peer-learning/student-questions`, {
+      method: 'POST',
+      headers: await headersFor(user, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify(payload || {})
+    });
+    return parseResponse(response);
+  },
+
+  async voteStudentQuestion(user, questionId, scores) {
+    const response = await fetch(`${API_BASE}/api/peer-learning/student-questions/${questionId}/vote`, {
+      method: 'POST',
+      headers: await headersFor(user, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify(scores || {})
+    });
+    return parseResponse(response);
+  },
+
+  async challenges(user, params = {}) {
+    const response = await fetch(`${API_BASE}/api/peer-learning/challenges${queryString(params)}`, {
+      headers: await headersFor(user)
+    });
+    return parseResponse(response);
+  },
+
+  async createChallenge(user, payload) {
+    const response = await fetch(`${API_BASE}/api/peer-learning/challenges`, {
+      method: 'POST',
+      headers: await headersFor(user, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify(payload || {})
+    });
+    return parseResponse(response);
+  },
+
+  async respondChallenge(user, challengeId, action) {
+    const response = await fetch(`${API_BASE}/api/peer-learning/challenges/${challengeId}/respond`, {
+      method: 'POST',
+      headers: await headersFor(user, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ action })
+    });
+    return parseResponse(response);
+  },
+
+  async completeChallenge(user, challengeId, scores) {
+    const response = await fetch(`${API_BASE}/api/peer-learning/challenges/${challengeId}/complete`, {
+      method: 'POST',
+      headers: await headersFor(user, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ scores })
+    });
+    return parseResponse(response);
+  },
+
   async respondToHelp(user, helpRequestId, payload) {
     const response = await fetch(`${API_BASE}/api/peer-learning/help-requests/${helpRequestId}/responses`, {
       method: 'POST',

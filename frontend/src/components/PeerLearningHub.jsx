@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
-  CheckCircle2,
+  BookOpenCheck,
   Flag,
   HandHeart,
   HelpCircle,
@@ -23,6 +23,15 @@ const RESPONSE_TYPES = [
   ['concept_reminder', '概念提醒']
 ];
 
+const emptyStudentQuestion = {
+  prompt: '',
+  answer: '',
+  explanation: '',
+  knowledgePoint: '',
+  difficulty: 'medium',
+  creationReason: ''
+};
+
 function StatusBadge({ status }) {
   return <span className={`peer-status-badge ${status || 'open'}`}>{status || 'open'}</span>;
 }
@@ -31,7 +40,7 @@ function SafetyNotice() {
   return (
     <div className="peer-safety-notice">
       <ShieldCheck size={18} />
-      <span>同儕學習採結構化回覆並保留老師審核權限。請提供提示、理由與例子，避免嘲笑、公開比較或直接丟答案。</span>
+      <span>同儕學習以題目、提示、解析與求助為核心；內容可被老師審核、隱藏或退回，請使用建設性語氣協助同學理解概念。</span>
     </div>
   );
 }
@@ -39,7 +48,7 @@ function SafetyNotice() {
 function Leaderboard({ items = [] }) {
   return (
     <div className="peer-leaderboard">
-      {items.length === 0 && <p className="peer-empty">尚未累積同儕互助資料。</p>}
+      {items.length === 0 && <p className="peer-empty">目前尚無同儕學習紀錄。</p>}
       {items.map((item) => (
         <div className="peer-leader-row" key={item.studentId}>
           <span className="rank">#{item.rank}</span>
@@ -60,8 +69,13 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
   const [helpMessage, setHelpMessage] = useState('');
   const [responseDrafts, setResponseDrafts] = useState({});
   const [responseTypes, setResponseTypes] = useState({});
+  const [studentQuestionDraft, setStudentQuestionDraft] = useState(emptyStudentQuestion);
+  const [challengeDraft, setChallengeDraft] = useState({ opponentStudentId: '', opponentName: '' });
+  const [challengeScores, setChallengeScores] = useState({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+
+  const userId = user?.uid || user?.studentId || 'anonymous-student';
 
   const query = useMemo(() => ({
     questionId: questionContext.questionId || questionContext.id || '',
@@ -107,16 +121,11 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
     load();
   }, [mode, query.questionId, query.classId]);
 
-  const submitExplanation = async () => {
+  const runStudentAction = async (action) => {
     setBusy(true);
     setError('');
     try {
-      await peerLearningApi.submitExplanation(user, {
-        ...payloadContext(),
-        explanationText,
-        explanationType: 'concept_explanation'
-      });
-      setExplanationText('');
+      await action();
       await loadStudent();
     } catch (err) {
       setError(err.message);
@@ -125,40 +134,64 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
     }
   };
 
-  const createHelpRequest = async () => {
-    setBusy(true);
-    setError('');
-    try {
-      await peerLearningApi.createHelpRequest(user, {
-        ...payloadContext(),
-        message: helpMessage
-      });
-      setHelpMessage('');
-      await loadStudent();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setBusy(false);
-    }
-  };
+  const submitExplanation = () => runStudentAction(async () => {
+    await peerLearningApi.submitExplanation(user, {
+      ...payloadContext(),
+      explanationText,
+      explanationType: 'concept_explanation'
+    });
+    setExplanationText('');
+  });
 
-  const respondToHelp = async (helpRequestId) => {
-    const content = responseDrafts[helpRequestId] || '';
-    setBusy(true);
-    setError('');
-    try {
-      await peerLearningApi.respondToHelp(user, helpRequestId, {
-        content,
-        responseType: responseTypes[helpRequestId] || 'hint'
-      });
-      setResponseDrafts({ ...responseDrafts, [helpRequestId]: '' });
-      await loadStudent();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setBusy(false);
-    }
-  };
+  const createHelpRequest = () => runStudentAction(async () => {
+    await peerLearningApi.createHelpRequest(user, {
+      ...payloadContext(),
+      message: helpMessage
+    });
+    setHelpMessage('');
+  });
+
+  const respondToHelp = (helpRequestId) => runStudentAction(async () => {
+    await peerLearningApi.respondToHelp(user, helpRequestId, {
+      content: responseDrafts[helpRequestId] || '',
+      responseType: responseTypes[helpRequestId] || 'hint'
+    });
+    setResponseDrafts({ ...responseDrafts, [helpRequestId]: '' });
+  });
+
+  const submitStudentQuestion = () => runStudentAction(async () => {
+    await peerLearningApi.submitStudentQuestion(user, {
+      ...payloadContext(),
+      ...studentQuestionDraft,
+      type: 'short_answer',
+      sourceNote: 'Student-created question'
+    });
+    setStudentQuestionDraft(emptyStudentQuestion);
+  });
+
+  const createChallenge = () => runStudentAction(async () => {
+    await peerLearningApi.createChallenge(user, {
+      ...payloadContext(),
+      opponentStudentId: challengeDraft.opponentStudentId,
+      opponentName: challengeDraft.opponentName,
+      mode: challengeDraft.opponentStudentId ? 'one_v_one' : 'random',
+      questionIds: [query.questionId].filter(Boolean)
+    });
+    setChallengeDraft({ opponentStudentId: '', opponentName: '' });
+  });
+
+  const respondChallenge = (challengeId, action) => runStudentAction(async () => {
+    await peerLearningApi.respondChallenge(user, challengeId, action);
+  });
+
+  const completeChallenge = (challengeId) => runStudentAction(async () => {
+    const scores = challengeScores[challengeId] || {};
+    await peerLearningApi.completeChallenge(user, challengeId, {
+      challenger: Number(scores.challenger || 0),
+      opponent: Number(scores.opponent || 0)
+    });
+    setChallengeScores({ ...challengeScores, [challengeId]: {} });
+  });
 
   const moderate = async (targetType, targetId, action) => {
     setBusy(true);
@@ -174,14 +207,19 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
   };
 
   if (mode === 'teacher') {
-    const pendingCount = (queue?.explanations?.length || 0) + (queue?.helpRequests?.length || 0) + (queue?.helpResponses?.length || 0);
+    const pendingCount = (queue?.explanations?.length || 0) +
+      (queue?.helpRequests?.length || 0) +
+      (queue?.helpResponses?.length || 0) +
+      (queue?.studentQuestions?.length || 0) +
+      (queue?.peerChallenges?.length || 0);
+
     return (
       <section className="peer-learning-hub teacher-mode">
         <div className="peer-hub-header">
           <div>
             <span className="peer-eyebrow"><Users size={16} /> Student-to-Student Learning</span>
-            <h3>同儕學習審核與分析</h3>
-            <p>審核同儕解析、求助回覆與檢舉內容，並用健康指標觀察合作與互助。</p>
+            <h3>同儕學習審核中心</h3>
+            <p>集中審核同儕解析、求助回覆、學生自創題與被檢舉的挑戰紀錄，老師保有最終控制權。</p>
           </div>
           <button className="secondary-gold-outline-btn" onClick={load} disabled={busy}>重新整理</button>
         </div>
@@ -191,14 +229,16 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
         <div className="peer-analytics-grid">
           <div><strong>{analytics?.totals?.peerExplanations || 0}</strong><span>同儕解析</span></div>
           <div><strong>{analytics?.totals?.helpRequests || 0}</strong><span>求助</span></div>
-          <div><strong>{analytics?.totals?.resolvedHelpRequests || 0}</strong><span>已解決求助</span></div>
-          <div><strong>{pendingCount}</strong><span>待審核項目</span></div>
+          <div><strong>{analytics?.totals?.studentCreatedQuestions || 0}</strong><span>學生出題</span></div>
+          <div><strong>{analytics?.totals?.peerChallenges || 0}</strong><span>挑戰</span></div>
+          <div><strong>{pendingCount}</strong><span>待審核</span></div>
         </div>
 
         <div className="peer-two-column">
           <div className="peer-panel">
-            <h4><ShieldCheck size={18} /> 老師審核佇列</h4>
+            <h4><ShieldCheck size={18} /> 審核佇列</h4>
             {pendingCount === 0 && <p className="peer-empty">目前沒有待審核內容。</p>}
+
             {(queue?.explanations || []).map((item) => (
               <div className="peer-review-item" key={item.id}>
                 <div className="peer-item-top"><strong>同儕解析</strong><StatusBadge status={item.status} /></div>
@@ -212,6 +252,7 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
                 </div>
               </div>
             ))}
+
             {(queue?.helpResponses || []).map((item) => (
               <div className="peer-review-item" key={item.id}>
                 <div className="peer-item-top"><strong>求助回覆</strong><StatusBadge status={item.status} /></div>
@@ -223,17 +264,34 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
                 </div>
               </div>
             ))}
+
+            {(queue?.studentQuestions || []).map((item) => (
+              <div className="peer-review-item" key={item.id}>
+                <div className="peer-item-top"><strong>學生自創題</strong><StatusBadge status={item.status} /></div>
+                <p>{item.prompt}</p>
+                <small>{item.creatorName} · {item.knowledgePoint || '未分類'} · 答案：{item.answer}</small>
+                {item.explanation && <p className="peer-muted">{item.explanation}</p>}
+                <div className="peer-action-row">
+                  <button onClick={() => moderate('studentQuestion', item.id, 'approve')}>通過</button>
+                  {item.questionBankId && <button onClick={() => moderate('studentQuestion', item.id, 'add_to_teacher_bank')}>加入題庫</button>}
+                  <button onClick={() => moderate('studentQuestion', item.id, 'return')}>退回</button>
+                  <button className="danger" onClick={() => moderate('studentQuestion', item.id, 'hide')}>隱藏</button>
+                </div>
+              </div>
+            ))}
           </div>
 
           <div className="peer-panel">
-            <h4><Trophy size={18} /> 健康排行榜</h4>
+            <h4><Trophy size={18} /> 健康協作排行榜</h4>
             <Leaderboard items={analytics?.leaderboard || []} />
             <h4><Lightbulb size={18} /> 熱門互助知識點</h4>
             <div className="peer-chip-list">
               {(analytics?.conceptHotspots || []).map((item) => (
-                <span key={item.knowledgePoint}>{item.knowledgePoint}: {item.helpRequests + item.explanations}</span>
+                <span key={item.knowledgePoint}>{item.knowledgePoint}: {(item.helpRequests || 0) + (item.explanations || 0) + (item.studentQuestions || 0)}</span>
               ))}
             </div>
+            <h4><BookOpenCheck size={18} /> 學生出題徽章</h4>
+            <Leaderboard items={analytics?.badges?.questionDesigners || []} />
           </div>
         </div>
       </section>
@@ -245,8 +303,8 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
       <div className="peer-hub-header">
         <div>
           <span className="peer-eyebrow"><Sparkles size={16} /> Peer Learning</span>
-          <h3>同儕解析與互助</h3>
-          <p>把錯題變成合作機會：提交你的解析、提出求助，或用提示幫助同學。</p>
+          <h3>同儕互助學習</h3>
+          <p>答題後可以提交解析、提出求助、設計題目或發起健康挑戰；內容會保留審核與安全紀錄。</p>
         </div>
       </div>
       <SafetyNotice />
@@ -255,20 +313,67 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
       <div className="peer-student-grid">
         <div className="peer-panel">
           <h4><MessageSquareText size={18} /> 提交同儕解析</h4>
-          <textarea value={explanationText} onChange={(event) => setExplanationText(event.target.value)} placeholder="用自己的話說明正確概念、常見誤解或一個簡單例子。" />
-          <button className="primary-btn" disabled={busy || explanationText.trim().length < 12} onClick={submitExplanation}>送出待老師審核</button>
+          <textarea value={explanationText} onChange={(event) => setExplanationText(event.target.value)} placeholder="用提示、例子或步驟說明這題的關鍵概念。" />
+          <button className="primary-btn" disabled={busy || explanationText.trim().length < 12} onClick={submitExplanation}>送交老師審核</button>
         </div>
         <div className="peer-panel">
           <h4><HelpCircle size={18} /> 我需要幫助</h4>
-          <textarea value={helpMessage} onChange={(event) => setHelpMessage(event.target.value)} placeholder="描述你卡住的地方，例如：我分不清楚 A 與 B 的差異。" />
+          <textarea value={helpMessage} onChange={(event) => setHelpMessage(event.target.value)} placeholder="描述你卡住的地方，例如：我不懂為什麼 A 比 B 更合理。" />
           <button className="secondary-gold-outline-btn" disabled={busy || helpMessage.trim().length < 8} onClick={createHelpRequest}>建立求助</button>
+        </div>
+      </div>
+
+      <div className="peer-student-grid">
+        <div className="peer-panel">
+          <h4><BookOpenCheck size={18} /> 學生自創題</h4>
+          <input value={studentQuestionDraft.prompt} onChange={(event) => setStudentQuestionDraft({ ...studentQuestionDraft, prompt: event.target.value })} placeholder="題幹：設計一道能幫同學複習的題目" />
+          <input value={studentQuestionDraft.answer} onChange={(event) => setStudentQuestionDraft({ ...studentQuestionDraft, answer: event.target.value })} placeholder="正確答案" />
+          <textarea value={studentQuestionDraft.explanation} onChange={(event) => setStudentQuestionDraft({ ...studentQuestionDraft, explanation: event.target.value })} placeholder="解析：為什麼這個答案是對的？" />
+          <div className="peer-form-row">
+            <input value={studentQuestionDraft.knowledgePoint} onChange={(event) => setStudentQuestionDraft({ ...studentQuestionDraft, knowledgePoint: event.target.value })} placeholder="知識點" />
+            <select value={studentQuestionDraft.difficulty} onChange={(event) => setStudentQuestionDraft({ ...studentQuestionDraft, difficulty: event.target.value })}>
+              <option value="easy">easy</option>
+              <option value="medium">medium</option>
+              <option value="hard">hard</option>
+            </select>
+          </div>
+          <textarea value={studentQuestionDraft.creationReason} onChange={(event) => setStudentQuestionDraft({ ...studentQuestionDraft, creationReason: event.target.value })} placeholder="我為什麼設計這題？" />
+          <button disabled={busy || studentQuestionDraft.prompt.trim().length < 8 || studentQuestionDraft.answer.trim().length < 1} onClick={submitStudentQuestion}>送交老師審核</button>
+        </div>
+
+        <div className="peer-panel">
+          <h4><Trophy size={18} /> 同儕挑戰</h4>
+          <input value={challengeDraft.opponentStudentId} onChange={(event) => setChallengeDraft({ ...challengeDraft, opponentStudentId: event.target.value })} placeholder="對手學生 ID；留空代表隨機挑戰" />
+          <input value={challengeDraft.opponentName} onChange={(event) => setChallengeDraft({ ...challengeDraft, opponentName: event.target.value })} placeholder="對手顯示名稱，可選" />
+          <button disabled={busy} onClick={createChallenge}>建立健康挑戰</button>
+          {(overview?.challenges || []).slice(0, 4).map((item) => (
+            <div className="peer-review-item" key={item.id}>
+              <div className="peer-item-top"><strong>{item.mode}</strong><StatusBadge status={item.status} /></div>
+              <small>{item.challengerName} vs {item.opponentName}</small>
+              <p className="peer-muted">{item.fairnessNote}</p>
+              {item.status === 'pending' && item.opponentStudentId === userId && (
+                <div className="peer-action-row">
+                  <button onClick={() => respondChallenge(item.id, 'accept')}>接受</button>
+                  <button className="danger" onClick={() => respondChallenge(item.id, 'decline')}>婉拒</button>
+                </div>
+              )}
+              {['accepted', 'matched'].includes(item.status) && (
+                <div className="peer-response-composer">
+                  <input type="number" min="0" value={challengeScores[item.id]?.challenger || ''} onChange={(event) => setChallengeScores({ ...challengeScores, [item.id]: { ...(challengeScores[item.id] || {}), challenger: event.target.value } })} placeholder="挑戰者分數" />
+                  <input type="number" min="0" value={challengeScores[item.id]?.opponent || ''} onChange={(event) => setChallengeScores({ ...challengeScores, [item.id]: { ...(challengeScores[item.id] || {}), opponent: event.target.value } })} placeholder="對手分數" />
+                  <button onClick={() => completeChallenge(item.id)}>完成挑戰</button>
+                </div>
+              )}
+              {item.status === 'completed' && <p>完成：{Object.values(item.scores || {}).join(' : ')}</p>}
+            </div>
+          ))}
         </div>
       </div>
 
       <div className="peer-two-column">
         <div className="peer-panel">
-          <h4><Star size={18} /> 班級同儕解析</h4>
-          {(overview?.explanations || []).length === 0 && <p className="peer-empty">這題還沒有已通過的同儕解析。</p>}
+          <h4><Star size={18} /> 精選同儕解析</h4>
+          {(overview?.explanations || []).length === 0 && <p className="peer-empty">目前沒有這題的同儕解析。</p>}
           {(overview?.explanations || []).map((item) => (
             <div className="peer-review-item" key={item.id}>
               <div className="peer-item-top"><strong>{item.studentName}</strong><StatusBadge status={item.status} /></div>
@@ -293,7 +398,7 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
                 <div className="peer-help-response" key={response.id}>
                   <small>{response.responderName} · {response.responseType}</small>
                   <p>{response.content}</p>
-                  {item.studentId === (user?.uid || user?.studentId) && <button onClick={() => peerLearningApi.markHelpful(user, response.id).then(loadStudent)}>標記有幫助</button>}
+                  {item.studentId === userId && <button onClick={() => peerLearningApi.markHelpful(user, response.id).then(loadStudent)}>標記有幫助</button>}
                 </div>
               ))}
               {item.status !== 'resolved' && (
@@ -301,8 +406,8 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
                   <select value={responseTypes[item.id] || 'hint'} onChange={(event) => setResponseTypes({ ...responseTypes, [item.id]: event.target.value })}>
                     {RESPONSE_TYPES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                   </select>
-                  <textarea value={responseDrafts[item.id] || ''} onChange={(event) => setResponseDrafts({ ...responseDrafts, [item.id]: event.target.value })} placeholder="給提示或引導問題，不要只丟答案。" />
-                  <button disabled={busy || (responseDrafts[item.id] || '').trim().length < 8} onClick={() => respondToHelp(item.id)}>送出幫助</button>
+                  <textarea value={responseDrafts[item.id] || ''} onChange={(event) => setResponseDrafts({ ...responseDrafts, [item.id]: event.target.value })} placeholder="提供提示或引導問題，不要直接丟答案。" />
+                  <button disabled={busy || (responseDrafts[item.id] || '').trim().length < 8} onClick={() => respondToHelp(item.id)}>送出協助</button>
                 </div>
               )}
             </div>
@@ -311,7 +416,7 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
       </div>
 
       <div className="peer-panel">
-        <h4><Trophy size={18} /> 多維度健康排行榜</h4>
+        <h4><Trophy size={18} /> 健康協作排行榜</h4>
         <Leaderboard items={leaderboard?.boards?.teamworkXp || overview?.leaderboard || []} />
       </div>
     </section>
