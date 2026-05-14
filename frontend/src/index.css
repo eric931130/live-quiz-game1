@@ -3268,6 +3268,56 @@ input[type="file"]::file-selector-button {
   color: #c9bfa8;
 }
 
+.peer-safety-summary {
+  margin: 1rem 0;
+  background: linear-gradient(135deg, rgba(30, 26, 18, 0.92), rgba(8, 8, 8, 0.9));
+}
+
+.peer-summary-heading,
+.peer-summary-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(220px, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.peer-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 0.7rem;
+  margin: 0.9rem 0;
+}
+
+.peer-summary-grid > div {
+  border: 1px solid rgba(214, 168, 79, 0.22);
+  border-radius: 12px;
+  padding: 0.8rem;
+  background: rgba(8, 8, 8, 0.36);
+}
+
+.peer-summary-grid strong {
+  display: block;
+  color: #f4d37a;
+  font-size: 1.45rem;
+}
+
+.peer-summary-grid span,
+.peer-summary-actions {
+  color: #c9bfa8;
+}
+
+.peer-summary-columns h5 {
+  margin: 0.3rem 0 0.55rem;
+  color: #f7f1e3;
+  font-size: 0.95rem;
+}
+
+.peer-summary-actions {
+  margin: 0;
+  padding-left: 1.1rem;
+  line-height: 1.55;
+}
+
 .peer-panel input,
 .peer-panel textarea,
 .peer-panel select {
@@ -3445,7 +3495,9 @@ input[type="file"]::file-selector-button {
 @media (max-width: 760px) {
   .peer-student-grid,
   .peer-two-column,
-  .peer-analytics-grid {
+  .peer-analytics-grid,
+  .peer-summary-heading,
+  .peer-summary-columns {
     grid-template-columns: 1fr;
   }
 

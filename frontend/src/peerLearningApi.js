@@ -285,18 +285,32 @@ export const peerLearningApi = {
     return parseResponse(response);
   },
 
-  async teacherQueue(user) {
-    const response = await fetch(`${API_BASE}/api/peer-learning/teacher/queue`, {
+  async teacherQueue(user, params = {}) {
+    const response = await fetch(`${API_BASE}/api/peer-learning/teacher/queue${queryString(params)}`, {
       headers: await headersFor(user, {}, 'teacher')
     });
     return parseResponse(response);
   },
 
-  async teacherAnalytics(user) {
-    const response = await fetch(`${API_BASE}/api/peer-learning/teacher/analytics`, {
+  async teacherAnalytics(user, params = {}) {
+    const response = await fetch(`${API_BASE}/api/peer-learning/teacher/analytics${queryString(params)}`, {
       headers: await headersFor(user, {}, 'teacher')
     });
     return parseResponse(response);
+  },
+
+  async safetySummary(user, params = {}) {
+    const response = await fetch(`${API_BASE}/api/peer-learning/teacher/safety-summary${queryString(params)}`, {
+      headers: await headersFor(user, {}, 'teacher')
+    });
+    return parseResponse(response);
+  },
+
+  async exportAnalytics(user, params = {}) {
+    const response = await fetch(`${API_BASE}/api/peer-learning/teacher/analytics/export${queryString(params)}`, {
+      headers: await headersFor(user, {}, 'teacher')
+    });
+    return parseTextResponse(response);
   },
 
   async moderationLogs(user, params = {}) {

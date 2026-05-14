@@ -1198,6 +1198,14 @@ function moderationLogsCsv(logs) {
   return [headers.join(','), ...rows].join('\n');
 }
 
+function peerClassId(query = {}) {
+  return sanitizeCell(query.classId || '');
+}
+
+function byPeerClass(items = [], classId = '') {
+  return items.filter((item) => !classId || item.classId === classId);
+}
+
 function publicPeerExplanation(explanation, principal) {
   const canModerate = isTeacherRole(principal);
   return {
@@ -1368,15 +1376,16 @@ function ensurePeerFeatureEnabled(store, classId, feature, principal) {
   };
 }
 
-function computePeerLearningAnalytics(store) {
-  const explanations = (store.peerExplanations || []).filter((item) => item.status !== 'deleted');
-  const helpRequests = (store.helpRequests || []).filter((item) => item.status !== 'deleted');
-  const helpResponses = (store.helpResponses || []).filter((item) => item.status !== 'deleted');
-  const studentQuestions = (store.studentCreatedQuestions || []).filter((item) => item.status !== 'deleted');
-  const peerChallenges = (store.peerChallenges || []).filter((item) => item.status !== 'deleted');
-  const peerReviews = (store.peerReviewAssignments || []).filter((item) => item.status !== 'deleted');
-  const wrongExchanges = (store.wrongQuestionExchanges || []).filter((item) => item.status !== 'deleted');
-  const guilds = (store.learningGuilds || []).filter((item) => item.status !== 'deleted');
+function computePeerLearningAnalytics(store, query = {}) {
+  const classId = peerClassId(query);
+  const explanations = byPeerClass(store.peerExplanations || [], classId).filter((item) => item.status !== 'deleted');
+  const helpRequests = byPeerClass(store.helpRequests || [], classId).filter((item) => item.status !== 'deleted');
+  const helpResponses = byPeerClass(store.helpResponses || [], classId).filter((item) => item.status !== 'deleted');
+  const studentQuestions = byPeerClass(store.studentCreatedQuestions || [], classId).filter((item) => item.status !== 'deleted');
+  const peerChallenges = byPeerClass(store.peerChallenges || [], classId).filter((item) => item.status !== 'deleted');
+  const peerReviews = byPeerClass(store.peerReviewAssignments || [], classId).filter((item) => item.status !== 'deleted');
+  const wrongExchanges = byPeerClass(store.wrongQuestionExchanges || [], classId).filter((item) => item.status !== 'deleted');
+  const guilds = byPeerClass(store.learningGuilds || [], classId).filter((item) => item.status !== 'deleted');
   const students = {};
   const concepts = {};
 
@@ -1488,6 +1497,7 @@ function computePeerLearningAnalytics(store) {
 
   return {
     generatedAt: nowIso(),
+    classId,
     totals: {
       peerExplanations: explanations.length,
       approvedExplanations: explanations.filter((item) => item.status === 'approved').length,
@@ -1509,7 +1519,8 @@ function computePeerLearningAnalytics(store) {
         studentQuestions.filter((item) => ['pending_review', 'flagged', 'returned_for_revision'].includes(item.status)).length +
         peerChallenges.filter((item) => item.status === 'flagged').length +
         peerReviews.filter((item) => item.status === 'flagged').length +
-        wrongExchanges.filter((item) => item.status === 'flagged').length
+        wrongExchanges.filter((item) => item.status === 'flagged').length +
+        guilds.filter((item) => item.status === 'flagged' || item.moderationLocked).length
     },
     leaderboard,
     conceptHotspots: Object.values(concepts)
@@ -1522,6 +1533,80 @@ function computePeerLearningAnalytics(store) {
       peerReviewers: leaderboard.filter((item) => item.peerReviewsCompleted >= 1).slice(0, 5),
       wrongQuestionRepair: leaderboard.filter((item) => item.wrongExchangesCompleted >= 1).slice(0, 5)
     }
+  };
+}
+
+function peerLearningAnalyticsCsv(analytics) {
+  const headers = [
+    'rank',
+    'studentId',
+    'studentName',
+    'teamworkXp',
+    'explanationsSubmitted',
+    'explanationsApproved',
+    'helpfulVotes',
+    'helpRequestsCreated',
+    'helpRequestsResolved',
+    'helpResponsesSubmitted',
+    'helpfulResponses',
+    'studentQuestionsCreated',
+    'studentQuestionsApproved',
+    'challengesCompleted',
+    'peerReviewsCompleted',
+    'wrongExchangesCompleted',
+    'guildXp'
+  ];
+  const rows = (analytics.leaderboard || []).map((item) => headers.map((header) => csvValue(item[header])).join(','));
+  return [headers.join(','), ...rows].join('\n');
+}
+
+function buildPeerLearningSafetySummary(store, query = {}) {
+  const classId = peerClassId(query);
+  const analytics = computePeerLearningAnalytics(store, { classId });
+  const logs = filteredModerationLogs(store, { ...query, classId, limit: 1000 });
+  const reports = logs.filter((log) => log.actionType === 'REPORT_CONTENT');
+  const topReportedTypes = Object.entries(reports.reduce((acc, log) => {
+    acc[log.targetType] = (acc[log.targetType] || 0) + 1;
+    return acc;
+  }, {}))
+    .map(([targetType, count]) => ({ targetType, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 8);
+  const lockedGuilds = byPeerClass(store.learningGuilds || [], classId)
+    .filter((guild) => guild.status !== 'deleted' && guild.moderationLocked)
+    .map((guild) => ({
+      id: guild.id,
+      name: guild.name,
+      classId: guild.classId,
+      memberCount: (guild.members || []).length,
+      lastProgressNote: guild.lastProgressNote || '',
+      teacherReviewNote: guild.teacherReviewNote || ''
+    }));
+  const studentsNeedingSupport = (analytics.leaderboard || [])
+    .filter((student) => student.helpRequestsCreated > student.helpRequestsResolved || student.helpRequestsCreated > student.helpResponsesSubmitted + 1)
+    .slice(0, 8);
+  const recommendations = [];
+  if (analytics.totals.pendingModeration > 0) recommendations.push('Review pending or flagged peer-learning items before the next live activity.');
+  if (reports.length >= 3) recommendations.push('Check repeated reports for patterns by target type, class, or concept before reopening public visibility.');
+  if (lockedGuilds.length > 0) recommendations.push('Follow up with locked learning guilds and document the resolution note before unlocking.');
+  if ((analytics.conceptHotspots || []).length > 0) recommendations.push('Use the top hot concepts for a short reteaching prompt or structured peer-help mission.');
+  if (recommendations.length === 0) recommendations.push('No urgent peer-learning safety signals were detected for this filter.');
+
+  return {
+    generatedAt: nowIso(),
+    classId,
+    totals: analytics.totals,
+    riskIndicators: {
+      recentReports: reports.length,
+      pendingModeration: analytics.totals.pendingModeration,
+      lockedGuilds: lockedGuilds.length,
+      reportRate: analytics.totals.pendingModeration > 0 ? Number((reports.length / analytics.totals.pendingModeration).toFixed(2)) : reports.length
+    },
+    topReportedTypes,
+    lockedGuilds,
+    studentsNeedingSupport,
+    conceptHotspots: analytics.conceptHotspots,
+    recommendedActions: recommendations
   };
 }
 
@@ -2795,31 +2880,33 @@ app.get('/api/peer-learning/leaderboard', (req, res) => {
 
 app.get('/api/peer-learning/teacher/queue', requireTeacher, (req, res) => {
   const store = readStore();
-  const explanations = (store.peerExplanations || [])
+  const classId = peerClassId(req.query);
+  const explanations = byPeerClass(store.peerExplanations || [], classId)
     .filter((item) => ['pending_review', 'flagged', 'returned_for_revision'].includes(item.status))
     .map((item) => ({ ...publicPeerExplanation(item, req.principal), targetType: 'explanation' }));
-  const helpRequests = (store.helpRequests || [])
+  const helpRequests = byPeerClass(store.helpRequests || [], classId)
     .filter((item) => item.status === 'flagged')
     .map((item) => ({ ...publicHelpRequest(item, store, req.principal), targetType: 'helpRequest' }));
-  const helpResponses = (store.helpResponses || [])
+  const helpResponses = byPeerClass(store.helpResponses || [], classId)
     .filter((item) => ['pending_review', 'flagged'].includes(item.status))
     .map((item) => ({ ...item, targetType: 'helpResponse' }));
-  const studentQuestions = (store.studentCreatedQuestions || [])
+  const studentQuestions = byPeerClass(store.studentCreatedQuestions || [], classId)
     .filter((item) => ['pending_review', 'flagged', 'returned_for_revision'].includes(item.status))
     .map((item) => ({ ...publicStudentQuestion(item, req.principal), targetType: 'studentQuestion' }));
-  const peerChallenges = (store.peerChallenges || [])
+  const peerChallenges = byPeerClass(store.peerChallenges || [], classId)
     .filter((item) => item.status === 'flagged')
     .map((item) => ({ ...publicPeerChallenge(item, req.principal), targetType: 'peerChallenge' }));
-  const peerReviews = (store.peerReviewAssignments || [])
+  const peerReviews = byPeerClass(store.peerReviewAssignments || [], classId)
     .filter((item) => item.status === 'flagged')
     .map((item) => ({ ...publicPeerReviewAssignment(item, req.principal), targetType: 'peerReview' }));
-  const wrongExchanges = (store.wrongQuestionExchanges || [])
+  const wrongExchanges = byPeerClass(store.wrongQuestionExchanges || [], classId)
     .filter((item) => item.status === 'flagged')
     .map((item) => ({ ...publicWrongQuestionExchange(item, req.principal), targetType: 'wrongExchange' }));
-  const learningGuilds = (store.learningGuilds || [])
+  const learningGuilds = byPeerClass(store.learningGuilds || [], classId)
     .filter((item) => item.status === 'flagged' || item.moderationLocked)
     .map((item) => ({ ...publicLearningGuild(item, req.principal), targetType: 'learningGuild' }));
   res.json({
+    classId,
     explanations,
     helpRequests,
     helpResponses,
@@ -2828,13 +2915,26 @@ app.get('/api/peer-learning/teacher/queue', requireTeacher, (req, res) => {
     peerReviews,
     wrongExchanges,
     learningGuilds,
-    moderationLogs: (store.moderationLogs || []).slice(0, 120)
+    moderationLogs: filteredModerationLogs(store, { classId, limit: 120 })
   });
 });
 
 app.get('/api/peer-learning/teacher/analytics', requireTeacher, (req, res) => {
   const store = readStore();
-  res.json(computePeerLearningAnalytics(store));
+  res.json(computePeerLearningAnalytics(store, req.query));
+});
+
+app.get('/api/peer-learning/teacher/safety-summary', requireTeacher, (req, res) => {
+  const store = readStore();
+  res.json(buildPeerLearningSafetySummary(store, req.query));
+});
+
+app.get('/api/peer-learning/teacher/analytics/export', requireTeacher, (req, res) => {
+  const store = readStore();
+  const analytics = computePeerLearningAnalytics(store, req.query);
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="peer-learning-analytics-${Date.now()}.csv"`);
+  res.send(peerLearningAnalyticsCsv(analytics));
 });
 
 app.get('/api/peer-learning/teacher/moderation-logs', requireTeacher, (req, res) => {

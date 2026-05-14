@@ -64,6 +64,7 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
   const [overview, setOverview] = useState(null);
   const [queue, setQueue] = useState(null);
   const [analytics, setAnalytics] = useState(null);
+  const [safetySummary, setSafetySummary] = useState(null);
   const [leaderboard, setLeaderboard] = useState(null);
   const [moderationLogs, setModerationLogs] = useState([]);
   const [settingsDraft, setSettingsDraft] = useState(null);
@@ -107,14 +108,17 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
   };
 
   const loadTeacher = async () => {
-    const [queueData, analyticsData, settingsData, logsData] = await Promise.all([
-      peerLearningApi.teacherQueue(user),
-      peerLearningApi.teacherAnalytics(user),
+    const teacherFilter = { classId: settingsClassId };
+    const [queueData, analyticsData, safetyData, settingsData, logsData] = await Promise.all([
+      peerLearningApi.teacherQueue(user, teacherFilter),
+      peerLearningApi.teacherAnalytics(user, teacherFilter),
+      peerLearningApi.safetySummary(user, teacherFilter),
       peerLearningApi.settings(user, { classId: settingsClassId }),
       peerLearningApi.moderationLogs(user, { classId: settingsClassId, limit: 20 })
     ]);
     setQueue(queueData);
     setAnalytics(analyticsData);
+    setSafetySummary(safetyData);
     setSettingsDraft(settingsData);
     setModerationLogs(logsData.logs || []);
   };
@@ -304,6 +308,27 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
     }
   };
 
+  const exportAnalytics = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      const csv = await peerLearningApi.exportAnalytics(user, { classId: settingsClassId });
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `peer-learning-analytics-${settingsClassId || 'default'}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const moderate = async (targetType, targetId, action) => {
     setBusy(true);
     setError('');
@@ -379,6 +404,39 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
           <div><strong>{analytics?.totals?.wrongQuestionExchanges || 0}</strong><span>Wrong exchanges</span></div>
           <div><strong>{analytics?.totals?.learningGuilds || 0}</strong><span>Guilds</span></div>
           <div><strong>{pendingCount}</strong><span>Needs review</span></div>
+        </div>
+
+        <div className="peer-panel peer-safety-summary">
+          <div className="peer-summary-heading">
+            <div>
+              <h4><ShieldCheck size={18} /> Safety Summary</h4>
+              <p className="peer-muted">Teacher-only snapshot for reports, locked guilds, and moderation follow-up. Export keeps student collaboration analytics reviewable without exposing admin controls to students.</p>
+            </div>
+            <button disabled={busy} onClick={exportAnalytics}>Export analytics CSV</button>
+          </div>
+          <div className="peer-summary-grid">
+            <div><strong>{safetySummary?.riskIndicators?.recentReports || 0}</strong><span>Recent reports</span></div>
+            <div><strong>{safetySummary?.riskIndicators?.pendingModeration || 0}</strong><span>Pending review</span></div>
+            <div><strong>{safetySummary?.riskIndicators?.lockedGuilds || 0}</strong><span>Locked guilds</span></div>
+            <div><strong>{safetySummary?.riskIndicators?.reportRate || 0}</strong><span>Report signal</span></div>
+          </div>
+          <div className="peer-summary-columns">
+            <div>
+              <h5>Reported content types</h5>
+              <div className="peer-chip-list">
+                {(safetySummary?.topReportedTypes || []).length === 0 && <span>None</span>}
+                {(safetySummary?.topReportedTypes || []).map((item) => (
+                  <span key={item.targetType}>{item.targetType}: {item.count}</span>
+                ))}
+              </div>
+            </div>
+            <div>
+              <h5>Recommended actions</h5>
+              <ul className="peer-summary-actions">
+                {(safetySummary?.recommendedActions || []).map((action) => <li key={action}>{action}</li>)}
+              </ul>
+            </div>
+          </div>
         </div>
 
         <div className="peer-two-column">

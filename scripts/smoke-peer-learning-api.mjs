@@ -500,6 +500,11 @@ try {
   const exportedCsv = await exportLogsResponse.text();
   assert(exportedCsv.includes('actionType') && exportedCsv.includes('REPORT_CONTENT'), 'Moderation log CSV should include headers and report events.');
 
+  const studentSafetySummary = await request(`/api/peer-learning/teacher/safety-summary?classId=${questionContext.classId}`, {
+    headers: studentAHeaders
+  });
+  assert(studentSafetySummary.status === 403, 'Student should not access teacher safety summary.');
+
   const { response: leaderboardResponse, json: leaderboard } = await jsonRequest('/api/peer-learning/leaderboard', {
     headers: studentAHeaders
   });
@@ -518,6 +523,30 @@ try {
   assert(analytics.totals.peerReviewAssignments === 1, 'Analytics peer review total mismatch.');
   assert(analytics.totals.wrongQuestionExchanges === 1, 'Analytics wrong question exchange total mismatch.');
   assert(analytics.totals.learningGuilds === 1, 'Analytics learning guild total mismatch.');
+
+  const { response: filteredAnalyticsResponse, json: filteredAnalytics } = await jsonRequest(`/api/peer-learning/teacher/analytics?classId=${questionContext.classId}`, {
+    headers: teacherHeaders
+  });
+  assert(filteredAnalyticsResponse.ok, 'Filtered teacher peer analytics failed.');
+  assert(filteredAnalytics.classId === questionContext.classId, 'Filtered analytics should echo classId.');
+  assert(filteredAnalytics.totals.peerExplanations === 1, 'Filtered analytics should include class peer explanations.');
+
+  const { response: safetyResponse, json: safetySummary } = await jsonRequest(`/api/peer-learning/teacher/safety-summary?classId=${questionContext.classId}`, {
+    headers: teacherHeaders
+  });
+  assert(safetyResponse.ok, 'Teacher safety summary failed.');
+  assert(safetySummary.classId === questionContext.classId, 'Safety summary should echo classId.');
+  assert(safetySummary.riskIndicators.recentReports >= 1, 'Safety summary should include recent reports.');
+  assert(safetySummary.riskIndicators.pendingModeration >= 1, 'Safety summary should include moderation signals.');
+  assert(Array.isArray(safetySummary.recommendedActions), 'Safety summary should include recommended actions.');
+
+  const analyticsExportResponse = await request(`/api/peer-learning/teacher/analytics/export?classId=${questionContext.classId}`, {
+    headers: teacherHeaders
+  });
+  assert(analyticsExportResponse.ok, 'Teacher analytics export failed.');
+  assert((analyticsExportResponse.headers.get('content-type') || '').includes('text/csv'), 'Analytics export should be CSV.');
+  const analyticsCsv = await analyticsExportResponse.text();
+  assert(analyticsCsv.includes('teamworkXp') && analyticsCsv.includes(studentAHeaders['x-user-id']), 'Analytics CSV should include headers and student rows.');
 
   console.log(`Peer learning API smoke OK: ${baseUrl}`);
 } finally {
