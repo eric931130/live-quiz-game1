@@ -94,6 +94,7 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
   const [leaderboard, setLeaderboard] = useState(null);
   const [moderationLogs, setModerationLogs] = useState([]);
   const [moderationTimeline, setModerationTimeline] = useState(null);
+  const [timelineCaseDetail, setTimelineCaseDetail] = useState(null);
   const [settingsDraft, setSettingsDraft] = useState(null);
   const [settingsClassId, setSettingsClassId] = useState(classId || '');
   const [explanationText, setExplanationText] = useState('');
@@ -154,6 +155,7 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
     setModerationLogs(logsData.logs || []);
     setModerationTimeline(timelineData);
     setSelectedModeration({});
+    setTimelineCaseDetail(null);
   };
 
   const load = async () => {
@@ -388,6 +390,23 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
       });
       if (result.failed > 0) setError(`${result.succeeded} items updated; ${result.failed} items need manual review.`);
       await loadTeacher();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const openTimelineCase = async (item) => {
+    setBusy(true);
+    setError('');
+    try {
+      const detail = await peerLearningApi.moderationTimelineCase(user, {
+        classId: settingsClassId,
+        targetType: item.targetType,
+        targetId: item.targetId
+      });
+      setTimelineCaseDetail(detail);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -695,13 +714,46 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
             <h4><Flag size={18} /> Timeline Cases</h4>
             <div className="peer-log-list">
               {(moderationTimeline?.cases || []).slice(0, 6).map((item) => (
-                <div className="peer-log-row" key={item.key}>
+                <button className="peer-case-row" key={item.key} disabled={busy} onClick={() => openTimelineCase(item)}>
                   <strong>{item.targetType} 繚 {item.targetStatus || 'open'}</strong>
                   <span>{item.eventCount} events 繚 {item.reportCount} reports 繚 {item.moderationCount} actions</span>
                   <small>{item.targetSummary || item.targetId}</small>
-                </div>
+                </button>
               ))}
             </div>
+            {timelineCaseDetail && (
+              <div className="peer-case-detail">
+                <div className="peer-item-top">
+                  <strong>{timelineCaseDetail.case.targetType} case detail</strong>
+                  <StatusBadge status={timelineCaseDetail.case.targetStatus} />
+                </div>
+                <p>{timelineCaseDetail.case.targetSummary || timelineCaseDetail.case.targetId}</p>
+                <div className="peer-summary-grid compact">
+                  <div><strong>{timelineCaseDetail.summary.totalEvents}</strong><span>events</span></div>
+                  <div><strong>{timelineCaseDetail.summary.reportEvents}</strong><span>reports</span></div>
+                  <div><strong>{timelineCaseDetail.summary.moderationEvents}</strong><span>actions</span></div>
+                </div>
+                <div className="peer-case-content">
+                  <small>Student / actor: {timelineCaseDetail.target.studentName || 'N/A'}</small>
+                  <small>Knowledge point: {timelineCaseDetail.target.knowledgePoint || 'Uncategorized'}</small>
+                  {timelineCaseDetail.target.prompt && <p>{timelineCaseDetail.target.prompt}</p>}
+                  {timelineCaseDetail.target.content && <p>{timelineCaseDetail.target.content}</p>}
+                  {timelineCaseDetail.case.teacherReviewNote && <small>Teacher note: {timelineCaseDetail.case.teacherReviewNote}</small>}
+                </div>
+                <div className="peer-timeline-list">
+                  {timelineCaseDetail.events.map((event) => (
+                    <div className={`peer-timeline-event ${event.severity}`} key={event.id}>
+                      <span className="peer-timeline-dot" />
+                      <div>
+                        <strong>{event.title}</strong>
+                        <small>{new Date(event.createdAt).toLocaleString()} | {event.actorUserId}</small>
+                        {event.reason && <p>{event.reason}</p>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             <h4><ShieldCheck size={18} /> Moderation Logs</h4>
             <div className="peer-action-row">
               <button disabled={busy} onClick={exportModerationLogs}>Export CSV</button>

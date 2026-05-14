@@ -1198,31 +1198,33 @@ function moderationLogsCsv(logs) {
   return [headers.join(','), ...rows].join('\n');
 }
 
+function moderationTimelineEvent(log) {
+  const isReport = log.actionType === 'REPORT_CONTENT';
+  const isRestrictive = ['MODERATE_HIDE', 'MODERATE_DELETE', 'MODERATE_LOCK', 'MODERATE_REJECT'].includes(log.actionType);
+  const isResolution = ['MODERATE_APPROVE', 'MODERATE_FEATURE', 'MODERATE_UNLOCK'].includes(log.actionType);
+  return {
+    id: log.id,
+    createdAt: log.createdAt,
+    actorUserId: log.actorUserId,
+    actorRole: log.actorRole,
+    actionType: log.actionType,
+    targetType: log.targetType,
+    targetId: log.targetId,
+    targetStatus: log.targetStatus,
+    targetClassId: log.targetClassId,
+    targetSummary: log.targetSummary,
+    reason: log.reason,
+    eventKind: isReport ? 'report' : 'moderation',
+    severity: isRestrictive ? 'high' : (isReport ? 'medium' : (isResolution ? 'resolved' : 'review')),
+    title: isReport
+      ? `Report received for ${log.targetType}`
+      : `${log.actionType.replace('MODERATE_', '').toLowerCase()} ${log.targetType}`
+  };
+}
+
 function peerModerationTimeline(store, query = {}) {
   const logs = filteredModerationLogs(store, { ...query, limit: Math.min(500, Number(query.limit || 120)) });
-  const events = logs.map((log) => {
-    const isReport = log.actionType === 'REPORT_CONTENT';
-    const isRestrictive = ['MODERATE_HIDE', 'MODERATE_DELETE', 'MODERATE_LOCK', 'MODERATE_REJECT'].includes(log.actionType);
-    const isResolution = ['MODERATE_APPROVE', 'MODERATE_FEATURE', 'MODERATE_UNLOCK'].includes(log.actionType);
-    return {
-      id: log.id,
-      createdAt: log.createdAt,
-      actorUserId: log.actorUserId,
-      actorRole: log.actorRole,
-      actionType: log.actionType,
-      targetType: log.targetType,
-      targetId: log.targetId,
-      targetStatus: log.targetStatus,
-      targetClassId: log.targetClassId,
-      targetSummary: log.targetSummary,
-      reason: log.reason,
-      eventKind: isReport ? 'report' : 'moderation',
-      severity: isRestrictive ? 'high' : (isReport ? 'medium' : (isResolution ? 'resolved' : 'review')),
-      title: isReport
-        ? `Report received for ${log.targetType}`
-        : `${log.actionType.replace('MODERATE_', '').toLowerCase()} ${log.targetType}`
-    };
-  });
+  const events = logs.map(moderationTimelineEvent);
   const cases = Object.values(events.reduce((acc, event) => {
     const key = `${event.targetType}:${event.targetId}`;
     if (!acc[key]) {
@@ -1269,6 +1271,54 @@ function peerModerationTimeline(store, query = {}) {
       reportEvents: events.filter((event) => event.eventKind === 'report').length,
       moderationEvents: events.filter((event) => event.eventKind === 'moderation').length,
       activeCases: cases.filter((item) => !['approved', 'hidden', 'deleted'].includes(item.targetStatus)).length
+    }
+  };
+}
+
+function peerModerationCaseDetail(store, query = {}) {
+  const targetType = sanitizeCell(query.targetType || '');
+  const targetId = sanitizeCell(query.targetId || '');
+  if (!targetType || !targetId) return { ok: false, status: 400, error: 'targetType and targetId are required.' };
+  const target = moderationTarget(store, targetType, targetId);
+  if (!target) return { ok: false, status: 404, error: 'Timeline case target not found.' };
+  const logs = filteredModerationLogs(store, { ...query, targetType, limit: 1000 })
+    .filter((log) => log.targetId === targetId);
+  const events = logs.map(moderationTimelineEvent);
+  const targetSummary = sanitizeCell(target.name || target.prompt || target.message || target.content || target.knowledgePoint || target.mode || '');
+  return {
+    ok: true,
+    generatedAt: nowIso(),
+    case: {
+      key: `${targetType}:${targetId}`,
+      targetType,
+      targetId,
+      targetStatus: target.status || '',
+      targetClassId: target.classId || '',
+      targetSummary,
+      reportCount: Number(target.reportCount || 0),
+      teacherReviewNote: target.teacherReviewNote || '',
+      moderationLocked: Boolean(target.moderationLocked),
+      createdAt: target.createdAt || '',
+      updatedAt: target.updatedAt || ''
+    },
+    target: {
+      id: target.id,
+      status: target.status || '',
+      classId: target.classId || '',
+      questionId: target.questionId || '',
+      knowledgePoint: target.knowledgePoint || '',
+      studentName: target.studentName || target.creatorName || target.responderName || target.challengerName || '',
+      prompt: sanitizeCell(target.prompt || target.questionPrompt || ''),
+      content: sanitizeCell(target.explanationText || target.message || target.content || target.feedbackText || target.submissionText || target.weeklyGoal || ''),
+      reason: sanitizeCell(target.creationReason || target.reflection || target.teacherReviewNote || '')
+    },
+    events,
+    summary: {
+      totalEvents: events.length,
+      reportEvents: events.filter((event) => event.eventKind === 'report').length,
+      moderationEvents: events.filter((event) => event.eventKind === 'moderation').length,
+      lastActionType: events[0]?.actionType || '',
+      lastEventAt: events[0]?.createdAt || ''
     }
   };
 }
@@ -3088,6 +3138,13 @@ app.get('/api/peer-learning/teacher/moderation-logs', requireTeacher, (req, res)
 app.get('/api/peer-learning/teacher/timeline', requireTeacher, (req, res) => {
   const store = readStore();
   res.json(peerModerationTimeline(store, req.query));
+});
+
+app.get('/api/peer-learning/teacher/timeline/case', requireTeacher, (req, res) => {
+  const store = readStore();
+  const detail = peerModerationCaseDetail(store, req.query);
+  if (!detail.ok) return res.status(detail.status || 400).json({ error: detail.error });
+  res.json(detail);
 });
 
 app.get('/api/peer-learning/teacher/moderation-logs/export', requireTeacher, (req, res) => {

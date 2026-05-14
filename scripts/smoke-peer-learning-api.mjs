@@ -490,6 +490,11 @@ try {
   });
   assert(studentTimeline.status === 403, 'Student should not access teacher moderation timeline.');
 
+  const studentTimelineCase = await request('/api/peer-learning/teacher/timeline/case?targetType=peerChallenge&targetId=blocked', {
+    headers: studentAHeaders
+  });
+  assert(studentTimelineCase.status === 403, 'Student should not access teacher moderation timeline case detail.');
+
   const { response: logsResponse, json: logsData } = await jsonRequest('/api/peer-learning/teacher/moderation-logs?limit=50', {
     headers: teacherHeaders
   });
@@ -507,6 +512,15 @@ try {
   assert(timelineData.summary.reportEvents >= 1, 'Timeline should summarize report events.');
   assert(timelineData.events.some((event) => event.eventKind === 'report'), 'Timeline should include report events.');
   assert(timelineData.cases.some((item) => item.eventCount >= 1), 'Timeline should group events by target case.');
+
+  const timelineCase = timelineData.cases[0];
+  const { response: timelineCaseResponse, json: timelineCaseDetail } = await jsonRequest(`/api/peer-learning/teacher/timeline/case?classId=${questionContext.classId}&targetType=${timelineCase.targetType}&targetId=${timelineCase.targetId}`, {
+    headers: teacherHeaders
+  });
+  assert(timelineCaseResponse.ok, 'Teacher moderation timeline case detail failed.');
+  assert(timelineCaseDetail.case.targetId === timelineCase.targetId, 'Timeline case detail target mismatch.');
+  assert(Array.isArray(timelineCaseDetail.events) && timelineCaseDetail.events.length >= 1, 'Timeline case detail should include events.');
+  assert(timelineCaseDetail.summary.totalEvents >= 1, 'Timeline case detail should include summary counts.');
 
   const exportLogsResponse = await request('/api/peer-learning/teacher/moderation-logs/export?limit=50', {
     headers: teacherHeaders

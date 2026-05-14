@@ -327,6 +327,13 @@ export const peerLearningApi = {
     return parseResponse(response);
   },
 
+  async moderationTimelineCase(user, params = {}) {
+    const response = await fetch(`${API_BASE}/api/peer-learning/teacher/timeline/case${queryString(params)}`, {
+      headers: await headersFor(user, {}, 'teacher')
+    });
+    return parseResponse(response);
+  },
+
   async exportModerationLogs(user, params = {}) {
     const response = await fetch(`${API_BASE}/api/peer-learning/teacher/moderation-logs/export${queryString(params)}`, {
       headers: await headersFor(user, {}, 'teacher')
