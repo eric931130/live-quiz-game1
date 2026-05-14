@@ -93,6 +93,7 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
   const [safetySummary, setSafetySummary] = useState(null);
   const [leaderboard, setLeaderboard] = useState(null);
   const [moderationLogs, setModerationLogs] = useState([]);
+  const [moderationTimeline, setModerationTimeline] = useState(null);
   const [settingsDraft, setSettingsDraft] = useState(null);
   const [settingsClassId, setSettingsClassId] = useState(classId || '');
   const [explanationText, setExplanationText] = useState('');
@@ -138,18 +139,20 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
 
   const loadTeacher = async () => {
     const teacherFilter = { classId: settingsClassId };
-    const [queueData, analyticsData, safetyData, settingsData, logsData] = await Promise.all([
+    const [queueData, analyticsData, safetyData, settingsData, logsData, timelineData] = await Promise.all([
       peerLearningApi.teacherQueue(user, teacherFilter),
       peerLearningApi.teacherAnalytics(user, teacherFilter),
       peerLearningApi.safetySummary(user, teacherFilter),
       peerLearningApi.settings(user, { classId: settingsClassId }),
-      peerLearningApi.moderationLogs(user, { classId: settingsClassId, limit: 20 })
+      peerLearningApi.moderationLogs(user, { classId: settingsClassId, limit: 20 }),
+      peerLearningApi.moderationTimeline(user, { classId: settingsClassId, limit: 80 })
     ]);
     setQueue(queueData);
     setAnalytics(analyticsData);
     setSafetySummary(safetyData);
     setSettingsDraft(settingsData);
     setModerationLogs(logsData.logs || []);
+    setModerationTimeline(timelineData);
     setSelectedModeration({});
   };
 
@@ -670,6 +673,35 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
             <input value={guildDraft.name} onChange={(event) => setGuildDraft({ ...guildDraft, name: event.target.value })} placeholder="Guild name" />
             <input value={guildDraft.weeklyGoal} onChange={(event) => setGuildDraft({ ...guildDraft, weeklyGoal: event.target.value })} placeholder="Weekly goal" />
             <button disabled={busy || guildDraft.name.trim().length < 2} onClick={createGuild}>Create guild</button>
+            <h4><ShieldCheck size={18} /> Event Timeline</h4>
+            <div className="peer-timeline-summary">
+              <div><strong>{moderationTimeline?.summary?.totalEvents || 0}</strong><span>events</span></div>
+              <div><strong>{moderationTimeline?.summary?.reportEvents || 0}</strong><span>reports</span></div>
+              <div><strong>{moderationTimeline?.summary?.activeCases || 0}</strong><span>active cases</span></div>
+            </div>
+            <div className="peer-timeline-list">
+              {(moderationTimeline?.events || []).length === 0 && <p className="peer-empty">No timeline events for this filter yet.</p>}
+              {(moderationTimeline?.events || []).slice(0, 10).map((event) => (
+                <div className={`peer-timeline-event ${event.severity}`} key={event.id}>
+                  <span className="peer-timeline-dot" />
+                  <div>
+                    <strong>{event.title}</strong>
+                    <small>{new Date(event.createdAt).toLocaleString()} 繚 {event.actorRole} 繚 {event.targetStatus || 'open'}</small>
+                    <p>{event.targetSummary || event.reason || event.targetId}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <h4><Flag size={18} /> Timeline Cases</h4>
+            <div className="peer-log-list">
+              {(moderationTimeline?.cases || []).slice(0, 6).map((item) => (
+                <div className="peer-log-row" key={item.key}>
+                  <strong>{item.targetType} 繚 {item.targetStatus || 'open'}</strong>
+                  <span>{item.eventCount} events 繚 {item.reportCount} reports 繚 {item.moderationCount} actions</span>
+                  <small>{item.targetSummary || item.targetId}</small>
+                </div>
+              ))}
+            </div>
             <h4><ShieldCheck size={18} /> Moderation Logs</h4>
             <div className="peer-action-row">
               <button disabled={busy} onClick={exportModerationLogs}>Export CSV</button>
