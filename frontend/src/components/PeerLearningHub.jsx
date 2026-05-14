@@ -32,6 +32,32 @@ const emptyStudentQuestion = {
   creationReason: ''
 };
 
+const MODERATION_TYPES = [
+  ['all', 'All content'],
+  ['explanation', 'Peer explanations'],
+  ['helpRequest', 'Help requests'],
+  ['helpResponse', 'Help responses'],
+  ['studentQuestion', 'Student questions'],
+  ['peerChallenge', 'Peer challenges'],
+  ['peerReview', 'Peer reviews'],
+  ['wrongExchange', 'Wrong exchanges'],
+  ['learningGuild', 'Learning guilds']
+];
+
+const MODERATION_STATUSES = [
+  ['all', 'All statuses'],
+  ['pending_review', 'Pending review'],
+  ['flagged', 'Flagged'],
+  ['returned_for_revision', 'Returned'],
+  ['approved', 'Approved'],
+  ['hidden', 'Hidden'],
+  ['deleted', 'Deleted']
+];
+
+function moderationKey(targetType, id) {
+  return `${targetType}:${id}`;
+}
+
 function StatusBadge({ status }) {
   return <span className={`peer-status-badge ${status || 'open'}`}>{status || 'open'}</span>;
 }
@@ -81,6 +107,9 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
   const [wrongExchangeDraft, setWrongExchangeDraft] = useState({ partnerStudentId: '', partnerName: '', knowledgePoint: '' });
   const [wrongExchangeReflections, setWrongExchangeReflections] = useState({});
   const [guildDraft, setGuildDraft] = useState({ name: '', weeklyGoal: '' });
+  const [queueTypeFilter, setQueueTypeFilter] = useState('all');
+  const [queueStatusFilter, setQueueStatusFilter] = useState('all');
+  const [selectedModeration, setSelectedModeration] = useState({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -121,6 +150,7 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
     setSafetySummary(safetyData);
     setSettingsDraft(settingsData);
     setModerationLogs(logsData.logs || []);
+    setSelectedModeration({});
   };
 
   const load = async () => {
@@ -342,15 +372,69 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
     }
   };
 
+  const batchModerate = async (action, items) => {
+    const targets = (items || []).map((item) => ({ targetType: item.targetType, targetId: item.id }));
+    if (!targets.length) return;
+    setBusy(true);
+    setError('');
+    try {
+      const result = await peerLearningApi.moderateBatch(user, {
+        action,
+        items: targets,
+        reason: `Teacher batch ${action} in peer learning queue.`
+      });
+      if (result.failed > 0) setError(`${result.succeeded} items updated; ${result.failed} items need manual review.`);
+      await loadTeacher();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (mode === 'teacher') {
-    const pendingCount = (queue?.explanations?.length || 0) +
-      (queue?.helpRequests?.length || 0) +
-      (queue?.helpResponses?.length || 0) +
-      (queue?.studentQuestions?.length || 0) +
-      (queue?.peerChallenges?.length || 0) +
-      (queue?.peerReviews?.length || 0) +
-      (queue?.wrongExchanges?.length || 0) +
-      (queue?.learningGuilds?.length || 0);
+    const queueGroups = [
+      ['explanations', 'Peer explanation', 'explanation'],
+      ['helpRequests', 'Help request', 'helpRequest'],
+      ['helpResponses', 'Help response', 'helpResponse'],
+      ['studentQuestions', 'Student-created question', 'studentQuestion'],
+      ['peerChallenges', 'Flagged challenge', 'peerChallenge'],
+      ['peerReviews', 'Flagged peer review', 'peerReview'],
+      ['wrongExchanges', 'Flagged wrong-question exchange', 'wrongExchange'],
+      ['learningGuilds', 'Learning guild', 'learningGuild']
+    ];
+    const allQueueItems = queueGroups.flatMap(([key, label, targetType]) => (
+      (queue?.[key] || []).map((item) => ({ ...item, queueLabel: label, targetType }))
+    ));
+    const filteredQueueItems = allQueueItems.filter((item) => (
+      (queueTypeFilter === 'all' || item.targetType === queueTypeFilter) &&
+      (queueStatusFilter === 'all' || item.status === queueStatusFilter)
+    ));
+    const selectedItems = filteredQueueItems.filter((item) => selectedModeration[moderationKey(item.targetType, item.id)]);
+    const selectedCount = selectedItems.length;
+    const pendingCount = allQueueItems.length;
+    const itemsForType = (targetType) => filteredQueueItems.filter((item) => item.targetType === targetType);
+    const toggleModerationSelection = (item) => {
+      const key = moderationKey(item.targetType, item.id);
+      setSelectedModeration((previous) => ({ ...previous, [key]: !previous[key] }));
+    };
+    const selectVisible = () => {
+      const next = {};
+      filteredQueueItems.forEach((item) => {
+        next[moderationKey(item.targetType, item.id)] = true;
+      });
+      setSelectedModeration(next);
+    };
+    const selectionControl = (item) => (
+      <label className="peer-select-item">
+        <input
+          type="checkbox"
+          checked={Boolean(selectedModeration[moderationKey(item.targetType, item.id)])}
+          onChange={() => toggleModerationSelection(item)}
+        />
+        <span>Select</span>
+      </label>
+    );
 
     return (
       <section className="peer-learning-hub teacher-mode">
@@ -442,11 +526,28 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
         <div className="peer-two-column">
           <div className="peer-panel">
             <h4><ShieldCheck size={18} /> Moderation Queue</h4>
+            <div className="peer-moderation-toolbar">
+              <select value={queueTypeFilter} onChange={(event) => setQueueTypeFilter(event.target.value)}>
+                {MODERATION_TYPES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+              <select value={queueStatusFilter} onChange={(event) => setQueueStatusFilter(event.target.value)}>
+                {MODERATION_STATUSES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+              <button disabled={busy || filteredQueueItems.length === 0} onClick={selectVisible}>Select visible</button>
+              <button disabled={busy || selectedCount === 0} onClick={() => setSelectedModeration({})}>Clear</button>
+            </div>
+            <div className="peer-batch-bar">
+              <span>{selectedCount} selected / {filteredQueueItems.length} visible</span>
+              <button disabled={busy || selectedCount === 0} onClick={() => batchModerate('approve', selectedItems)}>Batch approve</button>
+              <button disabled={busy || selectedCount === 0} onClick={() => batchModerate('return', selectedItems)}>Batch return</button>
+              <button className="danger" disabled={busy || selectedCount === 0} onClick={() => batchModerate('hide', selectedItems)}>Batch hide</button>
+            </div>
             {pendingCount === 0 && <p className="peer-empty">No pending moderation items.</p>}
+            {pendingCount > 0 && filteredQueueItems.length === 0 && <p className="peer-empty">No moderation items match the current filters.</p>}
 
-            {(queue?.explanations || []).map((item) => (
+            {itemsForType('explanation').map((item) => (
               <div className="peer-review-item" key={item.id}>
-                <div className="peer-item-top"><strong>Peer explanation</strong><StatusBadge status={item.status} /></div>
+                <div className="peer-item-top"><strong>{item.queueLabel}</strong><span>{selectionControl(item)}<StatusBadge status={item.status} /></span></div>
                 <p>{item.explanationText}</p>
                 <small>{item.studentName} · {item.questionPrompt || item.questionId}</small>
                 <div className="peer-action-row">
@@ -458,9 +559,21 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
               </div>
             ))}
 
-            {(queue?.helpResponses || []).map((item) => (
+            {itemsForType('helpRequest').map((item) => (
               <div className="peer-review-item" key={item.id}>
-                <div className="peer-item-top"><strong>Help response</strong><StatusBadge status={item.status} /></div>
+                <div className="peer-item-top"><strong>{item.queueLabel}</strong><span>{selectionControl(item)}<StatusBadge status={item.status} /></span></div>
+                <p>{item.message}</p>
+                <small>{item.studentName} 繚 {item.knowledgePoint || item.questionId}</small>
+                <div className="peer-action-row">
+                  <button onClick={() => moderate('helpRequest', item.id, 'approve')}>Clear flag</button>
+                  <button className="danger" onClick={() => moderate('helpRequest', item.id, 'hide')}>Hide</button>
+                </div>
+              </div>
+            ))}
+
+            {itemsForType('helpResponse').map((item) => (
+              <div className="peer-review-item" key={item.id}>
+                <div className="peer-item-top"><strong>{item.queueLabel}</strong><span>{selectionControl(item)}<StatusBadge status={item.status} /></span></div>
                 <p>{item.content}</p>
                 <small>{item.responderName} · {item.responseType}</small>
                 <div className="peer-action-row">
@@ -470,9 +583,9 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
               </div>
             ))}
 
-            {(queue?.studentQuestions || []).map((item) => (
+            {itemsForType('studentQuestion').map((item) => (
               <div className="peer-review-item" key={item.id}>
-                <div className="peer-item-top"><strong>Student-created question</strong><StatusBadge status={item.status} /></div>
+                <div className="peer-item-top"><strong>{item.queueLabel}</strong><span>{selectionControl(item)}<StatusBadge status={item.status} /></span></div>
                 <p>{item.prompt}</p>
                 <small>{item.creatorName} · {item.knowledgePoint || 'Uncategorized'} · Answer: {item.answer}</small>
                 {item.explanation && <p className="peer-muted">{item.explanation}</p>}
@@ -485,9 +598,9 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
               </div>
             ))}
 
-            {(queue?.peerChallenges || []).map((item) => (
+            {itemsForType('peerChallenge').map((item) => (
               <div className="peer-review-item" key={item.id}>
-                <div className="peer-item-top"><strong>Flagged challenge</strong><StatusBadge status={item.status} /></div>
+                <div className="peer-item-top"><strong>{item.queueLabel}</strong><span>{selectionControl(item)}<StatusBadge status={item.status} /></span></div>
                 <p>{item.challengerName} vs {item.opponentName}</p>
                 <small>{item.mode} · reports: {item.reportCount || 0}</small>
                 <div className="peer-action-row">
@@ -498,9 +611,9 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
               </div>
             ))}
 
-            {(queue?.peerReviews || []).map((item) => (
+            {itemsForType('peerReview').map((item) => (
               <div className="peer-review-item" key={item.id}>
-                <div className="peer-item-top"><strong>Flagged peer review</strong><StatusBadge status={item.status} /></div>
+                <div className="peer-item-top"><strong>{item.queueLabel}</strong><span>{selectionControl(item)}<StatusBadge status={item.status} /></span></div>
                 <p>{item.feedbackText || item.submissionText}</p>
                 <small>{item.reviewerName} → {item.revieweeName} · reports: {item.reportCount || 0}</small>
                 <div className="peer-action-row">
@@ -511,9 +624,9 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
               </div>
             ))}
 
-            {(queue?.wrongExchanges || []).map((item) => (
+            {itemsForType('wrongExchange').map((item) => (
               <div className="peer-review-item" key={item.id}>
-                <div className="peer-item-top"><strong>Flagged wrong-question exchange</strong><StatusBadge status={item.status} /></div>
+                <div className="peer-item-top"><strong>{item.queueLabel}</strong><span>{selectionControl(item)}<StatusBadge status={item.status} /></span></div>
                 <p>{item.knowledgePoint || 'Review concept'}</p>
                 <small>{item.studentAName} x {item.studentBName} · reports: {item.reportCount || 0}</small>
                 <div className="peer-action-row">
@@ -524,9 +637,9 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
               </div>
             ))}
 
-            {(queue?.learningGuilds || []).map((item) => (
+            {itemsForType('learningGuild').map((item) => (
               <div className="peer-review-item" key={item.id}>
-                <div className="peer-item-top"><strong>Learning guild</strong><StatusBadge status={item.status} /></div>
+                <div className="peer-item-top"><strong>{item.queueLabel}</strong><span>{selectionControl(item)}<StatusBadge status={item.status} /></span></div>
                 <p>{item.name} · {item.weeklyGoal}</p>
                 <small>{(item.members || []).length} members · locked: {item.moderationLocked ? 'yes' : 'no'}</small>
                 <div className="peer-action-row">

@@ -1626,6 +1626,72 @@ function moderationTarget(store, targetType, targetId) {
   return collection.find((item) => item.id === targetId);
 }
 
+function applyPeerModerationAction(store, principal, payload = {}) {
+  const targetType = sanitizeCell(payload.targetType || '');
+  const targetId = sanitizeCell(payload.targetId || '');
+  const action = sanitizeCell(payload.action || '');
+  const reason = sanitizeCell(payload.reason || '');
+  const target = moderationTarget(store, targetType, targetId);
+  if (!target) return { ok: false, status: 404, error: 'Moderation target not found.', targetType, targetId };
+  if (targetType === 'learningGuild' && ['lock', 'unlock'].includes(action)) {
+    target.moderationLocked = action === 'lock';
+    target.updatedAt = nowIso();
+    target.teacherReviewNote = reason;
+    addModerationLog(store, principal, `MODERATE_${action.toUpperCase()}`, targetType, targetId, reason);
+    return { ok: true, target, targetType, targetId, action };
+  }
+  const statusByAction = {
+    approve: 'approved',
+    feature: 'approved',
+    hide: 'hidden',
+    reject: 'rejected',
+    return: 'returned_for_revision',
+    delete: 'deleted',
+    flag: 'flagged',
+    add_to_teacher_bank: 'added_to_teacher_bank'
+  };
+  if (!statusByAction[action]) return { ok: false, status: 400, error: 'Unsupported moderation action.', targetType, targetId };
+  if (targetType === 'studentQuestion' && action === 'add_to_teacher_bank') {
+    const bank = (store.questionBanks || []).find((item) => item.id === target.questionBankId && !item.deletedAt);
+    if (!bank) return { ok: false, status: 400, error: 'A target teacher question bank is required before adding this student question.', targetType, targetId };
+    const permission = getPermission(store, bank, principal);
+    if (!permission.canEdit) return { ok: false, status: 403, error: 'Only the question bank owner or admin can add this student question to the bank.', targetType, targetId };
+    const addedQuestion = normalizeQuestion({
+      prompt: target.prompt,
+      type: target.type,
+      optionA: target.options?.A,
+      optionB: target.options?.B,
+      optionC: target.options?.C,
+      optionD: target.options?.D,
+      answer: target.answer,
+      explanation: target.explanation,
+      difficulty: target.difficulty,
+      knowledgePoint: target.knowledgePoint,
+      teachingGoal: target.creationReason,
+      sourceNote: target.sourceNote,
+      tags: ['student-created', target.creatorName].filter(Boolean)
+    }, bank);
+    bank.questions = bank.questions || [];
+    bank.questions.push(addedQuestion);
+    bank.updatedAt = nowIso();
+    bank.updatedBy = principal.userId;
+    target.addedQuestionId = addedQuestion.id;
+    target.addedToTeacherBankAt = nowIso();
+    addAudit(store, principal, 'ADD_STUDENT_CREATED_QUESTION_TO_BANK', 'question', addedQuestion.id, {
+      targetQuestionBankId: bank.id,
+      targetQuestionId: addedQuestion.id,
+      studentQuestionId: target.id
+    });
+  }
+  target.status = statusByAction[action];
+  target.teacherReviewNote = reason;
+  target.updatedAt = nowIso();
+  if (targetType === 'explanation' && action === 'feature') target.teacherFeatured = true;
+  if (targetType === 'helpResponse' && action === 'approve') target.teacherApproved = true;
+  addModerationLog(store, principal, `MODERATE_${action.toUpperCase()}`, targetType, targetId, reason);
+  return { ok: true, target, targetType, targetId, action };
+}
+
 function createQuestionBank({ principal, metadata, questions, legalAcknowledged }) {
   const timestamp = nowIso();
   const id = createId('qb');
@@ -2952,72 +3018,42 @@ app.get('/api/peer-learning/teacher/moderation-logs/export', requireTeacher, (re
   res.send(moderationLogsCsv(logs));
 });
 
-app.post('/api/peer-learning/teacher/moderate', requireTeacher, rateLimitMutations, (req, res) => {
-  const targetType = sanitizeCell(req.body.targetType || '');
-  const targetId = sanitizeCell(req.body.targetId || '');
+app.post('/api/peer-learning/teacher/moderate/batch', requireTeacher, rateLimitMutations, (req, res) => {
   const action = sanitizeCell(req.body.action || '');
+  const reason = sanitizeCell(req.body.reason || 'Teacher batch reviewed in peer learning queue.');
+  const items = Array.isArray(req.body.items) ? req.body.items.slice(0, 50) : [];
+  if (!items.length) return res.status(400).json({ error: 'Batch moderation requires at least one target item.' });
   const store = readStore();
-  const target = moderationTarget(store, targetType, targetId);
-  if (!target) return res.status(404).json({ error: 'Moderation target not found.' });
-  if (targetType === 'learningGuild' && ['lock', 'unlock'].includes(action)) {
-    target.moderationLocked = action === 'lock';
-    target.updatedAt = nowIso();
-    target.teacherReviewNote = sanitizeCell(req.body.reason || '');
-    addModerationLog(store, req.principal, `MODERATE_${action.toUpperCase()}`, targetType, targetId, req.body.reason || '');
-    writeStore(store);
-    return res.json({ ok: true, target });
-  }
-  const statusByAction = {
-    approve: 'approved',
-    feature: 'approved',
-    hide: 'hidden',
-    reject: 'rejected',
-    return: 'returned_for_revision',
-    delete: 'deleted',
-    flag: 'flagged',
-    add_to_teacher_bank: 'added_to_teacher_bank'
-  };
-  if (!statusByAction[action]) return res.status(400).json({ error: 'Unsupported moderation action.' });
-  if (targetType === 'studentQuestion' && action === 'add_to_teacher_bank') {
-    const bank = (store.questionBanks || []).find((item) => item.id === target.questionBankId && !item.deletedAt);
-    if (!bank) return res.status(400).json({ error: 'A target teacher question bank is required before adding this student question.' });
-    const permission = getPermission(store, bank, req.principal);
-    if (!permission.canEdit) return res.status(403).json({ error: 'Only the question bank owner or admin can add this student question to the bank.' });
-    const addedQuestion = normalizeQuestion({
-      prompt: target.prompt,
-      type: target.type,
-      optionA: target.options?.A,
-      optionB: target.options?.B,
-      optionC: target.options?.C,
-      optionD: target.options?.D,
-      answer: target.answer,
-      explanation: target.explanation,
-      difficulty: target.difficulty,
-      knowledgePoint: target.knowledgePoint,
-      teachingGoal: target.creationReason,
-      sourceNote: target.sourceNote,
-      tags: ['student-created', target.creatorName].filter(Boolean)
-    }, bank);
-    bank.questions = bank.questions || [];
-    bank.questions.push(addedQuestion);
-    bank.updatedAt = nowIso();
-    bank.updatedBy = req.principal.userId;
-    target.addedQuestionId = addedQuestion.id;
-    target.addedToTeacherBankAt = nowIso();
-    addAudit(store, req.principal, 'ADD_STUDENT_CREATED_QUESTION_TO_BANK', 'question', addedQuestion.id, {
-      targetQuestionBankId: bank.id,
-      targetQuestionId: addedQuestion.id,
-      studentQuestionId: target.id
-    });
-  }
-  target.status = statusByAction[action];
-  target.teacherReviewNote = sanitizeCell(req.body.reason || '');
-  target.updatedAt = nowIso();
-  if (targetType === 'explanation' && action === 'feature') target.teacherFeatured = true;
-  if (targetType === 'helpResponse' && action === 'approve') target.teacherApproved = true;
-  addModerationLog(store, req.principal, `MODERATE_${action.toUpperCase()}`, targetType, targetId, req.body.reason || '');
+  const results = items.map((item) => applyPeerModerationAction(store, req.principal, {
+    targetType: item.targetType,
+    targetId: item.targetId,
+    action: item.action || action,
+    reason
+  }));
+  const succeeded = results.filter((item) => item.ok).length;
+  if (succeeded > 0) writeStore(store);
+  res.json({
+    ok: succeeded === results.length,
+    succeeded,
+    failed: results.length - succeeded,
+    results: results.map((item) => ({
+      ok: item.ok,
+      status: item.status || 200,
+      error: item.error || '',
+      targetType: item.targetType,
+      targetId: item.targetId,
+      action: item.action || action,
+      targetStatus: item.target?.status || ''
+    }))
+  });
+});
+
+app.post('/api/peer-learning/teacher/moderate', requireTeacher, rateLimitMutations, (req, res) => {
+  const store = readStore();
+  const result = applyPeerModerationAction(store, req.principal, req.body);
+  if (!result.ok) return res.status(result.status || 400).json({ error: result.error });
   writeStore(store);
-  res.json({ ok: true, target });
+  res.json({ ok: true, target: result.target });
 });
 
 app.get('/api/admin/question-banks', requireAdmin, (req, res) => {

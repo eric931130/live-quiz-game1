@@ -334,5 +334,14 @@ export const peerLearningApi = {
       body: JSON.stringify(payload || {})
     });
     return parseResponse(response);
+  },
+
+  async moderateBatch(user, payload) {
+    const response = await fetch(`${API_BASE}/api/peer-learning/teacher/moderate/batch`, {
+      method: 'POST',
+      headers: await headersFor(user, { 'Content-Type': 'application/json' }, 'teacher'),
+      body: JSON.stringify(payload || {})
+    });
+    return parseResponse(response);
   }
 };

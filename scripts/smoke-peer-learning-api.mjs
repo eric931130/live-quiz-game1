@@ -231,29 +231,30 @@ try {
   assert(queue.explanations.some((item) => item.id === explanation.id), 'Pending explanation missing from moderation queue.');
   assert(queue.helpResponses.some((item) => item.id === helpAnswer.id), 'Pending help response missing from moderation queue.');
 
-  const { response: moderateExplanationResponse } = await jsonRequest('/api/peer-learning/teacher/moderate', {
+  const studentBatchModeration = await request('/api/peer-learning/teacher/moderate/batch', {
     method: 'POST',
-    headers: teacherHeaders,
-    body: {
-      targetType: 'explanation',
-      targetId: explanation.id,
-      action: 'feature',
-      reason: 'Clear structured peer explanation.'
-    }
+    headers: {
+      ...studentAHeaders,
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify({ action: 'approve', items: [{ targetType: 'explanation', targetId: explanation.id }] })
   });
-  assert(moderateExplanationResponse.ok, 'Teacher explanation moderation failed.');
+  assert(studentBatchModeration.status === 403, 'Student should not batch moderate peer learning items.');
 
-  const { response: moderateHelpResponse } = await jsonRequest('/api/peer-learning/teacher/moderate', {
+  const { response: batchModerateResponse, json: batchModerateResult } = await jsonRequest('/api/peer-learning/teacher/moderate/batch', {
     method: 'POST',
     headers: teacherHeaders,
     body: {
-      targetType: 'helpResponse',
-      targetId: helpAnswer.id,
       action: 'approve',
-      reason: 'Helpful hint without giving away the answer.'
+      reason: 'Batch approved structured peer explanation and helpful hint.',
+      items: [
+        { targetType: 'explanation', targetId: explanation.id },
+        { targetType: 'helpResponse', targetId: helpAnswer.id }
+      ]
     }
   });
-  assert(moderateHelpResponse.ok, 'Teacher help response moderation failed.');
+  assert(batchModerateResponse.ok, 'Teacher batch moderation failed.');
+  assert(batchModerateResult.succeeded === 2 && batchModerateResult.failed === 0, 'Teacher batch moderation result mismatch.');
 
   const { response: voteResponse, json: votedExplanation } = await jsonRequest(`/api/peer-learning/explanations/${explanation.id}/vote`, {
     method: 'POST',

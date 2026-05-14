@@ -3354,6 +3354,27 @@ input[type="file"]::file-selector-button {
   margin-top: 0.8rem;
 }
 
+.peer-moderation-toolbar,
+.peer-batch-bar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.55rem;
+  margin: 0.7rem 0;
+}
+
+.peer-batch-bar {
+  align-items: center;
+  border: 1px solid rgba(214, 168, 79, 0.2);
+  border-radius: 12px;
+  padding: 0.65rem;
+  background: rgba(8, 8, 8, 0.3);
+}
+
+.peer-batch-bar span {
+  color: #c9bfa8;
+  font-weight: 800;
+}
+
 .peer-toggle {
   display: flex;
   align-items: center;
@@ -3439,6 +3460,26 @@ input[type="file"]::file-selector-button {
   justify-content: space-between;
   gap: 0.75rem;
   align-items: center;
+}
+
+.peer-item-top > span,
+.peer-select-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.peer-select-item {
+  color: #c9bfa8;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.peer-select-item input {
+  width: auto;
+  margin: 0;
+  accent-color: #d6a84f;
 }
 
 .peer-status-badge {
