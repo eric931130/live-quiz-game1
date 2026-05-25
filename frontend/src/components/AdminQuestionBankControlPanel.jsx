@@ -3,12 +3,39 @@ import { AlertTriangle, FileText, Lock, RotateCcw, Search, ShieldAlert, Unlock }
 import { questionBankApi } from '../questionBankApi';
 
 const ADMIN_STATUSES = [
-  { value: 'active', label: 'Active' },
-  { value: 'rights-review-needed', label: 'Rights review' },
-  { value: 'locked', label: 'Locked' },
-  { value: 'suspended', label: 'Suspended' },
-  { value: 'deleted', label: 'Deleted' }
+  { value: 'active', label: '啟用中' },
+  { value: 'rights-review-needed', label: '權利審查' },
+  { value: 'locked', label: '已鎖定' },
+  { value: 'suspended', label: '已暫停' },
+  { value: 'deleted', label: '已刪除' }
 ];
+
+const ADMIN_STATUS_LABELS = Object.fromEntries(ADMIN_STATUSES.map((status) => [status.value, status.label]));
+
+const RIGHTS_RISK_LABELS = {
+  unchecked: '未檢查',
+  cleared: '已確認',
+  'needs-review': '需審查'
+};
+
+const VISIBILITY_LABELS = {
+  private: '私人',
+  shared: '已分享',
+  organization: '校內可見',
+  public: '公開'
+};
+
+function adminStatusText(status) {
+  return ADMIN_STATUS_LABELS[status] || status || '未設定';
+}
+
+function rightsRiskText(status) {
+  return RIGHTS_RISK_LABELS[status] || status || '未檢查';
+}
+
+function visibilityText(visibility) {
+  return VISIBILITY_LABELS[visibility] || visibility || '私人';
+}
 
 function isAdminUser(user) {
   const role = String(user?.role || user?.customClaims?.role || '').toLowerCase();
@@ -20,7 +47,7 @@ export default function AdminQuestionBankControlPanel({ user }) {
   const [logs, setLogs] = useState([]);
   const [query, setQuery] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('all');
-  const [reason, setReason] = useState('Platform compliance review');
+  const [reason, setReason] = useState('平台合規審查');
   const [loading, setLoading] = useState(false);
   const [accessError, setAccessError] = useState('');
 
@@ -68,7 +95,7 @@ export default function AdminQuestionBankControlPanel({ user }) {
       const updated = await questionBankApi.adminUpdateBankStatus(user, bank.id, {
         status,
         reason,
-        note: `Admin governance action from control panel: ${status}`
+        note: `管理員控制台治理操作：${adminStatusText(status)}`
       });
       setBanks((current) => current.map((item) => (item.id === updated.id ? updated : item)));
       const auditResult = await questionBankApi.adminAudit(user);
@@ -114,7 +141,7 @@ export default function AdminQuestionBankControlPanel({ user }) {
 
       <div className="admin-governance-notice">
         <AlertTriangle size={18} />
-        <span>管理操作應基於安全、濫用防範、權利保護、法律合規、爭議處理、資料復原或平台營運必要性，並保留 audit log。</span>
+        <span>管理操作應基於安全、濫用防範、權利保護、法律合規、爭議處理、資料復原或平台營運必要性，並保留操作紀錄。</span>
       </div>
 
       {accessError && (
@@ -140,10 +167,10 @@ export default function AdminQuestionBankControlPanel({ user }) {
         {filteredBanks.map((bank) => (
           <article key={bank.id} className="admin-bank-card">
             <div>
-              <span className={`bank-status ${bank.status}`}>{bank.status}</span>
+              <span className={`bank-status ${bank.status}`}>{adminStatusText(bank.status)}</span>
               <h4>{bank.title || bank.name}</h4>
               <p>{bank.subject || '未設定科目'} · {bank.questions?.length || 0} 題 · owner: {bank.ownerTeacherName || bank.ownerTeacherId}</p>
-              <small>Rights: {bank.rightsRiskStatus || 'unchecked'} · Visibility: {bank.visibility}</small>
+              <small>權利狀態：{rightsRiskText(bank.rightsRiskStatus)} · 可見性：{visibilityText(bank.visibility)}</small>
             </div>
             <div className="admin-action-row">
               <button onClick={() => updateStatus(bank, 'rights-review-needed')}><FileText size={15} /> 權利審查</button>
@@ -159,7 +186,7 @@ export default function AdminQuestionBankControlPanel({ user }) {
       </div>
 
       <div className="admin-audit-panel">
-        <h4>最近 Audit Logs</h4>
+        <h4>最近操作紀錄</h4>
         <div className="admin-audit-list">
           {logs.slice(0, 12).map((log) => (
             <div key={log.id}>

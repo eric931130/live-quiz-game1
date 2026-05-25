@@ -68,9 +68,9 @@ export default function TermsModal({ mode = 'terms', onClose }) {
 
           {mode === 'disclaimer' && (
             <>
-              <h3 style={{ color: '#333', marginBottom: '0.5rem' }}>免責聲明 (Disclaimer)</h3>
+              <h3 style={{ color: '#333', marginBottom: '0.5rem' }}>免責聲明</h3>
               <p style={{ marginBottom: '1rem', fontWeight: 'bold', color: '#D32F2F', background: '#FFEBEE', padding: '1rem', borderRadius: '8px' }}>
-                本服務係以「現況 (As Is)」及「現有 (As Available)」提供。我們不對本服務提供任何明示或默示的擔保，包含但不限於商業適售性、特定目的之適用性及未侵害他人權利。
+                本服務係以「現況」及「現有」狀態提供。我們不對本服務提供任何明示或默示的擔保，包含但不限於商業適售性、特定目的之適用性及未侵害他人權利。
                 <br/><br/>
                 我們絕對免責於以下情況（包含但不限於）：
                 <br/>1. <strong>系統中斷與連線失敗</strong>：因電信設備故障、網路壅塞、伺服器當機或進行例行性維護所導致的任何資料遺失、延遲或無法使用。
@@ -84,7 +84,7 @@ export default function TermsModal({ mode = 'terms', onClose }) {
 
           {mode === 'privacy' && (
              <>
-              <h3 style={{ color: '#333', marginBottom: '0.5rem' }}>隱私權政策 (Privacy Policy)</h3>
+              <h3 style={{ color: '#333', marginBottom: '0.5rem' }}>隱私權政策</h3>
               <p style={{ marginBottom: '1rem' }}>
                  我們極度重視您的隱私權。為了讓您能夠安心的使用本網站的各項服務與資訊，特此向您說明本網站的隱私權保護政策，以保障您的權益。
               </p>
@@ -108,7 +108,7 @@ export default function TermsModal({ mode = 'terms', onClose }) {
               
               <h4 style={{ color: '#333', marginTop: '1rem' }}>4. Cookie 及 Google 廣告之使用</h4>
               <p style={{ marginBottom: '1rem' }}>
-                 為了提供您最佳的服務，本網站會使用 Cookie 技術來儲存並在某些時候追蹤您的資料。此外，本網站採用第三方廣告供應商（如 <strong>Google AdSense</strong>）來投放廣告。Google 會使用 Cookie（如 DART Cookie）來根據您以往在本網站或網際網路上其他網站的瀏覽紀錄，為您放送個人化廣告。使用者可隨時前往 <a href="https://adssettings.google.com/" target="_blank" rel="noreferrer">Google 廣告設定</a> 頁面，選擇停用個人化廣告。
+                 為了提供您最佳的服務，本網站會使用 Cookie 技術來儲存並在某些時候追蹤您的資料。此外，本網站採用第三方廣告供應商（如 Google AdSense）來投放廣告。Google 會使用 Cookie（如 DART Cookie）來根據您以往在本網站或網際網路上其他網站的瀏覽紀錄，為您放送個人化廣告。使用者可隨時前往 <a href="https://adssettings.google.com/" target="_blank" rel="noreferrer">Google 廣告設定</a> 頁面，選擇停用個人化廣告。
               </p>
 
               <h4 style={{ color: '#333', marginTop: '1rem' }}>5. 使用者權利</h4>
@@ -120,22 +120,22 @@ export default function TermsModal({ mode = 'terms', onClose }) {
 
           {mode === 'contact' && (
              <>
-              <h3 style={{ color: '#333', marginBottom: '0.5rem' }}>聯絡我們 (Contact Us)</h3>
+              <h3 style={{ color: '#333', marginBottom: '0.5rem' }}>聯絡我們</h3>
               <p style={{ marginBottom: '1rem' }}>
                  若您對我們的「服務條款」、「隱私權政策」或平台功能有任何疑問、建議，或者是帳號資料刪除請求、商業合作提案，非常歡迎您隨時與我們聯繫！
               </p>
               <div style={{ background: '#f5f5f5', padding: '1.5rem', borderRadius: '12px', marginTop: '1.5rem', border: '1px solid #e0e0e0' }}>
                  <p style={{ margin: '0.5rem 0', fontSize: '1.1rem' }}>
-                   <strong>📧 電子郵件 Email：</strong> <br/>
+                   <strong>📧 電子郵件：</strong> <br/>
                    <a href="mailto:dragonbabyliu1130@gmail.com" style={{ color: 'var(--primary)', fontWeight: 'bold', textDecoration: 'none' }}>
                      dragonbabyliu1130@gmail.com
                    </a>
                  </p>
-                 <p style={{ margin: '1rem 0 0.5rem', fontSize: '1.1rem' }}><strong>📍 服務時間：</strong><br/>週一至週五 09:00 - 18:00 (GMT+8)</p>
+                 <p style={{ margin: '1rem 0 0.5rem', fontSize: '1.1rem' }}><strong>📍 服務時間：</strong><br/>週一至週五 09:00 - 18:00（台北時間）</p>
                  <p style={{ margin: '1rem 0 0.5rem', fontSize: '1.1rem' }}><strong>🏢 營運單位：</strong><br/>師說新宇教學平台團隊</p>
               </div>
               <p style={{ marginTop: '1.5rem', color: '#666', lineHeight: '1.6' }}>
-                 為了加速處理您的問題，來信時請盡量提供您的「註冊 Email」或「遭遇問題的詳細截圖」。我們將會盡快於 1-3 個工作天內回覆您的來信，感謝您的耐心等候與支持。
+                 為了加速處理您的問題，來信時請盡量提供您的「註冊電子郵件」或「遭遇問題的詳細截圖」。我們將會盡快於 1-3 個工作天內回覆您的來信，感謝您的耐心等候與支持。
               </p>
              </>
           )}

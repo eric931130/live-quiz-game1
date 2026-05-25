@@ -54,12 +54,12 @@ const USAGE_SCENARIOS = [
 const WIZARD_STEPS = [
   '建立來源',
   '預覽與驗證',
-  'Metadata 與標籤',
+  '補充資料與標籤',
   '權利確認',
   '儲存與下一步'
 ];
 
-const RIGHTS_NOTICE = 'Before uploading, please confirm that you have the lawful right to upload, use, and share this question bank. Question content may involve copyright, textbook licensing, examination provider rights, trademark, patent, contractual restrictions, school policy, privacy, or other legal obligations. You are responsible for ensuring that your uploaded content does not infringe third-party rights or violate applicable rules. The platform may review, restrict, suspend, remove, or disable access to content when necessary for rights protection, legal compliance, security, dispute resolution, abuse prevention, or platform operation.';
+const RIGHTS_NOTICE = '上傳前，請確認你擁有合法權利上傳、使用與分享此題庫。題目內容可能涉及著作權、教材授權、考試機構權利、商標、專利、契約限制、學校政策、隱私或其他法律義務。你有責任確認上傳內容不侵害第三方權利，也不違反適用規範。平台在必要時，得基於權利保護、法律合規、安全、爭議處理、防止濫用或平台營運需要，審查、限制、暫停、移除或停用相關內容。';
 
 function emptyQuestion(type = 'multiple_choice') {
   return {
@@ -88,6 +88,41 @@ function splitList(value) {
     .filter(Boolean);
 }
 
+const BANK_STATUS_LABELS = {
+  active: '啟用中',
+  draft: '草稿',
+  locked: '已鎖定',
+  suspended: '已暫停',
+  deleted: '已刪除',
+  'rights-review-needed': '需權利審查',
+  preview_ready: '預覽已產生'
+};
+
+const VISIBILITY_LABELS = {
+  private: '私人',
+  shared: '已分享',
+  organization: '校內可見',
+  public: '公開'
+};
+
+const RIGHTS_RISK_LABELS = {
+  unchecked: '未檢查',
+  cleared: '已確認',
+  'needs-review': '需審查'
+};
+
+function bankStatusText(status) {
+  return BANK_STATUS_LABELS[status] || status || '啟用中';
+}
+
+function visibilityText(visibility) {
+  return VISIBILITY_LABELS[visibility] || visibility || '私人';
+}
+
+function rightsRiskText(status) {
+  return RIGHTS_RISK_LABELS[status] || status || '未檢查';
+}
+
 function RightsNoticeBox({ compact = false }) {
   return (
     <div className="rights-notice-box">
@@ -103,23 +138,23 @@ function RightsNoticeBox({ compact = false }) {
   );
 }
 
-function UploadAcknowledgementCheckbox({ checked, onChange, verb = 'upload, use, share, export, or copy' }) {
+function UploadAcknowledgementCheckbox({ checked, onChange, verb = '上傳、使用、分享、匯出或複製' }) {
   return (
     <label className="ack-checkbox">
       <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
-      <span>I confirm that I have the necessary rights or authorization to {verb} this question bank, and I understand the related legal and platform policy risks.</span>
+      <span>我確認我擁有{verb}此題庫所需的權利或授權，並理解相關法律與平台政策風險。</span>
     </label>
   );
 }
 
 function PermissionBadge({ bank }) {
   const permission = bank.permission || {};
-  const badges = [permission.isOwner ? 'Owned by me' : 'Shared with me'];
-  if (!permission.isOwner) badges.push('Read-only access', 'Use only');
-  if (permission.canExport) badges.push('Export allowed');
-  if (permission.canCopy) badges.push('Copy allowed');
-  if (bank.status === 'locked') badges.push('Locked by platform');
-  if (bank.status === 'rights-review-needed' || bank.rightsRiskStatus === 'needs-review') badges.push('Needs rights review');
+  const badges = [permission.isOwner ? '我擁有' : '分享給我'];
+  if (!permission.isOwner) badges.push('唯讀權限', '僅可使用');
+  if (permission.canExport) badges.push('允許匯出');
+  if (permission.canCopy) badges.push('允許複製');
+  if (bank.status === 'locked') badges.push('平台已鎖定');
+  if (bank.status === 'rights-review-needed' || bank.rightsRiskStatus === 'needs-review') badges.push('需權利審查');
 
   return (
     <div className="permission-badge-row">
@@ -251,7 +286,7 @@ function QuestionBankCard({ bank, selected, onSelect, onDelete, onShare, onCopy,
   const permission = bank.permission || {};
   const readonlyReason = permission.isOwner
     ? ''
-    : 'You can use this shared question bank, but you cannot modify the original content.';
+    : '你可以使用此共享題庫，但不能修改原始內容。';
 
   return (
     <article className={`question-bank-card ${selected ? 'selected' : ''}`}>
@@ -261,14 +296,14 @@ function QuestionBankCard({ bank, selected, onSelect, onDelete, onShare, onCopy,
           <h4>{bank.title || bank.name}</h4>
           <p>{bank.description || '尚未填寫描述'}</p>
         </div>
-        <span className={`bank-status ${bank.status}`}>{bank.status || 'active'}</span>
+        <span className={`bank-status ${bank.status}`}>{bankStatusText(bank.status)}</span>
       </div>
       <div className="question-bank-meta">
         <span>{bank.questions?.length || 0} 題</span>
         <span>{bank.subject || '未設定科目'}</span>
         <span>{bank.gradeLevel || '未設定年級'}</span>
         <span>{bank.course || '未設定課程'}</span>
-        <span>{bank.visibility || 'private'}</span>
+        <span>{visibilityText(bank.visibility)}</span>
       </div>
       <div className="permission-note">
         {permission.notice || readonlyReason}
@@ -276,11 +311,11 @@ function QuestionBankCard({ bank, selected, onSelect, onDelete, onShare, onCopy,
       </div>
       <div className="bank-actions">
         <button onClick={() => onSelect(bank)}><BookOpen size={16} /> 使用</button>
-        <button disabled={!permission.canUse} title={!permission.canUse ? 'You do not have permission to use this question bank.' : 'Create activity'} onClick={() => onCreateActivity(bank)}><PlayCircle size={16} /> 產生活動</button>
-        <button disabled={!permission.canShare} title={!permission.canShare ? 'Only the owner can edit sharing settings.' : 'Share'} onClick={() => onShare(bank)}><Share2 size={16} /> 分享</button>
-        <button disabled={!permission.canExport} title={!permission.canExport ? 'Export is disabled by the owner.' : 'Export'} onClick={() => onExport(bank)}><Download size={16} /> 匯出</button>
-        <button disabled={!permission.canCopy} title={!permission.canCopy ? 'Copy is disabled by the owner.' : 'Copy to my library'} onClick={() => onCopy(bank)}><Copy size={16} /> 複製</button>
-        <button className="danger" disabled={!permission.canDelete} title={!permission.canDelete ? 'Only the owner can delete this question bank.' : 'Soft delete'} onClick={() => onDelete(bank.id)}><Trash2 size={16} /> 刪除</button>
+        <button disabled={!permission.canUse} title={!permission.canUse ? '你沒有使用此題庫的權限。' : '建立活動'} onClick={() => onCreateActivity(bank)}><PlayCircle size={16} /> 產生活動</button>
+        <button disabled={!permission.canShare} title={!permission.canShare ? '只有擁有者可以修改分享設定。' : '分享'} onClick={() => onShare(bank)}><Share2 size={16} /> 分享</button>
+        <button disabled={!permission.canExport} title={!permission.canExport ? '擁有者未開放匯出。' : '匯出'} onClick={() => onExport(bank)}><Download size={16} /> 匯出</button>
+        <button disabled={!permission.canCopy} title={!permission.canCopy ? '擁有者未開放複製。' : '複製到我的題庫'} onClick={() => onCopy(bank)}><Copy size={16} /> 複製</button>
+        <button className="danger" disabled={!permission.canDelete} title={!permission.canDelete ? '只有擁有者可以刪除此題庫。' : '軟刪除'} onClick={() => onDelete(bank.id)}><Trash2 size={16} /> 刪除</button>
       </div>
     </article>
   );
@@ -494,7 +529,7 @@ function ActivityGeneratorModal({ user, bank, onClose, onGenerated }) {
           <div className="activity-result-card">
             <strong>{activity.title}</strong>
             <span>代碼：{activity.code} · {activity.questionCount} 題 · {activity.activityType}</span>
-            <p>已建立 draft activity，並記錄題庫使用權限與 audit log。</p>
+            <p>已建立草稿活動，並記錄題庫使用權限與操作紀錄。</p>
           </div>
         )}
 
@@ -584,11 +619,11 @@ function AIHealthReportPanel({ user, bank }) {
     <div className="ai-health-panel">
       <div className="ai-panel-header">
         <div>
-          <h4><Brain size={18} /> AI Question Bank Health Report</h4>
+          <h4><Brain size={18} /> AI 題庫健康報告</h4>
           <p>以規則式 AI 輔助檢查格式、重複、解析、知識點覆蓋與可能權利風險。</p>
         </div>
         <button className="secondary-gold-outline-btn" onClick={runHealthReport} disabled={loading}>
-          <Sparkles size={16} /> {loading ? '檢查中...' : 'Run Health Check'}
+          <Sparkles size={16} /> {loading ? '檢查中...' : '執行健康檢查'}
         </button>
       </div>
 
@@ -596,7 +631,7 @@ function AIHealthReportPanel({ user, bank }) {
         <>
           <div className="health-summary-grid">
             <div className="health-score-card">
-              <span>Quality Score</span>
+              <span>品質分數</span>
               <strong>{report.qualityScore}</strong>
               <small>{report.classroomReadiness?.estimatedUsability}</small>
             </div>
@@ -645,10 +680,10 @@ function AIAssistantPanel({ user, bank, onApplied }) {
   const [applying, setApplying] = useState(false);
   const canEdit = Boolean(bank?.permission?.canEdit);
   const actions = [
-    { type: 'auto_tag', label: 'Auto-tag Questions' },
-    { type: 'generate_explanations', label: 'Generate Explanations' },
-    { type: 'improve_clarity', label: 'Improve Question Clarity' },
-    { type: 'check_rights_risk', label: 'Check Rights Risk' }
+    { type: 'auto_tag', label: '自動標籤題目' },
+    { type: 'generate_explanations', label: '生成解析' },
+    { type: 'improve_clarity', label: '改善題目清楚度' },
+    { type: 'check_rights_risk', label: '檢查權利風險' }
   ];
 
   const runPreview = async (actionType) => {
@@ -689,8 +724,8 @@ function AIAssistantPanel({ user, bank, onApplied }) {
     <div className="ai-assistant-panel">
       <div className="ai-panel-header">
         <div>
-          <h4><Wand2 size={18} /> AI Assistant Preview</h4>
-          <p>AI 建議只會在老師確認後寫入，並建立版本紀錄與 audit log。</p>
+          <h4><Wand2 size={18} /> AI 助理預覽</h4>
+          <p>AI 建議只會在老師確認後寫入，並建立版本紀錄與操作紀錄。</p>
         </div>
       </div>
 
@@ -700,7 +735,7 @@ function AIAssistantPanel({ user, bank, onApplied }) {
             key={action.type}
             className="dark-action-btn"
             disabled={!canEdit || Boolean(loadingAction)}
-            title={!canEdit ? 'Only the owner can run AI modification previews for this question bank.' : 'Generate preview'}
+            title={!canEdit ? '只有擁有者可以對此題庫執行 AI 修改預覽。' : '產生預覽'}
             onClick={() => runPreview(action.type)}
           >
             <Sparkles size={15} /> {loadingAction === action.type ? '產生中...' : action.label}
@@ -716,19 +751,19 @@ function AIAssistantPanel({ user, bank, onApplied }) {
         <div className="ai-preview-list">
           <div className="ai-preview-heading">
             <strong>{preview.actionType}</strong>
-            <span>{preview.status}</span>
+            <span>{bankStatusText(preview.status)}</span>
           </div>
           {(preview.items || []).map((item) => (
             <div key={item.questionId} className="ai-preview-item">
-              <span>Question {item.questionId}</span>
+              <span>題目 {item.questionId}</span>
               <div className="before-after-grid">
                 <div>
-                  <strong>Before</strong>
+                  <strong>修改前</strong>
                   <p>{item.before?.prompt}</p>
                   <small>{item.before?.explanation || '尚無解析'}</small>
                 </div>
                 <div>
-                  <strong>After</strong>
+                  <strong>修改後</strong>
                   <p>{item.after?.prompt}</p>
                   <small>{item.after?.explanation || item.after?.note || '無文字變更'}</small>
                 </div>
@@ -740,9 +775,9 @@ function AIAssistantPanel({ user, bank, onApplied }) {
             <RightsNoticeBox compact />
             <label className="ack-checkbox">
               <input type="checkbox" checked={teacherConfirmed} onChange={(event) => setTeacherConfirmed(event.target.checked)} />
-              <span>I reviewed the AI-assisted before/after preview and confirm these changes should be applied to my original question bank.</span>
+              <span>我已檢視 AI 輔助的修改前後預覽，並確認要將這些變更套用到我的原始題庫。</span>
             </label>
-            <UploadAcknowledgementCheckbox checked={applyAck} onChange={setApplyAck} verb="apply AI-assisted changes to" />
+            <UploadAcknowledgementCheckbox checked={applyAck} onChange={setApplyAck} verb="套用 AI 輔助變更到" />
             <button
               className="primary-btn"
               disabled={!teacherConfirmed || !applyAck || applying}
@@ -762,7 +797,7 @@ function QuestionBankVersionHistory({ user, bank }) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [comparison, setComparison] = useState(null);
-  const [restoreReason, setRestoreReason] = useState('Restore previous question bank version');
+  const [restoreReason, setRestoreReason] = useState('還原先前題庫版本');
 
   const load = async () => {
     setLoading(true);
@@ -837,17 +872,17 @@ function QuestionBankVersionHistory({ user, bank }) {
             <div className="version-comparison-panel">
               <h5>版本比較：{comparison.version?.versionName || comparison.version?.versionNumber}</h5>
               <div className="version-comparison-grid">
-                <div><span>Metadata changes</span><strong>{comparison.comparison?.metadataChanges?.length || 0}</strong></div>
-                <div><span>Changed questions</span><strong>{comparison.comparison?.questionSummary?.changedQuestionCount || 0}</strong></div>
-                <div><span>Target adds</span><strong>{comparison.comparison?.questionSummary?.addedInTargetCount || 0}</strong></div>
-                <div><span>Target removes</span><strong>{comparison.comparison?.questionSummary?.removedInTargetCount || 0}</strong></div>
+                <div><span>補充資料變更</span><strong>{comparison.comparison?.metadataChanges?.length || 0}</strong></div>
+                <div><span>題目變更</span><strong>{comparison.comparison?.questionSummary?.changedQuestionCount || 0}</strong></div>
+                <div><span>目標版本新增</span><strong>{comparison.comparison?.questionSummary?.addedInTargetCount || 0}</strong></div>
+                <div><span>目標版本移除</span><strong>{comparison.comparison?.questionSummary?.removedInTargetCount || 0}</strong></div>
               </div>
               <div className="version-diff-list">
                 {(comparison.comparison?.metadataChanges || []).slice(0, 8).map((change) => (
-                  <p key={change.field}><strong>{change.field}</strong> current: {String(change.current)} / target: {String(change.target)}</p>
+                  <p key={change.field}><strong>{change.field}</strong> 目前：{String(change.current)} / 目標：{String(change.target)}</p>
                 ))}
                 {(comparison.comparison?.changedQuestions || []).slice(0, 8).map((question) => (
-                  <p key={question.id}><strong>{question.prompt || question.id}</strong> changed: {question.changedFields.join(', ')}</p>
+                  <p key={question.id}><strong>{question.prompt || question.id}</strong> 已變更：{question.changedFields.join(', ')}</p>
                 ))}
               </div>
             </div>
@@ -878,7 +913,7 @@ function ClassWeaknessReportPanel({ user, bank }) {
     <div className="class-weakness-panel">
       <div className="ai-panel-header">
         <div>
-          <h4><BarChart3 size={18} /> Class Weakness Report</h4>
+          <h4><BarChart3 size={18} /> 班級弱點報告</h4>
           <p>即時課堂作答會回流成題目成效與班級弱點摘要；共享題庫仍只統計你自己課堂的使用資料。</p>
         </div>
         <button className="secondary-gold-outline-btn" disabled={!bank?.permission?.canUse || loading} onClick={load}>
@@ -890,22 +925,22 @@ function ClassWeaknessReportPanel({ user, bank }) {
         <>
           <div className="weakness-summary-grid">
             <div>
-              <span>Total Answers</span>
+              <span>總作答數</span>
               <strong>{report.totalAnswers}</strong>
             </div>
             <div>
-              <span>Incorrect Rate</span>
+              <span>錯誤率</span>
               <strong>{report.incorrectRate}%</strong>
             </div>
             <div>
-              <span>Most Missed Concept</span>
+              <span>最常錯概念</span>
               <strong>{report.mostMissedConcept?.knowledgePoint || '尚無資料'}</strong>
             </div>
           </div>
           <div className="weakness-action-card">
-            <strong>Suggested action</strong>
+            <strong>建議教學行動</strong>
             <p>{report.suggestedAction}</p>
-            <small>Recommended follow-up: {report.recommendedFollowUp}</small>
+            <small>建議後續活動：{report.recommendedFollowUp}</small>
           </div>
           <div className="weakness-concept-list">
             {(report.concepts || []).slice(0, 6).map((concept) => (
@@ -1223,8 +1258,8 @@ export default function QuestionBankDashboard({
   const renderWizard = () => (
     <div className="qb-workspace">
       <div className="phase-scope-banner">
-        <strong>Phase 1 scope</strong>
-        <span>本階段聚焦：題庫上傳 wizard、匯入預覽、權限模型、黑金 UI 一致性。AI 健康分析與學生弱點診斷會留到後續階段。</span>
+        <strong>第一階段範圍</strong>
+        <span>本階段聚焦：題庫上傳精靈、匯入預覽、權限模型、黑金介面一致性。AI 健康分析與學生弱點診斷會留到後續階段。</span>
       </div>
       <WizardStepper step={wizardStep} setStep={setWizardStep} preview={preview} />
 
@@ -1236,7 +1271,7 @@ export default function QuestionBankDashboard({
           <EditablePreviewTable preview={preview} onChange={setPreview} />
           <div className="qb-inline-actions">
             <button onClick={revalidatePreview} disabled={!preview || busy}><AlertTriangle size={16} /> 重新驗證</button>
-            <button className="primary-btn" disabled={!preview || preview.summary.invalidRows > 0} onClick={() => setWizardStep(2)}>下一步：補 Metadata</button>
+            <button className="primary-btn" disabled={!preview || preview.summary.invalidRows > 0} onClick={() => setWizardStep(2)}>下一步：補充資料</button>
           </div>
         </div>
       )}
@@ -1263,11 +1298,11 @@ export default function QuestionBankDashboard({
           <RightsNoticeBox />
           <div className="rights-confirm-panel">
             <h4>儲存前確認</h4>
-            <p>平台會保留上傳、匯入與權利確認 audit logs。權利提醒不是法律意見；若來源來自課本、付費教材、出版考題、校內講義或外部平台，請先確認授權。</p>
+            <p>平台會保留上傳、匯入與權利確認操作紀錄。權利提醒不是法律意見；若來源來自課本、付費教材、出版考題、校內講義或外部平台，請先確認授權。</p>
             <UploadAcknowledgementCheckbox checked={ack} onChange={setAck} />
           </div>
           <div className="qb-inline-actions">
-            <button onClick={() => setWizardStep(2)}>返回 Metadata</button>
+            <button onClick={() => setWizardStep(2)}>返回補充資料</button>
             <button className="primary-btn" disabled={!preview || !ack || !metadata.title.trim() || preview.summary.invalidRows > 0 || busy} onClick={commitPreview}>
               <CheckCircle2 size={16} /> 確認並儲存
             </button>
@@ -1299,7 +1334,7 @@ export default function QuestionBankDashboard({
         </div>
         <div className="qb-view-switch">
           <button className={view === 'library' ? 'active' : ''} onClick={() => setView('library')}><BookOpen size={16} /> 題庫資產庫</button>
-          <button className={view === 'wizard' ? 'active' : ''} onClick={() => setView('wizard')}><UploadCloud size={16} /> 上傳 Wizard</button>
+          <button className={view === 'wizard' ? 'active' : ''} onClick={() => setView('wizard')}><UploadCloud size={16} /> 上傳精靈</button>
         </div>
       </div>
 
@@ -1314,8 +1349,8 @@ export default function QuestionBankDashboard({
             </div>
             <select value={filters.ownership} onChange={(event) => setFilters({ ...filters, ownership: event.target.value })}>
               <option value="all">全部權限</option>
-              <option value="owned">Owned by me</option>
-              <option value="shared">Shared with me</option>
+              <option value="owned">我擁有</option>
+              <option value="shared">分享給我</option>
             </select>
             <select value={filters.subject} onChange={(event) => setFilters({ ...filters, subject: event.target.value })}>
               <option value="">全部科目</option>
@@ -1362,8 +1397,8 @@ export default function QuestionBankDashboard({
           <QuestionBankVersionHistory user={user} bank={selectedBank} />
           <ClassWeaknessReportPanel user={user} bank={selectedBank} />
           <div className="next-action-grid">
-            <button disabled={!selectedBank.permission?.canUse} title={!selectedBank.permission?.canUse ? 'You do not have permission to use this question bank.' : 'Create classroom activity'} onClick={() => setActivityBank(selectedBank)}>
-              <PlayCircle size={16} /> Use this question bank for activity
+            <button disabled={!selectedBank.permission?.canUse} title={!selectedBank.permission?.canUse ? '你沒有使用此題庫的權限。' : '建立課堂活動'} onClick={() => setActivityBank(selectedBank)}>
+              <PlayCircle size={16} /> 用此題庫產生活動
             </button>
           </div>
           <div className="selected-question-list">
@@ -1371,7 +1406,7 @@ export default function QuestionBankDashboard({
               <div key={question.id || index}>
                 <span>{index + 1}</span>
                 <p>{question.prompt || question.Question}</p>
-                <button disabled={!selectedBank.permission?.canEdit} title={!selectedBank.permission?.canEdit ? 'Only the owner can edit or delete original questions.' : '軟刪除此題'} onClick={() => onDeleteQuestion(question.id, index)}>
+                <button disabled={!selectedBank.permission?.canEdit} title={!selectedBank.permission?.canEdit ? '只有擁有者可以編輯或刪除原始題目。' : '軟刪除此題'} onClick={() => onDeleteQuestion(question.id, index)}>
                   <Trash2 size={14} />
                 </button>
               </div>

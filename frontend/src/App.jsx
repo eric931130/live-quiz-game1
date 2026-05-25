@@ -209,7 +209,7 @@ function App() {
 
              {/* Right side floating card for Game Join */}
              <div className="saas-hero-card">
-                <div className="hero-card-kicker">Live Classroom</div>
+                <div className="hero-card-kicker">即時教室</div>
                 <h2 style={{ color: 'var(--primary-dark)', marginBottom: '1.5rem', textAlign: 'center', fontWeight: '800' }}>準備進教室了嗎？</h2>
                 <form onSubmit={handleGuestSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
                    <div>
@@ -396,14 +396,14 @@ function App() {
                 </div>
                 <div className="saas-footer-col">
                    <h3>法律與支援</h3>
-                   <a className="saas-footer-link" onClick={() => setTermsMode('privacy')}>隱私權政策 (Privacy)</a>
-                   <a className="saas-footer-link" onClick={() => setTermsMode('terms')}>服務條款 (Terms)</a>
-                   <a className="saas-footer-link" onClick={() => setTermsMode('disclaimer')}>免責聲明 (Disclaimer)</a>
-                   <a className="saas-footer-link" onClick={() => setTermsMode('contact')}>聯絡我們 (Contact)</a>
+                   <a className="saas-footer-link" onClick={() => setTermsMode('privacy')}>隱私權政策</a>
+                   <a className="saas-footer-link" onClick={() => setTermsMode('terms')}>服務條款</a>
+                   <a className="saas-footer-link" onClick={() => setTermsMode('disclaimer')}>免責聲明</a>
+                   <a className="saas-footer-link" onClick={() => setTermsMode('contact')}>聯絡我們</a>
                 </div>
              </div>
              <div className="saas-footer-bottom">
-                <span>&copy; {new Date().getFullYear()} 師說新宇. All rights reserved.</span>
+                <span>&copy; {new Date().getFullYear()} 師說新宇。保留所有權利。</span>
                 <span>系統版本 v2.1.0</span>
              </div>
           </footer>

@@ -201,13 +201,13 @@ function isAdmin(principal) {
 async function requirePrincipal(req, res, next) {
   req.principal = await getPrincipal(req);
   if (String(process.env.REQUIRE_FIREBASE_AUTH || '').toLowerCase() === 'true' && !req.principal.authVerified) {
-    return res.status(401).json({ error: 'Firebase authentication is required.' });
+    return res.status(401).json({ error: '需要登入驗證。' });
   }
   next();
 }
 
 function requireAdmin(req, res, next) {
-  if (!isAdmin(req.principal)) return res.status(403).json({ error: 'Admin permission required.' });
+  if (!isAdmin(req.principal)) return res.status(403).json({ error: '需要管理員權限。' });
   next();
 }
 
@@ -216,7 +216,7 @@ function isTeacherRole(principal) {
 }
 
 function requireTeacher(req, res, next) {
-  if (!isTeacherRole(req.principal)) return res.status(403).json({ error: 'Teacher permission required.' });
+  if (!isTeacherRole(req.principal)) return res.status(403).json({ error: '需要教師權限。' });
   next();
 }
 
@@ -225,7 +225,7 @@ async function rateLimitMutations(req, res, next) {
   const key = `${principal.userId}:${Math.floor(Date.now() / MUTATION_WINDOW_MS)}`;
   const count = (mutationBuckets.get(key) || 0) + 1;
   mutationBuckets.set(key, count);
-  if (count > MUTATION_LIMIT) return res.status(429).json({ error: 'Too many question bank requests. Please try again later.' });
+  if (count > MUTATION_LIMIT) return res.status(429).json({ error: '題庫請求過於頻繁，請稍後再試。' });
   next();
 }
 
@@ -301,7 +301,7 @@ function publicBank(store, bank, principal) {
 function findBankOr404(store, id, res) {
   const bank = store.questionBanks.find((item) => item.id === id);
   if (!bank) {
-    res.status(404).json({ error: 'Question bank not found.' });
+    res.status(404).json({ error: '找不到題庫。' });
     return null;
   }
   return bank;
@@ -526,7 +526,7 @@ function generateQuestionBankHealthReport(bank) {
   return {
     generatedAt: nowIso(),
     scope: 'phase_2_rule_based_ai_health_report',
-    disclaimer: 'This report is an AI-assisted, rule-based review. It may flag possible rights concerns, but it is not a legal conclusion. Please confirm authorization before uploading, sharing, exporting, or copying content.',
+    disclaimer: '此報告為 AI 輔助與規則式檢查，可能標示潛在權利疑慮，但不是法律結論。上傳、分享、匯出或複製內容前，請確認你已取得必要授權。',
     totals: {
       totalQuestions,
       validQuestions: totalQuestions - invalidQuestions.length,
@@ -603,7 +603,7 @@ function createAiPreview(bank, actionType) {
     actionType,
     generatedAt: nowIso(),
     status: 'preview_only',
-    disclaimer: 'AI-assisted suggestions are previews only. A teacher must review and confirm before any change is saved.',
+    disclaimer: 'AI 輔助建議僅供預覽。任何變更儲存前，都必須由老師檢視並確認。',
     items: previewItems
   };
 }
@@ -683,7 +683,7 @@ async function parseWorkbookExcelJs(buffer) {
     ignoreNodes: ['sheetProtection', 'dataValidations', 'conditionalFormatting', 'extLst']
   });
   const worksheet = workbook.worksheets[0];
-  if (!worksheet) throw new Error('Excel file does not contain a worksheet.');
+  if (!worksheet) throw new Error('Excel 檔案中沒有可讀取的工作表。');
 
   const rows = [];
   const columnCount = Math.min(Math.max(worksheet.columnCount || 0, 1), 80);
@@ -711,7 +711,7 @@ async function parseWorkbookExcelJs(buffer) {
   }
 
   if (headerRowIdx === -1) {
-    throw new Error('Unable to identify required question and answer columns in the Excel file.');
+    throw new Error('無法在 Excel 檔案中辨識必要的題目與答案欄位。');
   }
 
   return rows.slice(headerRowIdx + 1).map((row) => {
@@ -981,7 +981,7 @@ function generateActivityFromQuestionBank(bank, principal, options = {}) {
   const randomize = options.randomize !== false;
   const selected = (randomize ? [...pool].sort(() => 0.5 - Math.random()) : pool).slice(0, questionCount);
   if (!selected.length) {
-    const error = new Error('No usable questions matched the selected activity settings.');
+    const error = new Error('沒有符合所選活動設定的可用題目。');
     error.status = 422;
     throw error;
   }
@@ -1278,9 +1278,9 @@ function peerModerationTimeline(store, query = {}) {
 function peerModerationCaseDetail(store, query = {}) {
   const targetType = sanitizeCell(query.targetType || '');
   const targetId = sanitizeCell(query.targetId || '');
-  if (!targetType || !targetId) return { ok: false, status: 400, error: 'targetType and targetId are required.' };
+  if (!targetType || !targetId) return { ok: false, status: 400, error: '需要目標類型與目標 ID。' };
   const target = moderationTarget(store, targetType, targetId);
-  if (!target) return { ok: false, status: 404, error: 'Timeline case target not found.' };
+  if (!target) return { ok: false, status: 404, error: '找不到時間線案件目標。' };
   const logs = filteredModerationLogs(store, { ...query, targetType, limit: 1000 })
     .filter((log) => log.targetId === targetId);
   const events = logs.map(moderationTimelineEvent);
@@ -1336,7 +1336,7 @@ function publicPeerExplanation(explanation, principal) {
   return {
     ...explanation,
     studentId: canModerate || explanation.studentId === principal.userId ? explanation.studentId : undefined,
-    studentName: explanation.anonymous && !canModerate ? 'Anonymous classmate' : explanation.studentName,
+    studentName: explanation.anonymous && !canModerate ? '匿名同學' : explanation.studentName,
     votes: undefined,
     myVote: (explanation.votes || []).find((vote) => vote.studentId === principal.userId)?.voteType || null,
     helpfulCount: explanation.helpfulCount || 0,
@@ -1358,12 +1358,12 @@ function publicHelpRequest(request, store, principal) {
     .map((response) => ({
       ...response,
       responderStudentId: canModerate || response.responderStudentId === principal.userId ? response.responderStudentId : undefined,
-      responderName: response.anonymous && !canModerate ? 'Anonymous helper' : response.responderName
+      responderName: response.anonymous && !canModerate ? '匿名協助者' : response.responderName
     }));
   return {
     ...request,
     studentId: canModerate || request.studentId === principal.userId ? request.studentId : undefined,
-    studentName: request.anonymous && !canModerate ? 'Anonymous classmate' : request.studentName,
+    studentName: request.anonymous && !canModerate ? '匿名同學' : request.studentName,
     responses
   };
 }
@@ -1373,7 +1373,7 @@ function publicStudentQuestion(question, principal) {
   return {
     ...question,
     creatorStudentId: canModerate || question.creatorStudentId === principal.userId ? question.creatorStudentId : undefined,
-    creatorName: question.anonymous && !canModerate ? 'Anonymous creator' : question.creatorName,
+    creatorName: question.anonymous && !canModerate ? '匿名出題者' : question.creatorName,
     votes: undefined,
     myVote: (question.votes || []).find((vote) => vote.studentId === principal.userId) || null
   };
@@ -1408,8 +1408,8 @@ function publicPeerReviewAssignment(assignment, principal) {
     ...assignment,
     reviewerStudentId: canModerate || assignment.reviewerStudentId === principal.userId ? assignment.reviewerStudentId : undefined,
     revieweeStudentId: canModerate || assignment.revieweeStudentId === principal.userId ? assignment.revieweeStudentId : undefined,
-    reviewerName: assignment.anonymous && !canModerate && assignment.revieweeStudentId === principal.userId ? 'Anonymous reviewer' : assignment.reviewerName,
-    revieweeName: assignment.anonymous && !canModerate && assignment.reviewerStudentId === principal.userId ? 'Anonymous classmate' : assignment.revieweeName
+    reviewerName: assignment.anonymous && !canModerate && assignment.revieweeStudentId === principal.userId ? '匿名評閱者' : assignment.reviewerName,
+    revieweeName: assignment.anonymous && !canModerate && assignment.reviewerStudentId === principal.userId ? '匿名同學' : assignment.revieweeName
   };
 }
 
@@ -1447,6 +1447,18 @@ const PEER_LEARNING_SETTING_KEYS = [
   'moderationRequired'
 ];
 
+const PEER_FEATURE_LABELS = {
+  peerExplanations: '同儕解析',
+  helpRequests: '互助求救',
+  studentQuestions: '學生自創題',
+  peerChallenges: '同儕挑戰',
+  peerReviews: '同儕互評',
+  wrongExchanges: '錯題交換',
+  learningGuilds: '學習小組',
+  allowAnonymous: '匿名模式',
+  moderationRequired: '教師審核'
+};
+
 function defaultPeerLearningSettings(classId = '') {
   return {
     classId: sanitizeCell(classId || ''),
@@ -1460,7 +1472,7 @@ function defaultPeerLearningSettings(classId = '') {
     allowAnonymous: false,
     moderationRequired: true,
     freeChat: false,
-    safetyNote: 'Peer learning is structured around questions, explanations, reviews, wrong-question repair, and guild missions. Teachers keep final moderation control.'
+    safetyNote: '同儕學習以題目、解析、互評、錯題修復與小組任務為核心進行結構化互動。教師保有最終審核控制權。'
   };
 }
 
@@ -1496,7 +1508,7 @@ function ensurePeerFeatureEnabled(store, classId, feature, principal) {
   return {
     ok: false,
     status: 403,
-    error: `${feature} is disabled by the teacher for this class.`,
+    error: `${PEER_FEATURE_LABELS[feature] || '此功能'}已由本班教師停用。`,
     settings
   };
 }
@@ -1757,7 +1769,7 @@ function applyPeerModerationAction(store, principal, payload = {}) {
   const action = sanitizeCell(payload.action || '');
   const reason = sanitizeCell(payload.reason || '');
   const target = moderationTarget(store, targetType, targetId);
-  if (!target) return { ok: false, status: 404, error: 'Moderation target not found.', targetType, targetId };
+  if (!target) return { ok: false, status: 404, error: '找不到審核目標。', targetType, targetId };
   if (targetType === 'learningGuild' && ['lock', 'unlock'].includes(action)) {
     target.moderationLocked = action === 'lock';
     target.updatedAt = nowIso();
@@ -1775,12 +1787,12 @@ function applyPeerModerationAction(store, principal, payload = {}) {
     flag: 'flagged',
     add_to_teacher_bank: 'added_to_teacher_bank'
   };
-  if (!statusByAction[action]) return { ok: false, status: 400, error: 'Unsupported moderation action.', targetType, targetId };
+  if (!statusByAction[action]) return { ok: false, status: 400, error: '不支援的審核操作。', targetType, targetId };
   if (targetType === 'studentQuestion' && action === 'add_to_teacher_bank') {
     const bank = (store.questionBanks || []).find((item) => item.id === target.questionBankId && !item.deletedAt);
-    if (!bank) return { ok: false, status: 400, error: 'A target teacher question bank is required before adding this student question.', targetType, targetId };
+    if (!bank) return { ok: false, status: 400, error: '加入學生自創題前，需要指定教師題庫。', targetType, targetId };
     const permission = getPermission(store, bank, principal);
-    if (!permission.canEdit) return { ok: false, status: 403, error: 'Only the question bank owner or admin can add this student question to the bank.', targetType, targetId };
+    if (!permission.canEdit) return { ok: false, status: 403, error: '只有題庫擁有者或管理員可以將學生自創題加入題庫。', targetType, targetId };
     const addedQuestion = normalizeQuestion({
       prompt: target.prompt,
       type: target.type,
@@ -1870,7 +1882,7 @@ const excelUpload = multer({
   limits: { fileSize: MAX_UPLOAD_BYTES },
   fileFilter: (req, file, cb) => {
     const ext = path.extname(file.originalname || '').toLowerCase();
-    if (ext !== '.xlsx') return cb(new Error('Unsupported file format. Please upload an .xlsx file.'));
+    if (ext !== '.xlsx') return cb(new Error('不支援的檔案格式，請上傳 .xlsx 檔案。'));
     cb(null, true);
   }
 });
@@ -1919,7 +1931,7 @@ app.get('/api/question-banks/:id', (req, res) => {
   const bank = findBankOr404(store, req.params.id, res);
   if (!bank) return;
   const permission = getPermission(store, bank, req.principal);
-  if (!permission.canView) return res.status(403).json({ error: 'You do not have access to this question bank.' });
+  if (!permission.canView) return res.status(403).json({ error: '你沒有存取此題庫的權限。' });
   addAudit(store, req.principal, 'VIEW_QUESTION_BANK', 'questionBank', bank.id, { targetQuestionBankId: bank.id });
   writeStore(store);
   res.json(publicBank(store, bank, req.principal));
@@ -1932,7 +1944,7 @@ app.post('/api/question-banks/validate-preview', rateLimitMutations, (req, res) 
 app.post('/api/question-banks/import/preview', rateLimitMutations, (req, res) => {
   excelUpload.single('file')(req, res, async (error) => {
     if (error) return res.status(400).json({ error: error.message });
-    if (!req.file) return res.status(400).json({ error: 'No file uploaded.' });
+    if (!req.file) return res.status(400).json({ error: '尚未上傳檔案。' });
 
     try {
       const defaults = req.body.defaults ? JSON.parse(req.body.defaults) : {};
@@ -1945,10 +1957,10 @@ app.post('/api/question-banks/import/preview', rateLimitMutations, (req, res) =>
 
 app.post('/api/question-banks/import/commit', rateLimitMutations, (req, res) => {
   const { metadata = {}, rows = [], legalAcknowledged } = req.body;
-  if (!legalAcknowledged) return res.status(400).json({ error: 'Legal acknowledgement is required before import.' });
+  if (!legalAcknowledged) return res.status(400).json({ error: '匯入前必須完成權利確認。' });
 
   const preview = validateQuestions(rows.map((row) => row.question || row), req.principal, metadata);
-  if (preview.summary.invalidRows > 0) return res.status(422).json({ error: 'Import contains validation errors.', preview });
+  if (preview.summary.invalidRows > 0) return res.status(422).json({ error: '匯入內容包含驗證錯誤。', preview });
 
   const store = readStore();
   const bank = createQuestionBank({ principal: req.principal, metadata, questions: preview.rows.map((row) => row.question), legalAcknowledged });
@@ -1964,10 +1976,10 @@ app.post('/api/question-banks/import/commit', rateLimitMutations, (req, res) => 
 
 app.post('/api/question-banks', rateLimitMutations, (req, res) => {
   const { metadata = {}, questions = [], legalAcknowledged } = req.body;
-  if (!legalAcknowledged) return res.status(400).json({ error: 'Legal acknowledgement is required.' });
+  if (!legalAcknowledged) return res.status(400).json({ error: '必須完成權利確認。' });
 
   const preview = validateQuestions(questions, req.principal, metadata);
-  if (preview.summary.invalidRows > 0) return res.status(422).json({ error: 'Question bank contains validation errors.', preview });
+  if (preview.summary.invalidRows > 0) return res.status(422).json({ error: '題庫包含驗證錯誤。', preview });
 
   const store = readStore();
   const bank = createQuestionBank({ principal: req.principal, metadata, questions: preview.rows.map((row) => row.question), legalAcknowledged });
@@ -1982,7 +1994,7 @@ app.patch('/api/question-banks/:id', rateLimitMutations, (req, res) => {
   const bank = findBankOr404(store, req.params.id, res);
   if (!bank) return;
   const permission = getPermission(store, bank, req.principal);
-  if (!permission.canEdit) return res.status(403).json({ error: 'Only the owner or admin can edit this question bank.' });
+  if (!permission.canEdit) return res.status(403).json({ error: '只有擁有者或管理員可以編輯此題庫。' });
 
   const before = { title: bank.title, tags: bank.tags, chapter: bank.chapter, visibility: bank.visibility };
   ['title', 'description', 'subject', 'gradeLevel', 'course', 'chapter', 'visibility'].forEach((field) => {
@@ -2005,10 +2017,10 @@ app.post('/api/question-banks/:id/questions', rateLimitMutations, (req, res) => 
   const store = readStore();
   const bank = findBankOr404(store, req.params.id, res);
   if (!bank) return;
-  if (!getPermission(store, bank, req.principal).canEdit) return res.status(403).json({ error: 'Only the owner or admin can add questions.' });
+  if (!getPermission(store, bank, req.principal).canEdit) return res.status(403).json({ error: '只有擁有者或管理員可以新增題目。' });
 
   const preview = validateQuestions([req.body], req.principal, bank);
-  if (preview.summary.invalidRows > 0) return res.status(422).json({ error: 'Question has validation errors.', preview });
+  if (preview.summary.invalidRows > 0) return res.status(422).json({ error: '題目包含驗證錯誤。', preview });
   const question = preview.rows[0].question;
   bank.questions.push(question);
   bank.updatedAt = nowIso();
@@ -2022,10 +2034,10 @@ app.patch('/api/question-banks/:id/questions/:questionId', rateLimitMutations, (
   const store = readStore();
   const bank = findBankOr404(store, req.params.id, res);
   if (!bank) return;
-  if (!getPermission(store, bank, req.principal).canEdit) return res.status(403).json({ error: 'Only the owner or admin can edit questions.' });
+  if (!getPermission(store, bank, req.principal).canEdit) return res.status(403).json({ error: '只有擁有者或管理員可以編輯題目。' });
 
   const questionIndex = (bank.questions || []).findIndex((question) => question.id === req.params.questionId && !question.deletedAt);
-  if (questionIndex === -1) return res.status(404).json({ error: 'Question not found.' });
+  if (questionIndex === -1) return res.status(404).json({ error: '找不到題目。' });
   const before = bank.questions[questionIndex];
   bank.questions[questionIndex] = normalizeQuestion({ ...before, ...req.body, id: before.id, createdAt: before.createdAt }, bank);
   bank.updatedAt = nowIso();
@@ -2044,10 +2056,10 @@ app.delete('/api/question-banks/:id/questions/:questionId', rateLimitMutations, 
   const store = readStore();
   const bank = findBankOr404(store, req.params.id, res);
   if (!bank) return;
-  if (!getPermission(store, bank, req.principal).canEdit) return res.status(403).json({ error: 'Only the owner or admin can delete questions.' });
+  if (!getPermission(store, bank, req.principal).canEdit) return res.status(403).json({ error: '只有擁有者或管理員可以刪除題目。' });
 
   const question = (bank.questions || []).find((item) => item.id === req.params.questionId && !item.deletedAt);
-  if (!question) return res.status(404).json({ error: 'Question not found.' });
+  if (!question) return res.status(404).json({ error: '找不到題目。' });
   question.deletedAt = nowIso();
   question.updatedAt = nowIso();
   bank.updatedAt = nowIso();
@@ -2061,7 +2073,7 @@ app.delete('/api/question-banks/:id', rateLimitMutations, (req, res) => {
   const store = readStore();
   const bank = findBankOr404(store, req.params.id, res);
   if (!bank) return;
-  if (!getPermission(store, bank, req.principal).canDelete) return res.status(403).json({ error: 'Only the owner or admin can delete this question bank.' });
+  if (!getPermission(store, bank, req.principal).canDelete) return res.status(403).json({ error: '只有擁有者或管理員可以刪除此題庫。' });
 
   bank.deletedAt = nowIso();
   bank.status = 'deleted';
@@ -2077,7 +2089,7 @@ app.post('/api/question-banks/:id/restore', rateLimitMutations, (req, res) => {
   const bank = findBankOr404(store, req.params.id, res);
   if (!bank) return;
   const canRestore = isAdmin(req.principal) || bank.ownerTeacherId === req.principal.userId;
-  if (!canRestore) return res.status(403).json({ error: 'Only the owner or admin can restore this question bank.' });
+  if (!canRestore) return res.status(403).json({ error: '只有擁有者或管理員可以還原此題庫。' });
   const beforeSnapshot = snapshotQuestionBank(bank);
   bank.deletedAt = null;
   bank.status = 'active';
@@ -2097,11 +2109,11 @@ app.post('/api/question-banks/:id/share', rateLimitMutations, (req, res) => {
   const store = readStore();
   const bank = findBankOr404(store, req.params.id, res);
   if (!bank) return;
-  if (!getPermission(store, bank, req.principal).canShare) return res.status(403).json({ error: 'Only the owner can share this question bank.' });
-  if (!req.body.legalAcknowledged) return res.status(400).json({ error: 'Legal acknowledgement is required before sharing.' });
+  if (!getPermission(store, bank, req.principal).canShare) return res.status(403).json({ error: '只有擁有者可以分享此題庫。' });
+  if (!req.body.legalAcknowledged) return res.status(400).json({ error: '分享前必須完成權利確認。' });
 
   const sharedWithTeacherId = sanitizeCell(req.body.sharedWithTeacherId || req.body.email);
-  if (!sharedWithTeacherId) return res.status(400).json({ error: 'A teacher id or email is required.' });
+  if (!sharedWithTeacherId) return res.status(400).json({ error: '需要老師 ID 或電子郵件。' });
 
   const share = {
     id: createId('share'),
@@ -2128,10 +2140,10 @@ app.delete('/api/question-banks/:id/share/:shareId', rateLimitMutations, (req, r
   const store = readStore();
   const bank = findBankOr404(store, req.params.id, res);
   if (!bank) return;
-  if (!getPermission(store, bank, req.principal).canShare) return res.status(403).json({ error: 'Only the owner can revoke sharing.' });
+  if (!getPermission(store, bank, req.principal).canShare) return res.status(403).json({ error: '只有擁有者可以收回分享。' });
 
   const share = store.shares.find((item) => item.id === req.params.shareId && item.questionBankId === bank.id && !item.revokedAt);
-  if (!share) return res.status(404).json({ error: 'Share not found.' });
+  if (!share) return res.status(404).json({ error: '找不到分享紀錄。' });
   share.revokedAt = nowIso();
   addAudit(store, req.principal, 'REVOKE_QUESTION_BANK_SHARE', 'questionBankShare', share.id, { targetQuestionBankId: bank.id, share });
   writeStore(store);
@@ -2142,7 +2154,7 @@ app.post('/api/question-banks/:id/export', rateLimitMutations, async (req, res) 
   const store = readStore();
   const bank = findBankOr404(store, req.params.id, res);
   if (!bank) return;
-  if (!getPermission(store, bank, req.principal).canExport) return res.status(403).json({ error: 'Export is not allowed for this question bank.' });
+  if (!getPermission(store, bank, req.principal).canExport) return res.status(403).json({ error: '此題庫未允許匯出。' });
 
   const rows = (bank.questions || []).filter((question) => !question.deletedAt).map((question) => ({
     題型: question.type,
@@ -2171,7 +2183,7 @@ app.post('/api/question-banks/:id/copy', rateLimitMutations, (req, res) => {
   const store = readStore();
   const source = findBankOr404(store, req.params.id, res);
   if (!source) return;
-  if (!getPermission(store, source, req.principal).canCopy) return res.status(403).json({ error: 'Copying is not allowed for this question bank.' });
+  if (!getPermission(store, source, req.principal).canCopy) return res.status(403).json({ error: '此題庫未允許複製。' });
 
   const metadata = {
     ...source,
@@ -2194,7 +2206,7 @@ app.post('/api/question-banks/:id/schedule', rateLimitMutations, (req, res) => {
   const store = readStore();
   const bank = findBankOr404(store, req.params.id, res);
   if (!bank) return;
-  if (!getPermission(store, bank, req.principal).canUse) return res.status(403).json({ error: 'You cannot use this question bank in class or assignments.' });
+  if (!getPermission(store, bank, req.principal).canUse) return res.status(403).json({ error: '你不能在課堂或任務中使用此題庫。' });
   addAudit(store, req.principal, 'SCHEDULE_QUESTION_BANK', 'questionBank', bank.id, { targetQuestionBankId: bank.id, context: req.body || {} });
   writeStore(store);
   res.json({ ok: true });
@@ -2205,7 +2217,7 @@ app.post('/api/question-banks/:id/activities', rateLimitMutations, (req, res) =>
   const bank = findBankOr404(store, req.params.id, res);
   if (!bank) return;
   const permission = getPermission(store, bank, req.principal);
-  if (!permission.canUse) return res.status(403).json({ error: 'You cannot create classroom activities from this question bank.' });
+  if (!permission.canUse) return res.status(403).json({ error: '你不能使用此題庫建立課堂活動。' });
 
   try {
     const activity = generateActivityFromQuestionBank(bank, req.principal, req.body || {});
@@ -2228,7 +2240,7 @@ app.get('/api/question-banks/:id/activities', (req, res) => {
   const store = readStore();
   const bank = findBankOr404(store, req.params.id, res);
   if (!bank) return;
-  if (!getPermission(store, bank, req.principal).canUse) return res.status(403).json({ error: 'You cannot view activities for this question bank.' });
+  if (!getPermission(store, bank, req.principal).canUse) return res.status(403).json({ error: '你不能查看此題庫的活動。' });
   res.json((store.activities || []).filter((activity) => activity.questionBankId === bank.id && activity.createdBy === req.principal.userId));
 });
 
@@ -2236,7 +2248,7 @@ app.get('/api/question-banks/:id/weakness-report', (req, res) => {
   const store = readStore();
   const bank = findBankOr404(store, req.params.id, res);
   if (!bank) return;
-  if (!getPermission(store, bank, req.principal).canUse) return res.status(403).json({ error: 'You cannot view learning reports for this question bank.' });
+  if (!getPermission(store, bank, req.principal).canUse) return res.status(403).json({ error: '你不能查看此題庫的學習報告。' });
   const report = buildWeaknessReport(store, bank, req.principal);
   addAudit(store, req.principal, 'VIEW_CLASS_WEAKNESS_REPORT', 'questionBank', bank.id, {
     targetQuestionBankId: bank.id,
@@ -2251,7 +2263,7 @@ app.get('/api/question-banks/:id/wrong-answers', (req, res) => {
   const store = readStore();
   const bank = findBankOr404(store, req.params.id, res);
   if (!bank) return;
-  if (!getPermission(store, bank, req.principal).canUse) return res.status(403).json({ error: 'You cannot view wrong answers for this question bank.' });
+  if (!getPermission(store, bank, req.principal).canUse) return res.status(403).json({ error: '你不能查看此題庫的錯題紀錄。' });
   const studentId = sanitizeCell(req.query.studentId || '');
   const answers = (store.studentAnswers || []).filter((answer) => (
     answer.questionBankId === bank.id &&
@@ -2267,7 +2279,7 @@ app.get('/api/question-banks/:id/health-report', (req, res) => {
   const bank = findBankOr404(store, req.params.id, res);
   if (!bank) return;
   const permission = getPermission(store, bank, req.principal);
-  if (!permission.canView) return res.status(403).json({ error: 'You do not have access to this question bank.' });
+  if (!permission.canView) return res.status(403).json({ error: '你沒有存取此題庫的權限。' });
 
   const report = generateQuestionBankHealthReport(bank);
   addAudit(store, req.principal, 'RUN_AI_HEALTH_REPORT', 'questionBank', bank.id, {
@@ -2284,11 +2296,11 @@ app.post('/api/question-banks/:id/ai-preview', rateLimitMutations, (req, res) =>
   const bank = findBankOr404(store, req.params.id, res);
   if (!bank) return;
   const permission = getPermission(store, bank, req.principal);
-  if (!permission.canEdit) return res.status(403).json({ error: 'Only the owner can run AI modification previews for this question bank.' });
+  if (!permission.canEdit) return res.status(403).json({ error: '只有擁有者可以對此題庫執行 AI 修改預覽。' });
 
   const actionType = sanitizeCell(req.body.actionType || '');
   const allowedActions = ['auto_tag', 'generate_explanations', 'improve_clarity', 'check_rights_risk'];
-  if (!allowedActions.includes(actionType)) return res.status(400).json({ error: 'Unsupported AI preview action.' });
+  if (!allowedActions.includes(actionType)) return res.status(400).json({ error: '不支援的 AI 預覽操作。' });
 
   const preview = createAiPreview(bank, actionType);
   addAudit(store, req.principal, 'RUN_AI_PREVIEW', 'questionBank', bank.id, {
@@ -2305,13 +2317,13 @@ app.post('/api/question-banks/:id/ai-preview/apply', rateLimitMutations, (req, r
   const bank = findBankOr404(store, req.params.id, res);
   if (!bank) return;
   const permission = getPermission(store, bank, req.principal);
-  if (!permission.canEdit) return res.status(403).json({ error: 'Only the owner can apply AI-assisted changes to this question bank.' });
-  if (!req.body.teacherConfirmed) return res.status(400).json({ error: 'Teacher confirmation is required before applying AI-assisted changes.' });
-  if (!req.body.legalAcknowledged) return res.status(400).json({ error: 'Rights and policy acknowledgement is required before applying AI-assisted changes.' });
+  if (!permission.canEdit) return res.status(403).json({ error: '只有擁有者可以將 AI 輔助變更套用到此題庫。' });
+  if (!req.body.teacherConfirmed) return res.status(400).json({ error: '套用 AI 輔助變更前需要老師確認。' });
+  if (!req.body.legalAcknowledged) return res.status(400).json({ error: '套用 AI 輔助變更前需要完成權利與政策確認。' });
 
   const actionType = sanitizeCell(req.body.actionType || '');
   const allowedActions = ['auto_tag', 'generate_explanations', 'improve_clarity', 'check_rights_risk'];
-  if (!allowedActions.includes(actionType)) return res.status(400).json({ error: 'Unsupported AI preview action.' });
+  if (!allowedActions.includes(actionType)) return res.status(400).json({ error: '不支援的 AI 預覽操作。' });
 
   ensureVersionHistory(bank, req.principal);
   const preview = createAiPreview(bank, actionType);
@@ -2353,7 +2365,7 @@ app.get('/api/question-banks/:id/versions', (req, res) => {
   const bank = findBankOr404(store, req.params.id, res);
   if (!bank) return;
   const permission = getPermission(store, bank, req.principal);
-  if (!permission.isOwner && !permission.isAdmin) return res.status(403).json({ error: 'Only owner or admin can view version history.' });
+  if (!permission.isOwner && !permission.isAdmin) return res.status(403).json({ error: '只有擁有者或管理員可以查看版本歷史。' });
   ensureVersionHistory(bank, req.principal);
   writeStore(store);
   res.json(bank.versions || []);
@@ -2364,10 +2376,10 @@ app.get('/api/question-banks/:id/versions/:versionId/compare', (req, res) => {
   const bank = findBankOr404(store, req.params.id, res);
   if (!bank) return;
   const permission = getPermission(store, bank, req.principal);
-  if (!permission.isOwner && !permission.isAdmin) return res.status(403).json({ error: 'Only owner or admin can compare version history.' });
+  if (!permission.isOwner && !permission.isAdmin) return res.status(403).json({ error: '只有擁有者或管理員可以比較版本歷史。' });
   ensureVersionHistory(bank, req.principal);
   const version = (bank.versions || []).find((item) => item.id === req.params.versionId);
-  if (!version) return res.status(404).json({ error: 'Version not found.' });
+  if (!version) return res.status(404).json({ error: '找不到版本。' });
   writeStore(store);
   res.json({
     version,
@@ -2380,10 +2392,10 @@ app.post('/api/question-banks/:id/versions/:versionId/restore', rateLimitMutatio
   const bank = findBankOr404(store, req.params.id, res);
   if (!bank) return;
   const canRestore = isAdmin(req.principal) || bank.ownerTeacherId === req.principal.userId;
-  if (!canRestore) return res.status(403).json({ error: 'Only owner or admin can restore a question bank version.' });
+  if (!canRestore) return res.status(403).json({ error: '只有擁有者或管理員可以還原題庫版本。' });
   ensureVersionHistory(bank, req.principal);
   const version = (bank.versions || []).find((item) => item.id === req.params.versionId);
-  if (!version) return res.status(404).json({ error: 'Version not found.' });
+  if (!version) return res.status(404).json({ error: '找不到版本。' });
 
   const beforeSnapshot = snapshotQuestionBank(bank);
   restoreBankFromSnapshot(bank, version.snapshot);
@@ -2419,7 +2431,7 @@ app.get('/api/question-banks/:id/audit', (req, res) => {
   const bank = findBankOr404(store, req.params.id, res);
   if (!bank) return;
   const permission = getPermission(store, bank, req.principal);
-  if (!permission.isOwner && !permission.isAdmin) return res.status(403).json({ error: 'Only owner or admin can view audit logs.' });
+  if (!permission.isOwner && !permission.isAdmin) return res.status(403).json({ error: '只有擁有者或管理員可以查看操作紀錄。' });
   res.json(store.auditLogs.filter((log) => log.targetQuestionBankId === bank.id));
 });
 
@@ -2494,7 +2506,7 @@ app.post('/api/peer-learning/explanations', rateLimitMutations, (req, res) => {
   const feature = ensurePeerFeatureEnabled(store, req.body.classId || '', 'peerExplanations', req.principal);
   if (!feature.ok) return res.status(feature.status).json({ error: feature.error, settings: feature.settings });
   const text = sanitizeCell(req.body.explanationText || req.body.text || '');
-  if (text.length < 12) return res.status(400).json({ error: 'Explanation must include a meaningful learning hint or reasoning.' });
+  if (text.length < 12) return res.status(400).json({ error: '解析必須包含有意義的學習提示或推理。' });
   const explanation = {
     id: createId('pexp'),
     questionId: sanitizeCell(req.body.questionId || ''),
@@ -2531,12 +2543,12 @@ app.post('/api/peer-learning/explanations', rateLimitMutations, (req, res) => {
 app.post('/api/peer-learning/explanations/:id/vote', rateLimitMutations, (req, res) => {
   const store = readStore();
   const explanation = store.peerExplanations.find((item) => item.id === req.params.id && item.status !== 'deleted');
-  if (!explanation) return res.status(404).json({ error: 'Peer explanation not found.' });
+  if (!explanation) return res.status(404).json({ error: '找不到同儕解析。' });
   const feature = ensurePeerFeatureEnabled(store, explanation.classId || '', 'peerExplanations', req.principal);
   if (!feature.ok) return res.status(feature.status).json({ error: feature.error, settings: feature.settings });
-  if (!visiblePeerExplanation(explanation, req.principal)) return res.status(403).json({ error: 'This explanation is not available.' });
+  if (!visiblePeerExplanation(explanation, req.principal)) return res.status(403).json({ error: '此解析目前不可用。' });
   const voteType = sanitizeCell(req.body.voteType || '');
-  if (!['helpful', 'clear', 'needs_improvement'].includes(voteType)) return res.status(400).json({ error: 'Unsupported vote type.' });
+  if (!['helpful', 'clear', 'needs_improvement'].includes(voteType)) return res.status(400).json({ error: '不支援的投票類型。' });
   explanation.votes = (explanation.votes || []).filter((vote) => vote.studentId !== req.principal.userId);
   explanation.votes.push({ studentId: req.principal.userId, voteType, createdAt: nowIso() });
   explanation.helpfulCount = explanation.votes.filter((vote) => vote.voteType === 'helpful').length;
@@ -2553,7 +2565,7 @@ app.post('/api/peer-learning/help-requests', rateLimitMutations, (req, res) => {
   const feature = ensurePeerFeatureEnabled(store, req.body.classId || '', 'helpRequests', req.principal);
   if (!feature.ok) return res.status(feature.status).json({ error: feature.error, settings: feature.settings });
   const message = sanitizeCell(req.body.message || '');
-  if (message.length < 8) return res.status(400).json({ error: 'Help request must describe where you are stuck.' });
+  if (message.length < 8) return res.status(400).json({ error: '求助請描述你卡住的地方。' });
   const request = {
     id: createId('help'),
     studentId: req.principal.userId,
@@ -2585,14 +2597,14 @@ app.post('/api/peer-learning/help-requests', rateLimitMutations, (req, res) => {
 app.post('/api/peer-learning/help-requests/:id/responses', rateLimitMutations, (req, res) => {
   const store = readStore();
   const request = store.helpRequests.find((item) => item.id === req.params.id && item.status !== 'deleted');
-  if (!request) return res.status(404).json({ error: 'Help request not found.' });
+  if (!request) return res.status(404).json({ error: '找不到求助請求。' });
   const feature = ensurePeerFeatureEnabled(store, request.classId || '', 'helpRequests', req.principal);
   if (!feature.ok) return res.status(feature.status).json({ error: feature.error, settings: feature.settings });
-  if (request.status === 'resolved') return res.status(400).json({ error: 'This help request is already resolved.' });
+  if (request.status === 'resolved') return res.status(400).json({ error: '此求助請求已解決。' });
   const content = sanitizeCell(req.body.content || '');
-  if (content.length < 8) return res.status(400).json({ error: 'Help response must include a hint, example, or explanation.' });
+  if (content.length < 8) return res.status(400).json({ error: '協助回覆必須包含提示、範例或解釋。' });
   const responseType = sanitizeCell(req.body.responseType || 'hint');
-  if (!['hint', 'step_explanation', 'example', 'guiding_question', 'concept_reminder'].includes(responseType)) return res.status(400).json({ error: 'Unsupported help response type.' });
+  if (!['hint', 'step_explanation', 'example', 'guiding_question', 'concept_reminder'].includes(responseType)) return res.status(400).json({ error: '不支援的協助回覆類型。' });
   const response = {
     id: createId('hresp'),
     helpRequestId: request.id,
@@ -2621,12 +2633,12 @@ app.post('/api/peer-learning/help-requests/:id/responses', rateLimitMutations, (
 app.post('/api/peer-learning/help-responses/:id/mark-helpful', rateLimitMutations, (req, res) => {
   const store = readStore();
   const response = store.helpResponses.find((item) => item.id === req.params.id && item.status !== 'deleted');
-  if (!response) return res.status(404).json({ error: 'Help response not found.' });
+  if (!response) return res.status(404).json({ error: '找不到協助回覆。' });
   const request = store.helpRequests.find((item) => item.id === response.helpRequestId);
-  if (!request) return res.status(404).json({ error: 'Help request not found.' });
+  if (!request) return res.status(404).json({ error: '找不到求助請求。' });
   const feature = ensurePeerFeatureEnabled(store, request.classId || '', 'helpRequests', req.principal);
   if (!feature.ok) return res.status(feature.status).json({ error: feature.error, settings: feature.settings });
-  if (request.studentId !== req.principal.userId && !isTeacherRole(req.principal)) return res.status(403).json({ error: 'Only the requester or teacher can mark a response helpful.' });
+  if (request.studentId !== req.principal.userId && !isTeacherRole(req.principal)) return res.status(403).json({ error: '只有求助者或老師可以將回覆標記為有幫助。' });
   response.helpfulMarked = true;
   request.status = 'resolved';
   request.resolvedAt = nowIso();
@@ -2655,10 +2667,10 @@ app.post('/api/peer-learning/student-questions', rateLimitMutations, (req, res) 
   if (!feature.ok) return res.status(feature.status).json({ error: feature.error, settings: feature.settings });
   const prompt = sanitizeCell(req.body.prompt || req.body.questionPrompt || '');
   const answer = sanitizeCell(req.body.answer || '');
-  if (prompt.length < 8) return res.status(400).json({ error: 'Student-created question must include a clear prompt.' });
-  if (answer.length < 1) return res.status(400).json({ error: 'Student-created question must include an answer.' });
+  if (prompt.length < 8) return res.status(400).json({ error: '學生自創題必須包含清楚題目。' });
+  if (answer.length < 1) return res.status(400).json({ error: '學生自創題必須包含答案。' });
   const type = sanitizeCell(req.body.type || 'multiple_choice');
-  if (!['multiple_choice', 'true_false', 'fill_blank', 'short_answer', 'matching', 'essay'].includes(type)) return res.status(400).json({ error: 'Unsupported student-created question type.' });
+  if (!['multiple_choice', 'true_false', 'fill_blank', 'short_answer', 'matching', 'essay'].includes(type)) return res.status(400).json({ error: '不支援的學生自創題型。' });
   const options = req.body.options && typeof req.body.options === 'object' ? req.body.options : {};
   const studentQuestion = {
     id: createId('scq'),
@@ -2704,15 +2716,15 @@ app.post('/api/peer-learning/student-questions', rateLimitMutations, (req, res) 
 app.post('/api/peer-learning/student-questions/:id/vote', rateLimitMutations, (req, res) => {
   const store = readStore();
   const studentQuestion = store.studentCreatedQuestions.find((item) => item.id === req.params.id && item.status !== 'deleted');
-  if (!studentQuestion) return res.status(404).json({ error: 'Student-created question not found.' });
+  if (!studentQuestion) return res.status(404).json({ error: '找不到學生自創題。' });
   const feature = ensurePeerFeatureEnabled(store, studentQuestion.classId || '', 'studentQuestions', req.principal);
   if (!feature.ok) return res.status(feature.status).json({ error: feature.error, settings: feature.settings });
-  if (!visibleStudentQuestion(studentQuestion, req.principal)) return res.status(403).json({ error: 'This student-created question is not available.' });
+  if (!visibleStudentQuestion(studentQuestion, req.principal)) return res.status(403).json({ error: '此學生自創題目前不可用。' });
   const clarity = Math.max(0, Math.min(5, Number(req.body.clarity || 0)));
   const correctness = Math.max(0, Math.min(5, Number(req.body.correctness || 0)));
   const helpfulness = Math.max(0, Math.min(5, Number(req.body.helpfulness || 0)));
   const difficultyFit = Math.max(0, Math.min(5, Number(req.body.difficultyFit || 0)));
-  if (![clarity, correctness, helpfulness, difficultyFit].every((score) => score > 0)) return res.status(400).json({ error: 'Quality vote must include clarity, correctness, helpfulness, and difficulty fit scores from 1 to 5.' });
+  if (![clarity, correctness, helpfulness, difficultyFit].every((score) => score > 0)) return res.status(400).json({ error: '品質投票必須包含清楚度、正確性、幫助度與難度適配，分數介於 1 到 5。' });
   studentQuestion.votes = (studentQuestion.votes || []).filter((vote) => vote.studentId !== req.principal.userId);
   studentQuestion.votes.push({ studentId: req.principal.userId, clarity, correctness, helpfulness, difficultyFit, createdAt: nowIso() });
   const total = studentQuestion.votes.reduce((sum, vote) => sum + vote.clarity + vote.correctness + vote.helpfulness + vote.difficultyFit, 0);
@@ -2741,8 +2753,8 @@ app.post('/api/peer-learning/challenges', rateLimitMutations, (req, res) => {
   if (!feature.ok) return res.status(feature.status).json({ error: feature.error, settings: feature.settings });
   const opponentStudentId = sanitizeCell(req.body.opponentStudentId || '');
   const mode = sanitizeCell(req.body.mode || 'one_v_one');
-  if (!['one_v_one', 'random', 'rematch', 'weakness'].includes(mode)) return res.status(400).json({ error: 'Unsupported peer challenge mode.' });
-  if (mode !== 'random' && !opponentStudentId) return res.status(400).json({ error: 'Opponent student id is required for this challenge mode.' });
+  if (!['one_v_one', 'random', 'rematch', 'weakness'].includes(mode)) return res.status(400).json({ error: '不支援的同儕挑戰模式。' });
+  if (mode !== 'random' && !opponentStudentId) return res.status(400).json({ error: '此挑戰模式需要對手學生 ID。' });
   const questionIds = Array.isArray(req.body.questionIds) ? req.body.questionIds.map(sanitizeCell).filter(Boolean).slice(0, 20) : [];
   const challenge = {
     id: createId('pch'),
@@ -2775,12 +2787,12 @@ app.post('/api/peer-learning/challenges', rateLimitMutations, (req, res) => {
 app.post('/api/peer-learning/challenges/:id/respond', rateLimitMutations, (req, res) => {
   const store = readStore();
   const challenge = store.peerChallenges.find((item) => item.id === req.params.id && item.status !== 'deleted');
-  if (!challenge) return res.status(404).json({ error: 'Peer challenge not found.' });
+  if (!challenge) return res.status(404).json({ error: '找不到同儕挑戰。' });
   const feature = ensurePeerFeatureEnabled(store, challenge.classId || '', 'peerChallenges', req.principal);
   if (!feature.ok) return res.status(feature.status).json({ error: feature.error, settings: feature.settings });
-  if (challenge.opponentStudentId !== req.principal.userId && !isTeacherRole(req.principal)) return res.status(403).json({ error: 'Only the challenged student or teacher can respond.' });
+  if (challenge.opponentStudentId !== req.principal.userId && !isTeacherRole(req.principal)) return res.status(403).json({ error: '只有被挑戰學生或老師可以回應。' });
   const action = sanitizeCell(req.body.action || '');
-  if (!['accept', 'decline'].includes(action)) return res.status(400).json({ error: 'Unsupported challenge response.' });
+  if (!['accept', 'decline'].includes(action)) return res.status(400).json({ error: '不支援的挑戰回應。' });
   challenge.status = action === 'accept' ? 'accepted' : 'declined';
   challenge.respondedAt = nowIso();
   addAudit(store, req.principal, `${action === 'accept' ? 'ACCEPT' : 'DECLINE'}_PEER_CHALLENGE`, 'peerChallenge', challenge.id, {});
@@ -2791,11 +2803,11 @@ app.post('/api/peer-learning/challenges/:id/respond', rateLimitMutations, (req, 
 app.post('/api/peer-learning/challenges/:id/complete', rateLimitMutations, (req, res) => {
   const store = readStore();
   const challenge = store.peerChallenges.find((item) => item.id === req.params.id && item.status !== 'deleted');
-  if (!challenge) return res.status(404).json({ error: 'Peer challenge not found.' });
+  if (!challenge) return res.status(404).json({ error: '找不到同儕挑戰。' });
   const feature = ensurePeerFeatureEnabled(store, challenge.classId || '', 'peerChallenges', req.principal);
   if (!feature.ok) return res.status(feature.status).json({ error: feature.error, settings: feature.settings });
   const isParticipant = [challenge.challengerStudentId, challenge.opponentStudentId].includes(req.principal.userId);
-  if (!isParticipant && !isTeacherRole(req.principal)) return res.status(403).json({ error: 'Only participants or teacher can complete this challenge.' });
+  if (!isParticipant && !isTeacherRole(req.principal)) return res.status(403).json({ error: '只有參與者或老師可以完成此挑戰。' });
   const scores = req.body.scores && typeof req.body.scores === 'object' ? req.body.scores : {};
   const challengerScore = Number(scores[challenge.challengerStudentId] || scores.challenger || 0);
   const opponentScore = Number(scores[challenge.opponentStudentId] || scores.opponent || 0);
@@ -2838,8 +2850,8 @@ app.post('/api/peer-learning/peer-reviews', rateLimitMutations, (req, res) => {
   if (!feature.ok) return res.status(feature.status).json({ error: feature.error, settings: feature.settings });
   const reviewerStudentId = sanitizeCell(req.body.reviewerStudentId || '');
   const submissionText = sanitizeCell(req.body.submissionText || '');
-  if (!reviewerStudentId) return res.status(400).json({ error: 'Reviewer student id is required.' });
-  if (submissionText.length < 12) return res.status(400).json({ error: 'Peer review assignment must include a submission to review.' });
+  if (!reviewerStudentId) return res.status(400).json({ error: '需要評閱者學生 ID。' });
+  if (submissionText.length < 12) return res.status(400).json({ error: '同儕互評任務必須包含要評閱的提交內容。' });
   const assignment = {
     id: createId('prev'),
     activityId: sanitizeCell(req.body.activityId || ''),
@@ -2870,12 +2882,12 @@ app.post('/api/peer-learning/peer-reviews', rateLimitMutations, (req, res) => {
 app.post('/api/peer-learning/peer-reviews/:id/submit', rateLimitMutations, (req, res) => {
   const store = readStore();
   const assignment = store.peerReviewAssignments.find((item) => item.id === req.params.id && item.status !== 'deleted');
-  if (!assignment) return res.status(404).json({ error: 'Peer review assignment not found.' });
+  if (!assignment) return res.status(404).json({ error: '找不到同儕互評任務。' });
   const feature = ensurePeerFeatureEnabled(store, assignment.classId || '', 'peerReviews', req.principal);
   if (!feature.ok) return res.status(feature.status).json({ error: feature.error, settings: feature.settings });
-  if (assignment.reviewerStudentId !== req.principal.userId && !isTeacherRole(req.principal)) return res.status(403).json({ error: 'Only the assigned reviewer or teacher can submit this review.' });
+  if (assignment.reviewerStudentId !== req.principal.userId && !isTeacherRole(req.principal)) return res.status(403).json({ error: '只有被指派的評閱者或老師可以提交此互評。' });
   const feedbackText = sanitizeCell(req.body.feedbackText || '');
-  if (feedbackText.length < 12) return res.status(400).json({ error: 'Peer review feedback must be constructive and specific.' });
+  if (feedbackText.length < 12) return res.status(400).json({ error: '同儕互評回饋必須具體且具建設性。' });
   const rawScores = req.body.rubricScores && typeof req.body.rubricScores === 'object' ? req.body.rubricScores : {};
   const rubricScores = {};
   ['accuracy', 'reasoning', 'clarity', 'evidence', 'completeness'].forEach((key) => {
@@ -2908,7 +2920,7 @@ app.post('/api/peer-learning/wrong-exchanges', rateLimitMutations, (req, res) =>
   const feature = ensurePeerFeatureEnabled(store, req.body.classId || '', 'wrongExchanges', req.principal);
   if (!feature.ok) return res.status(feature.status).json({ error: feature.error, settings: feature.settings });
   const studentBId = sanitizeCell(req.body.partnerStudentId || req.body.studentBId || '');
-  if (!studentBId) return res.status(400).json({ error: 'Partner student id is required for wrong question exchange.' });
+  if (!studentBId) return res.status(400).json({ error: '錯題交換需要夥伴學生 ID。' });
   const exchange = {
     id: createId('wqx'),
     classId: sanitizeCell(req.body.classId || ''),
@@ -2939,13 +2951,13 @@ app.post('/api/peer-learning/wrong-exchanges', rateLimitMutations, (req, res) =>
 app.post('/api/peer-learning/wrong-exchanges/:id/complete', rateLimitMutations, (req, res) => {
   const store = readStore();
   const exchange = store.wrongQuestionExchanges.find((item) => item.id === req.params.id && item.status !== 'deleted');
-  if (!exchange) return res.status(404).json({ error: 'Wrong question exchange not found.' });
+  if (!exchange) return res.status(404).json({ error: '找不到錯題交換。' });
   const feature = ensurePeerFeatureEnabled(store, exchange.classId || '', 'wrongExchanges', req.principal);
   if (!feature.ok) return res.status(feature.status).json({ error: feature.error, settings: feature.settings });
   const isParticipant = [exchange.studentAId, exchange.studentBId].includes(req.principal.userId);
-  if (!isParticipant && !isTeacherRole(req.principal)) return res.status(403).json({ error: 'Only participants or teacher can complete this exchange.' });
+  if (!isParticipant && !isTeacherRole(req.principal)) return res.status(403).json({ error: '只有參與者或老師可以完成此交換。' });
   const reflection = sanitizeCell(req.body.reflection || '');
-  if (reflection.length < 8) return res.status(400).json({ error: 'Reflection is required to complete a wrong question exchange.' });
+  if (reflection.length < 8) return res.status(400).json({ error: '完成錯題交換需要填寫反思。' });
   if (req.principal.userId === exchange.studentAId) exchange.reflectionA = reflection;
   if (req.principal.userId === exchange.studentBId) exchange.reflectionB = reflection;
   if (isTeacherRole(req.principal)) {
@@ -2976,7 +2988,7 @@ app.post('/api/peer-learning/guilds', requireTeacher, rateLimitMutations, (req, 
   const feature = ensurePeerFeatureEnabled(store, req.body.classId || '', 'learningGuilds', req.principal);
   if (!feature.ok) return res.status(feature.status).json({ error: feature.error, settings: feature.settings });
   const name = sanitizeCell(req.body.name || '');
-  if (name.length < 2) return res.status(400).json({ error: 'Learning guild name is required.' });
+  if (name.length < 2) return res.status(400).json({ error: '需要學習小組名稱。' });
   const guild = {
     id: createId('guild'),
     classId: sanitizeCell(req.body.classId || ''),
@@ -3003,10 +3015,10 @@ app.post('/api/peer-learning/guilds', requireTeacher, rateLimitMutations, (req, 
 app.post('/api/peer-learning/guilds/:id/join', rateLimitMutations, (req, res) => {
   const store = readStore();
   const guild = store.learningGuilds.find((item) => item.id === req.params.id && item.status !== 'deleted');
-  if (!guild) return res.status(404).json({ error: 'Learning guild not found.' });
+  if (!guild) return res.status(404).json({ error: '找不到學習小組。' });
   const feature = ensurePeerFeatureEnabled(store, guild.classId || '', 'learningGuilds', req.principal);
   if (!feature.ok) return res.status(feature.status).json({ error: feature.error, settings: feature.settings });
-  if (guild.moderationLocked && !isTeacherRole(req.principal)) return res.status(403).json({ error: 'This learning guild is locked by the teacher.' });
+  if (guild.moderationLocked && !isTeacherRole(req.principal)) return res.status(403).json({ error: '此學習小組已被老師鎖定。' });
   guild.members = guild.members || [];
   if (!guild.members.some((member) => member.studentId === req.principal.userId)) {
     guild.members.push({
@@ -3026,12 +3038,12 @@ app.post('/api/peer-learning/guilds/:id/join', rateLimitMutations, (req, res) =>
 app.post('/api/peer-learning/guilds/:id/progress', rateLimitMutations, (req, res) => {
   const store = readStore();
   const guild = store.learningGuilds.find((item) => item.id === req.params.id && item.status !== 'deleted');
-  if (!guild) return res.status(404).json({ error: 'Learning guild not found.' });
+  if (!guild) return res.status(404).json({ error: '找不到學習小組。' });
   const feature = ensurePeerFeatureEnabled(store, guild.classId || '', 'learningGuilds', req.principal);
   if (!feature.ok) return res.status(feature.status).json({ error: feature.error, settings: feature.settings });
   const canModerate = isTeacherRole(req.principal);
   const member = (guild.members || []).find((item) => item.studentId === req.principal.userId);
-  if (!member && !canModerate) return res.status(403).json({ error: 'Join this learning guild before adding progress.' });
+  if (!member && !canModerate) return res.status(403).json({ error: '加入此學習小組後才能新增進度。' });
   const xp = Math.max(0, Math.min(50, Number(req.body?.xp || 5)));
   guild.xp = Number(guild.xp || 0) + xp;
   if (member) member.xp = Number(member.xp || 0) + xp;
@@ -3047,7 +3059,7 @@ app.post('/api/peer-learning/report', rateLimitMutations, (req, res) => {
   const targetId = sanitizeCell(req.body.targetId || '');
   const store = readStore();
   const target = moderationTarget(store, targetType, targetId);
-  if (!target) return res.status(404).json({ error: 'Report target not found.' });
+  if (!target) return res.status(404).json({ error: '找不到檢舉目標。' });
   target.reportCount = (target.reportCount || 0) + 1;
   if (target.reportCount >= 2 && !['approved', 'featured'].includes(target.status)) target.status = 'flagged';
   addModerationLog(store, req.principal, 'REPORT_CONTENT', targetType, targetId, req.body.reason || '');
@@ -3065,7 +3077,7 @@ app.get('/api/peer-learning/leaderboard', (req, res) => {
       clearExplainers: analytics.badges.clearExplainers,
       helpfulClassmates: analytics.badges.helpfulClassmates
     },
-    note: 'This leaderboard rewards help, explanations, and improvement-oriented behaviors rather than raw scores only.'
+    note: '此排行榜獎勵協助、解析與進步導向行為，而不只看原始分數。'
   });
 });
 
@@ -3159,7 +3171,7 @@ app.post('/api/peer-learning/teacher/moderate/batch', requireTeacher, rateLimitM
   const action = sanitizeCell(req.body.action || '');
   const reason = sanitizeCell(req.body.reason || 'Teacher batch reviewed in peer learning queue.');
   const items = Array.isArray(req.body.items) ? req.body.items.slice(0, 50) : [];
-  if (!items.length) return res.status(400).json({ error: 'Batch moderation requires at least one target item.' });
+  if (!items.length) return res.status(400).json({ error: '批次審核至少需要一個目標項目。' });
   const store = readStore();
   const results = items.map((item) => applyPeerModerationAction(store, req.principal, {
     targetType: item.targetType,
@@ -3208,7 +3220,7 @@ app.post('/api/admin/question-banks/:id/status', requireAdmin, rateLimitMutation
   const bank = findBankOr404(store, req.params.id, res);
   if (!bank) return;
   const nextStatus = sanitizeCell(req.body.status || 'active');
-  if (!['active', 'draft', 'locked', 'suspended', 'deleted', 'rights-review-needed'].includes(nextStatus)) return res.status(400).json({ error: 'Unsupported status.' });
+  if (!['active', 'draft', 'locked', 'suspended', 'deleted', 'rights-review-needed'].includes(nextStatus)) return res.status(400).json({ error: '不支援的狀態。' });
   const before = bank.status;
   bank.status = nextStatus;
   bank.deletedAt = nextStatus === 'deleted' ? (bank.deletedAt || nowIso()) : null;
@@ -3244,7 +3256,7 @@ app.get('/api/banks/:id', (req, res) => {
   const banks = getLegacyBanks();
   const bank = banks.find((item) => item.id === req.params.id);
   if (bank) return res.json(bank);
-  res.status(404).json({ error: 'Bank not found' });
+  res.status(404).json({ error: '找不到題庫' });
 });
 
 app.post('/api/upload', excelUpload.single('file'), async (req, res) => {
@@ -3260,7 +3272,7 @@ app.post('/api/upload', excelUpload.single('file'), async (req, res) => {
 
 app.post('/api/student-answers/bulk', rateLimitMutations, (req, res) => {
   const answers = Array.isArray(req.body.answers) ? req.body.answers.slice(0, 300) : [];
-  if (!answers.length) return res.status(400).json({ error: 'No student answers provided.' });
+    if (!answers.length) return res.status(400).json({ error: '未提供學生作答資料。' });
 
   const store = readStore();
   const recorded = answers.map((answer) => recordStudentAnswer(store, {
@@ -3294,7 +3306,7 @@ io.on('connection', (socket) => {
     let selected = shuffled.slice(0, limit || 10);
 
     if (selected.length === 0) {
-      socket.emit('error', 'No questions to play.');
+      socket.emit('error', '目前沒有可進行的題目。');
       return;
     }
 
@@ -3326,8 +3338,8 @@ io.on('connection', (socket) => {
 
   socket.on('join_room_student', ({ roomId, nickname }) => {
     const room = rooms[roomId];
-    if (!room) return socket.emit('error', 'Room not found.');
-    if (room.status !== 'waiting') return socket.emit('error', 'Game already started.');
+    if (!room) return socket.emit('error', '找不到房間。');
+    if (room.status !== 'waiting') return socket.emit('error', '遊戲已經開始。');
 
     room.players[socket.id] = {
       id: socket.id,
