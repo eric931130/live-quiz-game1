@@ -4,7 +4,7 @@ import { doc, getDoc } from 'firebase/firestore';
 import { auth, db } from './firebase';
 import ParticleButton from './components/ParticleButton';
 import LazyErrorBoundary from './components/LazyErrorBoundary';
-import { Globe2, LogOut, BookOpen, Users, Shield, ArrowRight, Play, BarChart3, Clock, Zap, Target, BookHeart, GraduationCap, Building2, Palette, BriefcaseBusiness, Code2, Brain, MessageSquareText, Layers3, ClipboardCheck, Sparkles, Compass, Trophy } from 'lucide-react';
+import { Globe2, LogOut, BookOpen, Users, Shield, ArrowRight, ArrowLeft, Play, BarChart3, Clock, Zap, Target, BookHeart, GraduationCap, Building2, Palette, BriefcaseBusiness, Code2, Brain, MessageSquareText, Layers3, ClipboardCheck, Sparkles, Compass, Trophy } from 'lucide-react';
 import './index.css';
 
 const TeacherDashboard = lazy(() => import('./components/TeacherDashboard'));
