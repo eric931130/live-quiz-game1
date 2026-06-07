@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { signInWithEmailAndPassword } from 'firebase/auth';
-import { auth } from '../firebase';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
+import { doc, runTransaction } from 'firebase/firestore';
+import { auth, db } from '../firebase';
 import { X, Mail, Lock, User, LogIn, Calendar, Smile, ShieldAlert, ArrowLeft } from 'lucide-react';
 import ParticleButton from './ParticleButton';
 
@@ -53,6 +54,7 @@ export default function AuthModal({ onClose, onSuccess }) {
         }
 
         let registeredUid = null;
+        let useFallback = false;
         try {
           const API_BASE_URL = window.location.hostname === 'localhost' 
             ? 'http://localhost:3001' 
@@ -73,14 +75,52 @@ export default function AuthModal({ onClose, onSuccess }) {
           const data = await response.json().catch(() => ({}));
           if (response.ok && data.success) {
             registeredUid = data.uid;
+          } else if (data.error === 'FIREBASE_NOT_CONFIGURED') {
+            useFallback = true;
           } else {
             throw new Error(data.message || data.error || '註冊失敗，請確認資料填寫正確。');
           }
         } catch (fetchErr) {
-          throw new Error(fetchErr.message || '無法連線至註冊伺服器，請稍後再試。');
+          console.warn('Backend register failed, falling back to client-side transaction:', fetchErr);
+          useFallback = true;
         }
 
-        if (registeredUid) {
+        if (useFallback) {
+          const userCredential = await createUserWithEmailAndPassword(auth, email.trim(), password);
+          registeredUid = userCredential.user.uid;
+
+          const counterRef = doc(db, 'SystemCounters', 'user_counter');
+          const userRef = doc(db, 'Users', registeredUid);
+
+          await runTransaction(db, async (transaction) => {
+            const counterDoc = await transaction.get(counterRef);
+            let currentNumber = 0;
+            if (counterDoc.exists()) {
+              currentNumber = counterDoc.data().currentNumber || 0;
+            }
+            const nextNumber = currentNumber + 1;
+            const anonymizedCode = 'S' + String(nextNumber).padStart(4, '0');
+
+            transaction.set(userRef, {
+              id: registeredUid,
+              email: email.trim(),
+              emailVerified: false,
+              anonymizedStudentNumber: nextNumber,
+              anonymizedStudentCode: anonymizedCode,
+              displayName: nickname.trim(),
+              nickname: nickname.trim(),
+              allowPublicDisplayName: !!allowPublicDisplayName,
+              avatarType: avatar || '🧑‍🚀',
+              avatar: avatar || '🧑‍🚀',
+              playFrequency: playFrequency || '每週 3 次',
+              role: 'student',
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString()
+            });
+
+            transaction.set(counterRef, { currentNumber: nextNumber });
+          });
+        } else if (registeredUid) {
           await signInWithEmailAndPassword(auth, email, password);
         } else {
           throw new Error('註冊失敗，伺服器未回傳有效帳號。');
