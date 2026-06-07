@@ -1,8 +1,8 @@
-import React, { Suspense, lazy, useState, useEffect, useRef } from 'react';
+import React, { Suspense, lazy, useState, useEffect, useRef, useCallback } from 'react';
 import { io } from 'socket.io-client';
 import { QRCodeSVG } from 'qrcode.react';
-import { collection, addDoc, getDocs, doc, updateDoc } from 'firebase/firestore';
-import { Cloud, UploadCloud, Shuffle, ListChecks, Folder, FileText, CheckCircle, Trophy, BarChart3, Clock, Users, Trash2, ChevronDown, ChevronRight, MessageSquare, Save, Archive, PlusCircle } from 'lucide-react';
+import { collection, addDoc, getDocs, deleteDoc, doc, updateDoc, setDoc } from 'firebase/firestore';
+import { Cloud, UploadCloud, Shuffle, ListChecks, Folder, FileText, CheckCircle, Trophy, BarChart3, Clock, Users, Trash2, ChevronDown, ChevronRight, MessageSquare, Save, Archive, PlusCircle, ArrowLeft } from 'lucide-react';
 import { db } from '../firebase';
 import ParticleButton from './ParticleButton';
 import LazyErrorBoundary from './LazyErrorBoundary';
@@ -11,6 +11,8 @@ import { questionBankApi } from '../questionBankApi';
 const QuestionBankDashboard = lazy(() => import('./QuestionBankDashboard'));
 const AdminQuestionBankControlPanel = lazy(() => import('./AdminQuestionBankControlPanel'));
 const PeerLearningHub = lazy(() => import('./PeerLearningHub'));
+const StudentProgressDashboard = lazy(() => import('./StudentProgressDashboard'));
+const WorldStageEditor = lazy(() => import('./WorldStageEditor'));
 
 const SOCKET_URL = window.location.hostname === 'localhost' 
   ? 'http://localhost:3001' 
@@ -42,7 +44,7 @@ export default function TeacherDashboard({ onGoBack, user }) {
   const [selectedBankQuestions, setSelectedBankQuestions] = useState([]);
   
   // Dashboard Mode
-  const [dashboardMode, setDashboardMode] = useState('live'); // 'live', 'assignment_setup', 'assignment_manage', 'classroom_discussion'
+  const [dashboardMode, setDashboardMode] = useState('live'); // 'live', 'assignment_setup', 'assignment_manage', 'classroom_discussion', 'student_progress', 'world_management'
   
   // Assignment Setup State
   const [assignmentTitle, setAssignmentTitle] = useState('');
@@ -55,6 +57,11 @@ export default function TeacherDashboard({ onGoBack, user }) {
   const [assignmentsList, setAssignmentsList] = useState([]);
   const [selectedAssignmentId, setSelectedAssignmentId] = useState(null);
   const [assignmentResults, setAssignmentResults] = useState([]);
+
+  // Worlds and Challenge Rounds State
+  const [worldsList, setWorldsList] = useState([]);
+  const [roundsList, setRoundsList] = useState([]);
+  const [filterRoundId, setFilterRoundId] = useState('');
 
   // Setup Tabs & Flow State
   const [setupTab, setSetupTab] = useState('upload'); // 'upload' or 'select'
@@ -91,13 +98,160 @@ export default function TeacherDashboard({ onGoBack, user }) {
   const [discussionFilter, setDiscussionFilter] = useState('all');
   const canUseAdminPanel = isAdminUser(user);
 
+  const cancelWaiting = () => {
+     if (window.confirm("確定要取消本次測驗並返回控制面板嗎？")) {
+        if (socket) {
+           socket.emit('close_room', roomCode);
+        }
+        setStep('setup');
+     }
+  };
+
+  const terminateGame = () => {
+     if (window.confirm("確定要強制終止本場測驗並返回控制面板嗎？所有學生的作答進度將會中斷。")) {
+        if (socket) {
+           socket.emit('terminate_game', roomCode);
+        }
+        setStep('setup');
+     }
+  };
+
+  const fetchBanksFromFirebase = useCallback(async () => {
+     try {
+       const banks = await questionBankApi.list(user);
+       setSavedBanks(banks);
+     } catch (e) {
+       console.log('載入歷史題庫失敗', e);
+     }
+  }, [user]);
+
+  const fetchAssignmentsFromFirebase = useCallback(async () => {
+     try {
+       const querySnapshot = await getDocs(collection(db, "Assignments"));
+       const assigns = [];
+       querySnapshot.forEach((doc) => {
+         assigns.push({ id: doc.id, ...doc.data() });
+       });
+       // Sort by descending created date
+       assigns.sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
+       setAssignmentsList(assigns);
+     } catch(e) {
+       console.log('載入任務失敗', e);
+     }
+  }, []);
+
+  const fetchWorldsAndRounds = useCallback(async () => {
+     const runFetch = async () => {
+       try {
+         const worldsSnap = await getDocs(collection(db, "Worlds"));
+         let worlds = [];
+         worldsSnap.forEach((doc) => {
+           worlds.push({ id: doc.id, ...doc.data() });
+         });
+
+         // Seeding if database is empty
+         if (worlds.length === 0) {
+           const batch = [];
+           for (let w = 1; w <= 20; w++) {
+             const worldId = `world_${w}`;
+             const activeRoundId = `world_${w}_round_1`;
+             const defaultWorld = {
+               id: worldId,
+               name: `世界 ${w}: SDGs 主題領域`,
+               worldTemplateId: `template_${w}`,
+               sourceWorldId: null,
+               duplicatedFromWorldId: null,
+               restartedFromRoundId: null,
+               roundVersion: 1,
+               isArchived: false,
+               archivedAt: null,
+               activeRoundId: activeRoundId,
+               perfectClearRequired: true,
+               stages: Array.from({length: 10}, (_, stageIdx) => ({
+                 id: stageIdx + 1,
+                 name: `階段 ${stageIdx + 1}`,
+                 perfectClearRequired: true,
+                 checkpoints: [
+                   {
+                     id: `cp_${stageIdx + 1}`,
+                     name: `Checkpoint ${stageIdx + 1}`,
+                     questionCount: 20,
+                     perfectClearRequired: true
+                   }
+                 ]
+               }))
+             };
+             batch.push(setDoc(doc(db, "Worlds", worldId), defaultWorld));
+
+             const defaultRound = {
+               id: activeRoundId,
+               worldId: worldId,
+               roundVersion: 1,
+               createdAt: new Date().toISOString(),
+               isArchived: false,
+               archivedAt: null,
+               targetWorldId: worldId,
+               targetStageIndex: 5,
+               targetDescription: `達到世界 ${w} 第 5 關`,
+               leaderboardLimit: 10
+             };
+             batch.push(setDoc(doc(db, "ChallengeRounds", activeRoundId), defaultRound));
+           }
+           await Promise.all(batch);
+           return runFetch();
+         }
+
+         worlds.sort((a, b) => {
+           const numA = parseInt(a.id.replace(/\D/g, ''), 10) || 0;
+           const numB = parseInt(b.id.replace(/\D/g, ''), 10) || 0;
+           return numA - numB;
+         });
+         setWorldsList(worlds);
+
+         const roundsSnap = await getDocs(collection(db, "ChallengeRounds"));
+         const rounds = [];
+         roundsSnap.forEach((doc) => {
+           rounds.push({ id: doc.id, ...doc.data() });
+         });
+         rounds.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+         setRoundsList(rounds);
+         
+         if (rounds.length > 0 && !filterRoundId) {
+           setFilterRoundId(rounds[0].id);
+         }
+       } catch (e) {
+         console.error("載入世界與輪次失敗", e);
+       }
+     };
+
+     await runFetch();
+  }, [filterRoundId, setFilterRoundId]);
+
+  const fetchDiscussionsFromFirebase = useCallback(async () => {
+    try {
+      const querySnapshot = await getDocs(collection(db, "ClassroomDiscussions"));
+      const messages = [];
+      querySnapshot.forEach((doc) => {
+        messages.push({ id: doc.id, ...doc.data() });
+      });
+      messages.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      setDiscussionMessages(messages);
+    } catch (e) {
+      console.log('載入課堂討論失敗', e);
+    }
+  }, []);
+
   useEffect(() => {
-    fetchBanksFromFirebase();
-    fetchAssignmentsFromFirebase();
-    fetchDiscussionsFromFirebase();
+    const timer1 = setTimeout(() => {
+      fetchBanksFromFirebase();
+      fetchAssignmentsFromFirebase();
+      fetchDiscussionsFromFirebase();
+    }, 0);
 
     const newSocket = io(SOCKET_URL);
-    setSocket(newSocket);
+    const timer2 = setTimeout(() => {
+      setSocket(newSocket);
+    }, 0);
 
     newSocket.on('room_created', (code) => {
       setRoomCode(code);
@@ -136,32 +290,17 @@ export default function TeacherDashboard({ onGoBack, user }) {
       setStep('game_over');
     });
 
-    return () => newSocket.close();
-  }, [user]);
+    return () => {
+      clearTimeout(timer1);
+      clearTimeout(timer2);
+      newSocket.close();
+    };
+  }, [fetchBanksFromFirebase, fetchAssignmentsFromFirebase, fetchDiscussionsFromFirebase]);
 
-  const fetchBanksFromFirebase = async () => {
-    try {
-      const banks = await questionBankApi.list(user);
-      setSavedBanks(banks);
-    } catch (e) {
-      console.log('載入歷史題庫失敗', e);
-    }
-  };
+  useEffect(() => {
+    fetchWorldsAndRounds();
+  }, [fetchWorldsAndRounds]);
 
-  const fetchAssignmentsFromFirebase = async () => {
-    try {
-      const querySnapshot = await getDocs(collection(db, "Assignments"));
-      const assigns = [];
-      querySnapshot.forEach((doc) => {
-        assigns.push({ id: doc.id, ...doc.data() });
-      });
-      // Sort by descending created date
-      assigns.sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
-      setAssignmentsList(assigns);
-    } catch(e) {
-      console.log('載入任務失敗', e);
-    }
-  };
 
   const loadAssignmentResults = async (assignId) => {
     try {
@@ -532,218 +671,242 @@ export default function TeacherDashboard({ onGoBack, user }) {
 
   if (step === 'setup') {
     return (
-      <div className="card teacher-card animate-fade-in glass-panel" style={{ padding: '2rem', maxWidth: '800px', margin: 'auto' }}>
-        <h2 className="title" style={{ textAlign: 'center', marginBottom: '1.5rem', color: 'var(--primary-dark)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
-          <Folder size={32} /> 教師控制面板
-        </h2>
-
-        {/* Top Level Mode Tabs */}
-        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '2rem', background: 'rgba(0,0,0,0.05)', padding: '0.5rem', borderRadius: '12px', flexWrap: 'wrap' }}>
-           <button 
-             onClick={() => setDashboardMode('live')}
-             style={{ flex: 1, minWidth: '160px', padding: '1rem', borderRadius: '8px', border: 'none', background: dashboardMode === 'live' ? 'var(--primary-color)' : 'transparent', color: dashboardMode === 'live' ? 'white' : 'var(--text-main)', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.3s' }}
-           >
-              👥 即時連線對戰
-           </button>
-           <button 
-             onClick={() => setDashboardMode('assignment_setup')}
-             style={{ flex: 1, minWidth: '160px', padding: '1rem', borderRadius: '8px', border: 'none', background: dashboardMode === 'assignment_setup' ? 'var(--primary-color)' : 'transparent', color: dashboardMode === 'assignment_setup' ? 'white' : 'var(--text-main)', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.3s' }}
-           >
-              📝 單人任務派發
-           </button>
-           <button 
-             onClick={() => setDashboardMode('assignment_manage')}
-             style={{ flex: 1, minWidth: '160px', padding: '1rem', borderRadius: '8px', border: 'none', background: dashboardMode === 'assignment_manage' ? 'var(--primary-color)' : 'transparent', color: dashboardMode === 'assignment_manage' ? 'white' : 'var(--text-main)', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.3s' }}
-           >
-              📊 任務管理與成績
-           </button>
-           <button 
-             onClick={() => setDashboardMode('classroom_discussion')}
-             style={{ flex: 1, minWidth: '160px', padding: '1rem', borderRadius: '8px', border: 'none', background: dashboardMode === 'classroom_discussion' ? 'var(--primary-color)' : 'transparent', color: dashboardMode === 'classroom_discussion' ? 'white' : 'var(--text-main)', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.3s' }}
-           >
-              💬 課堂討論
-           </button>
-           <button
-             onClick={() => setDashboardMode('peer_learning')}
-             style={{ flex: 1, minWidth: '160px', padding: '1rem', borderRadius: '8px', border: 'none', background: dashboardMode === 'peer_learning' ? 'var(--primary-color)' : 'transparent', color: dashboardMode === 'peer_learning' ? 'white' : 'var(--text-main)', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.3s' }}
-           >
-              同儕學習
-           </button>
-           {canUseAdminPanel && (
-             <button
-               onClick={() => setDashboardMode('admin_governance')}
-               style={{ flex: 1, minWidth: '160px', padding: '1rem', borderRadius: '8px', border: 'none', background: dashboardMode === 'admin_governance' ? 'var(--primary-color)' : 'transparent', color: dashboardMode === 'admin_governance' ? 'white' : 'var(--text-main)', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.3s' }}
-             >
-                🛡️ 平台治理
-             </button>
-           )}
-        </div>
-
-        {dashboardMode === 'assignment_manage' ? (
-           <div className="animate-fade-in">
-              <h3 style={{ marginBottom: '1rem', color: 'var(--primary-dark)' }}>已派發的任務清單</h3>
-              {assignmentsList.length === 0 ? (
-                 <p style={{ color: '#777', textAlign: 'center' }}>目前沒有任何任務。</p>
-              ) : (
-                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                    {assignmentsList.map(a => (
-                       <div key={a.id} style={{ border: '1px solid #ddd', borderRadius: '8px', padding: '1rem', background: selectedAssignmentId === a.id ? '#f1f8e9' : '#fff' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                             <div>
-                <h4 style={{ margin: '0 0 0.5rem 0', color: 'var(--primary-dark)' }}>{a.title}</h4>
-                               <div style={{ fontSize: '0.9rem', color: '#666' }}>代碼: <strong style={{ color: 'var(--primary-color)' }}>{a.code}</strong> | 模式: {a.mode === 'exam' ? '考核' : '練習'} | 期限: {new Date(a.deadline).toLocaleString()}</div>
-                             </div>
-                             <button onClick={() => { setSelectedAssignmentId(a.id); loadAssignmentResults(a.id); }} style={{ padding: '0.5rem 1rem', background: 'var(--primary-color)', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}>
-                               查看成績
-                             </button>
-                          </div>
-                          {selectedAssignmentId === a.id && (
-                             <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid #ccc' }}>
-                                <h4 style={{ marginBottom: '0.5rem' }}>學生成績列表 ({assignmentResults.length} 筆)</h4>
-                                {assignmentResults.length === 0 ? <p>尚未有學生完成。</p> : (
-                                   <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.9rem' }}>
-                                      <thead>
-                                         <tr style={{ background: '#eee' }}>
-                                            <th style={{ padding: '0.5rem' }}>學生</th>
-                                            <th style={{ padding: '0.5rem' }}>分數</th>
-                                            <th style={{ padding: '0.5rem' }}>作答次數</th>
-                                            <th style={{ padding: '0.5rem' }}>完成時間</th>
-                                         </tr>
-                                      </thead>
-                                      <tbody>
-                                         {assignmentResults.sort((x,y) => y.score - x.score).map((r, i) => (
-                                            <tr key={i} style={{ borderBottom: '1px solid #eee' }}>
-                                               <td style={{ padding: '0.5rem' }}>{r.nickname}</td>
-                                               <td style={{ padding: '0.5rem', fontWeight: 'bold', color: 'var(--primary-dark)' }}>{r.score}</td>
-                                               <td style={{ padding: '0.5rem' }}>{r.attempts}</td>
-                                               <td style={{ padding: '0.5rem' }}>{new Date(r.completedAt).toLocaleString()}</td>
-                                            </tr>
-                                         ))}
-                                      </tbody>
-                                   </table>
-                                )}
-                             </div>
-                          )}
-                       </div>
-                    ))}
-                 </div>
-              )}
-              <div style={{ marginTop: '2rem', textAlign: 'center' }}>
-                 <ParticleButton className="btn back-btn" onClick={onGoBack}>返回首頁</ParticleButton>
-              </div>
+      <div className="home-container" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', background: 'var(--bg-color)', padding: '2rem' }}>
+        <div className="app-tool-window large animate-fade-in">
+          <div className="app-tool-window-header">
+            <div className="app-tool-window-header-title">
+               <button onClick={onGoBack} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 'bold' }}>
+                  <ArrowLeft size={20} /> 返回會員中心
+               </button>
+               <span style={{ color: 'rgba(255,255,255,0.4)' }}>|</span>
+               <span>🏫 永續學習小老師控制面板</span>
             </div>
-         ) : dashboardMode === 'admin_governance' && canUseAdminPanel ? (
-            <Suspense fallback={<DashboardChunkFallback label="載入平台治理控制台..." />}>
-              <LazyErrorBoundary title="平台治理控制台載入失敗">
-                <AdminQuestionBankControlPanel user={user} />
-              </LazyErrorBoundary>
-            </Suspense>
-         ) : dashboardMode === 'peer_learning' ? (
-            <Suspense fallback={<DashboardChunkFallback label="載入同儕學習審核..." />}>
-              <LazyErrorBoundary title="同儕學習面板載入失敗">
-                <PeerLearningHub mode="teacher" user={user} />
-              </LazyErrorBoundary>
-            </Suspense>
-         ) : dashboardMode === 'classroom_discussion' ? (
-            <div className="animate-fade-in">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem', color: 'var(--primary-dark)' }}>
-                <MessageSquare size={24} />
-                <h3>課堂討論管理</h3>
-              </div>
-              <p style={{ color: '#666', lineHeight: 1.7, marginBottom: '1.5rem' }}>
-                老師可把課堂中的提問、補充、迷思概念或學生回饋記錄在這裡，再決定哪些內容要保存成教學素材，哪些要移除或暫時保留待判斷。
-              </p>
-
-              <form onSubmit={addDiscussionMessage} style={{ background: '#fff', border: '1px solid #e0e0e0', borderRadius: '12px', padding: '1.5rem', marginBottom: '1.5rem' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 180px', gap: '1rem' }}>
-                  <div>
-                    <label style={{ fontWeight: 'bold', color: 'var(--primary-dark)' }}>課程 / 課堂名稱</label>
-                    <input
-                      type="text"
-                      className="input-field"
-                      placeholder="例如：國中英文文法複習、Python 入門第一堂"
-                      value={discussionTitle}
-                      onChange={e => setDiscussionTitle(e.target.value)}
-                      style={{ width: '100%', marginTop: '0.5rem' }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ fontWeight: 'bold', color: 'var(--primary-dark)' }}>內容類型</label>
-                    <select className="input-field" value={discussionTag} onChange={e => setDiscussionTag(e.target.value)} style={{ width: '100%', marginTop: '0.5rem' }}>
-                      <option value="提問">提問</option>
-                      <option value="補充">補充</option>
-                      <option value="迷思概念">迷思概念</option>
-                      <option value="延伸任務">延伸任務</option>
-                      <option value="學生回饋">學生回饋</option>
-                    </select>
-                  </div>
-                </div>
-                <label style={{ fontWeight: 'bold', color: 'var(--primary-dark)' }}>討論內容</label>
-                <textarea
-                  value={discussionInput}
-                  onChange={e => setDiscussionInput(e.target.value)}
-                  placeholder="輸入要保存或待整理的聊天內容、學生提問、老師補充說明..."
-                  rows={4}
-                  style={{ width: '100%', marginTop: '0.5rem', padding: '1rem', borderRadius: '12px', border: '1px solid #CED4DA', fontFamily: 'inherit', fontSize: '1rem', resize: 'vertical' }}
-                />
-                <ParticleButton type="submit" className="btn primary-btn" style={{ marginTop: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
-                  <PlusCircle size={18} /> 新增討論內容
-                </ParticleButton>
-              </form>
-
-              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
-                {[
-                  ['all', '全部'],
-                  ['pending', '待判斷'],
-                  ['saved', '已保存'],
-                  ['removed', '已移除']
-                ].map(([value, label]) => (
-                  <button
-                    key={value}
-                    onClick={() => setDiscussionFilter(value)}
-                    style={{ padding: '0.6rem 1rem', borderRadius: '8px', border: '1px solid #d6dde5', background: discussionFilter === value ? 'var(--primary-dark)' : '#fff', color: discussionFilter === value ? '#fff' : 'var(--text-main)', fontWeight: 'bold', cursor: 'pointer' }}
+            <div className="app-tool-window-controls">
+               <span className="app-tool-window-control-dot minimize" />
+               <span className="app-tool-window-control-dot maximize" />
+               <span className="app-tool-window-control-dot close" onClick={onGoBack} title="關閉視窗" />
+            </div>
+          </div>
+          <div className="app-tool-window-body">
+            {/* Top Level Mode Tabs */}
+            <div className="app-tool-window-tabs">
+               {[
+                  { key: 'live', label: '👥 即時連線對戰' },
+                  { key: 'assignment_setup', label: '📝 單人任務派發' },
+                  { key: 'assignment_manage', label: '📊 任務管理與成績' },
+                  { key: 'classroom_discussion', label: '💬 課堂討論' },
+                  { key: 'peer_learning', label: '👥 同儕學習' },
+                  { key: 'student_progress', label: '📈 學員進度看板' },
+                  { key: 'world_management', label: '🗺️ 世界與關卡管理' },
+                  ...(canUseAdminPanel ? [{ key: 'admin_governance', label: '🛡️ 平台治理' }] : [])
+               ].map(t => (
+                  <button 
+                    key={t.key}
+                    onClick={() => {
+                       setDashboardMode(t.key);
+                       if (t.key === 'student_progress' || t.key === 'world_management') {
+                          fetchWorldsAndRounds();
+                       }
+                    }}
+                    className={`app-tool-window-tab-btn ${dashboardMode === t.key ? 'active' : ''}`}
                   >
-                    {label}
+                     {t.label}
                   </button>
-                ))}
-              </div>
-
-              {filteredDiscussions.length === 0 ? (
-                <p style={{ color: '#777', textAlign: 'center', padding: '2rem', background: '#fff', borderRadius: '12px' }}>目前沒有符合條件的討論內容。</p>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                  {filteredDiscussions.map(item => (
-                    <div key={item.id} style={{ background: '#fff', border: '1px solid #e0e0e0', borderLeft: `6px solid ${discussionStatusColor[item.status] || '#90a4ae'}`, borderRadius: '12px', padding: '1rem' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'flex-start' }}>
-                        <div>
-                          <h4 style={{ color: 'var(--primary-dark)', marginBottom: '0.4rem' }}>{item.title}</h4>
-                          <div style={{ color: '#777', fontSize: '0.9rem' }}>
-                            {item.tag} · {new Date(item.createdAt).toLocaleString()} · <strong style={{ color: discussionStatusColor[item.status] || '#777' }}>{discussionStatusText[item.status] || item.status}</strong>
-                          </div>
-                        </div>
-                        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                          <button onClick={() => updateDiscussionStatus(item.id, 'saved')} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', padding: '0.5rem 0.8rem', borderRadius: '8px', border: '1px solid #a5d6a7', background: '#e8f5e9', color: '#2e7d32', fontWeight: 'bold', cursor: 'pointer' }}>
-                            <Save size={16} /> 保存
-                          </button>
-                          <button onClick={() => updateDiscussionStatus(item.id, 'pending')} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', padding: '0.5rem 0.8rem', borderRadius: '8px', border: '1px solid #ffcc80', background: '#fff8e1', color: '#ef6c00', fontWeight: 'bold', cursor: 'pointer' }}>
-                            <Archive size={16} /> 待判斷
-                          </button>
-                          <button onClick={() => updateDiscussionStatus(item.id, 'removed')} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', padding: '0.5rem 0.8rem', borderRadius: '8px', border: '1px solid #ef9a9a', background: '#ffebee', color: '#c62828', fontWeight: 'bold', cursor: 'pointer' }}>
-                            <Trash2 size={16} /> 移除
-                          </button>
-                        </div>
-                      </div>
-                      <p style={{ marginTop: '1rem', color: '#444', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{item.content}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <div style={{ marginTop: '2rem', textAlign: 'center' }}>
-                 <ParticleButton className="btn back-btn" onClick={onGoBack}>返回首頁</ParticleButton>
-              </div>
+               ))}
             </div>
-         ) : (
+
+            {/* Dashboard Content depending on Mode */}
+            {dashboardMode === 'assignment_manage' && (
+               <div className="animate-fade-in">
+                  <h3 style={{ marginBottom: '1rem', color: 'var(--primary-dark)' }}>已派發的任務清單</h3>
+                  {assignmentsList.length === 0 ? (
+                     <p style={{ color: '#777', textAlign: 'center' }}>目前沒有任務。</p>
+                  ) : (
+                     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                        {assignmentsList.map(a => (
+                           <div key={a.id} style={{ border: '1px solid #ddd', borderRadius: '8px', padding: '1rem', background: selectedAssignmentId === a.id ? '#f1f8e9' : '#fff' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <div>
+                                    <h4 style={{ margin: '0 0 0.5rem 0', color: 'var(--primary-dark)' }}>{a.title}</h4>
+                                    <div style={{ fontSize: '0.9rem', color: '#666' }}>代碼: <strong style={{ color: 'var(--primary-color)' }}>{a.code}</strong> | 模式: {a.mode === 'exam' ? '考核' : '練習'} | 期限: {new Date(a.deadline).toLocaleString()}</div>
+                                  </div>
+                                  <button onClick={() => { setSelectedAssignmentId(a.id); loadAssignmentResults(a.id); }} style={{ padding: '0.5rem 1rem', background: 'var(--primary-color)', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}>
+                                    查看成績
+                                  </button>
+                              </div>
+                              {selectedAssignmentId === a.id && (
+                                  <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid #ccc' }}>
+                                     <h4 style={{ marginBottom: '0.5rem' }}>學生成績列表 ({assignmentResults.length} 筆)</h4>
+                                     {assignmentResults.length === 0 ? <p>尚未有學生完成。</p> : (
+                                        <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.9rem' }}>
+                                           <thead>
+                                              <tr style={{ background: '#eee' }}>
+                                                 <th style={{ padding: '0.5rem' }}>學生</th>
+                                                 <th style={{ padding: '0.5rem' }}>分數</th>
+                                                 <th style={{ padding: '0.5rem' }}>作答次數</th>
+                                                 <th style={{ padding: '0.5rem' }}>完成時間</th>
+                                              </tr>
+                                           </thead>
+                                           <tbody>
+                                              {assignmentResults.sort((x,y) => y.score - x.score).map((r, i) => (
+                                                 <tr key={i} style={{ borderBottom: '1px solid #eee' }}>
+                                                    <td style={{ padding: '0.5rem' }}>{r.nickname}</td>
+                                                    <td style={{ padding: '0.5rem', fontWeight: 'bold', color: 'var(--primary-dark)' }}>{r.score}</td>
+                                                    <td style={{ padding: '0.5rem' }}>{r.attempts}</td>
+                                                    <td style={{ padding: '0.5rem' }}>{new Date(r.completedAt).toLocaleString()}</td>
+                                                 </tr>
+                                              ))}
+                                           </tbody>
+                                        </table>
+                                     )}
+                                  </div>
+                              )}
+                           </div>
+                        ))}
+                     </div>
+                  )}
+                  <div style={{ marginTop: '2rem', textAlign: 'center' }}>
+                     <ParticleButton className="btn back-btn" onClick={onGoBack}>返回首頁</ParticleButton>
+                  </div>
+               </div>
+            )}
+
+            {dashboardMode === 'admin_governance' && canUseAdminPanel && (
+               <Suspense fallback={<DashboardChunkFallback label="載入平台治理控制台..." />}>
+                 <LazyErrorBoundary title="平台治理控制台載入失敗">
+                   <AdminQuestionBankControlPanel user={user} />
+                 </LazyErrorBoundary>
+               </Suspense>
+            )}
+
+            {dashboardMode === 'peer_learning' && (
+               <Suspense fallback={<DashboardChunkFallback label="載入同儕學習審核..." />}>
+                 <LazyErrorBoundary title="同儕學習面板載入失敗">
+                   <PeerLearningHub mode="teacher" user={user} />
+                 </Suspense>
+               </Suspense>
+            )}
+
+            {dashboardMode === 'classroom_discussion' && (
+               <div className="animate-fade-in">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem', color: 'var(--primary-dark)' }}>
+                    <MessageSquare size={24} />
+                    <h3>課堂討論管理</h3>
+                  </div>
+                  <p style={{ color: '#cbd5e1', lineHeight: 1.7, marginBottom: '1.5rem' }}>
+                    老師可把課堂中的提問、補充、迷思概念或學生回饋記錄在這裡，再決定哪些內容要保存成教學素材，哪些要移除或暫時保留待判斷。
+                  </p>
+
+                  <form onSubmit={addDiscussionMessage} style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', padding: '1.5rem', marginBottom: '1.5rem' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 180px', gap: '1rem' }}>
+                      <div>
+                        <label style={{ fontWeight: 'bold', color: '#00bcd4' }}>課程 / 課堂名稱</label>
+                        <input
+                           type="text"
+                           className="input-field"
+                           placeholder="例如：國中英文文法複習、Python 入門第一堂"
+                           value={discussionTitle}
+                           onChange={e => setDiscussionTitle(e.target.value)}
+                           style={{ width: '100%', marginTop: '0.5rem' }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ fontWeight: 'bold', color: '#00bcd4' }}>內容類型</label>
+                        <select className="input-field" value={discussionTag} onChange={e => setDiscussionTag(e.target.value)} style={{ width: '100%', marginTop: '0.5rem' }}>
+                          <option value="提問">提問</option>
+                          <option value="補充">補充</option>
+                          <option value="迷思概念">迷思概念</option>
+                          <option value="延伸任務">延伸任務</option>
+                          <option value="學生回饋">學生回饋</option>
+                        </select>
+                      </div>
+                    </div>
+                    <label style={{ fontWeight: 'bold', color: '#00bcd4', marginTop: '1rem', display: 'block' }}>討論內容</label>
+                    <textarea
+                      value={discussionInput}
+                      onChange={e => setDiscussionInput(e.target.value)}
+                      placeholder="輸入要保存或待整理的聊天內容、學生提問、老師補充說明..."
+                      rows={4}
+                      style={{ width: '100%', marginTop: '0.5rem', padding: '1rem', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(0,0,0,0.2)', color: '#fff', fontFamily: 'inherit', fontSize: '1rem', resize: 'vertical' }}
+                    />
+                    <ParticleButton type="submit" className="btn primary-btn" style={{ marginTop: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+                      <PlusCircle size={18} /> 新增討論內容
+                    </ParticleButton>
+                  </form>
+
+                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
+                    {[
+                      ['all', '全部'],
+                      ['pending', '待判斷'],
+                      ['saved', '已保存'],
+                      ['removed', '已移除']
+                    ].map(([value, label]) => (
+                      <button
+                        key={value}
+                        onClick={() => setDiscussionFilter(value)}
+                        style={{ padding: '0.6rem 1rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)', background: discussionFilter === value ? 'var(--primary-dark)' : 'rgba(255,255,255,0.05)', color: '#fff', fontWeight: 'bold', cursor: 'pointer' }}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {filteredDiscussions.length === 0 ? (
+                    <p style={{ color: '#94a3b8', textAlign: 'center', padding: '2rem', background: 'rgba(255,255,255,0.02)', borderRadius: '12px' }}>目前沒有符合條件的討論內容。</p>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                      {filteredDiscussions.map(item => (
+                        <div key={item.id} style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', borderLeft: `6px solid ${discussionStatusColor[item.status] || '#90a4ae'}`, borderRadius: '12px', padding: '1rem' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'flex-start' }}>
+                            <div>
+                              <h4 style={{ color: '#00bcd4', marginBottom: '0.4rem' }}>{item.title}</h4>
+                              <div style={{ color: '#94a3b8', fontSize: '0.9rem' }}>
+                                {item.tag} · {new Date(item.createdAt).toLocaleString()} · <strong style={{ color: discussionStatusColor[item.status] || '#777' }}>{discussionStatusText[item.status] || item.status}</strong>
+                              </div>
+                            </div>
+                            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                              <button onClick={() => updateDiscussionStatus(item.id, 'saved')} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', padding: '0.5rem 0.8rem', borderRadius: '8px', border: '1px solid #a5d6a7', background: '#e8f5e9', color: '#2e7d32', fontWeight: 'bold', cursor: 'pointer' }}>
+                                <Save size={16} /> 保存
+                              </button>
+                              <button onClick={() => updateDiscussionStatus(item.id, 'pending')} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', padding: '0.5rem 0.8rem', borderRadius: '8px', border: '1px solid #ffcc80', background: '#fff8e1', color: '#ef6c00', fontWeight: 'bold', cursor: 'pointer' }}>
+                                <Archive size={16} /> 待判斷
+                              </button>
+                              <button onClick={() => updateDiscussionStatus(item.id, 'removed')} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', padding: '0.5rem 0.8rem', borderRadius: '8px', border: '1px solid #ef9a9a', background: '#ffebee', color: '#c62828', fontWeight: 'bold', cursor: 'pointer' }}>
+                                <Trash2 size={16} /> 移除
+                              </button>
+                            </div>
+                          </div>
+                          <p style={{ marginTop: '1rem', color: '#cbd5e1', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{item.content}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div style={{ marginTop: '2rem', textAlign: 'center' }}>
+                     <ParticleButton className="btn back-btn" onClick={onGoBack}>返回首頁</ParticleButton>
+                  </div>
+               </div>
+            )}
+
+            {dashboardMode === 'student_progress' && (
+               <StudentProgressDashboard 
+                  worldsList={worldsList}
+                  roundsList={roundsList}
+                  filterRoundId={filterRoundId}
+                  setFilterRoundId={setFilterRoundId}
+               />
+            )}
+
+            {dashboardMode === 'world_management' && (
+               <WorldStageEditor 
+                  worldsList={worldsList}
+                  roundsList={roundsList}
+                  fetchWorldsAndRounds={fetchWorldsAndRounds}
+               />
+            )}
+
+            {(dashboardMode === 'live' || dashboardMode === 'assignment_setup') && (
+>>>>>>> 421d087 (feat: implement user authentication redesign, anonymized student code generation, layout clipping fix, and production backend URL correction)
         <>
         {/* Setup Configuration Content */}
         {dashboardMode === 'assignment_setup' && (
@@ -976,13 +1139,15 @@ export default function TeacherDashboard({ onGoBack, user }) {
         </>)}
 
         <div className="actions" style={{ marginTop: '2rem', display: 'flex', justifyContent: 'space-between' }}>
-          <ParticleButton className="btn back-btn" onClick={onGoBack}>返回</ParticleButton>
-          <ParticleButton className="btn primary-btn" onClick={createRoom} disabled={selectedBankQuestions.length === 0}>
+          <ParticleButton className="btn back-btn" onClick={onGoBack} style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.2)', color: '#fff' }}>返回會員中心</ParticleButton>
+          <ParticleButton className="btn primary-btn" onClick={createRoom} disabled={selectedBankQuestions.length === 0 && setupTab === 'select'}>
              {dashboardMode === 'live' ? '建立測驗房間' : '派發單人任務'}
           </ParticleButton>
         </div>
         </>
         )}
+          </div>
+        </div>
       </div>
     );
   }
@@ -991,26 +1156,44 @@ export default function TeacherDashboard({ onGoBack, user }) {
   if (step === 'waiting') {
     const joinUrl = `${window.location.origin}/?code=${roomCode}`;
     return (
-      <div className="card teacher-waiting animate-fade-in" style={{ textAlign: 'center' }}>
-        <h2 className="title" style={{ color: 'var(--primary-dark)' }}>等待學生加入課堂...</h2>
-        <div className="room-info" style={{ background: '#f1f8e9', padding: '2rem', borderRadius: '12px' }}>
-          <h3>學生請前往首頁並輸入課堂代碼：</h3>
-          <div className="room-code" style={{ fontSize: '4rem', letterSpacing: '8px', color: 'var(--primary-color)' }}>{roomCode}</div>
-          <div className="qr-container" style={{ marginTop: '1rem' }}>
-             <QRCodeSVG value={joinUrl} size={180} />
+      <div className="home-container" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', background: 'var(--bg-color)', padding: '2rem' }}>
+        <div className="app-tool-window animate-fade-in">
+          <div className="app-tool-window-header">
+            <div className="app-tool-window-header-title">
+               <button onClick={cancelWaiting} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 'bold' }}>
+                  <ArrowLeft size={20} /> 取消並返回
+               </button>
+               <span style={{ color: 'rgba(255,255,255,0.4)' }}>|</span>
+               <span>⏳ 等待學生加入 (房間: {roomCode})</span>
+            </div>
+            <div className="app-tool-window-controls">
+               <span className="app-tool-window-control-dot minimize" />
+               <span className="app-tool-window-control-dot maximize" />
+               <span className="app-tool-window-control-dot close" onClick={cancelWaiting} title="取消" />
+            </div>
+          </div>
+          <div className="app-tool-window-body text-center">
+            <h2 className="title" style={{ color: '#00bcd4', marginBottom: '1.5rem' }}>等待永續夥伴加入...</h2>
+            <div className="room-info" style={{ background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255,255,255,0.08)', padding: '2rem', borderRadius: '12px' }}>
+              <h3 style={{ color: '#cbd5e1' }}>學生請前往首頁並輸入代碼：</h3>
+              <div className="room-code" style={{ fontSize: '4rem', letterSpacing: '8px', color: '#00bcd4' }}>{roomCode}</div>
+              <div className="qr-container" style={{ marginTop: '1rem', background: '#fff', padding: '1rem', borderRadius: '8px', display: 'inline-block' }}>
+                 <QRCodeSVG value={joinUrl} size={180} />
+              </div>
+            </div>
+            
+            <div className="players-list" style={{ marginTop: '2rem', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}>
+              <h3 style={{ color: '#00bcd4' }}>已報到 ({players.length} 人)</h3>
+              <div className="player-badges" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', justifyContent: 'center' }}>
+                {players.map(p => (
+                  <div key={p.id} className="player-badge animate-pop" style={{ background: 'rgba(0, 188, 212, 0.25)', color: '#fff', border: '1px solid rgba(0, 188, 212, 0.4)', padding: '0.5rem 1rem', borderRadius: '20px', fontWeight: 'bold' }}>{p.nickname}</div>
+                ))}
+              </div>
+            </div>
+            
+            <ParticleButton className="btn primary-btn xl-btn" onClick={startGame} style={{ marginTop: '2rem', width: '100%', borderRadius: '50px' }}>開始作答！</ParticleButton>
           </div>
         </div>
-        
-        <div className="players-list" style={{ marginTop: '2rem' }}>
-          <h3>已報到 ({players.length} 人)</h3>
-          <div className="player-badges" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', justifyContent: 'center' }}>
-            {players.map(p => (
-              <div key={p.id} className="player-badge animate-pop" style={{ background: 'var(--primary-light)', padding: '0.5rem 1rem', borderRadius: '20px', fontWeight: 'bold' }}>{p.nickname}</div>
-            ))}
-          </div>
-        </div>
-        
-        <ParticleButton className="btn primary-btn xl-btn" onClick={startGame} style={{ marginTop: '2rem', width: '100%' }}>開始作答！</ParticleButton>
       </div>
     );
   }
@@ -1018,35 +1201,54 @@ export default function TeacherDashboard({ onGoBack, user }) {
   // --- PLAYING ---
   if (step === 'playing' && currentQuestion) {
     return (
-      <div className="teacher-playing animate-fade-in">
-        <div className="game-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--primary-dark)', padding: '1rem', background: 'rgba(255,255,255,0.7)', borderRadius: '15px' }}>
-          <div className="question-counter" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><BarChart3 /> 第 {currentQuestion.qIndex + 1} 題 / 共 {currentQuestion.total} 題</div>
-          <div className="timer" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><Clock /> {timeLeft}s</div>
-        </div>
-        
-        <h1 className="question-text" style={{ textAlign: 'center', fontSize: '2.5rem', margin: '3rem 0', textShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>{currentQuestion.question}</h1>
-        
-        <div className="options-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', padding: '0 2rem' }}>
-           {['A', 'B'].map((opt) => (
-             <div key={opt} className={`option-card opt-${opt.toLowerCase()}`} style={{ padding: '2rem', fontSize: '1.8rem', borderRadius: '16px', textAlign: 'center', boxShadow: '0 10px 20px rgba(0,0,0,0.1)', cursor: 'default' }}>
-               <span className="opt-label" style={{ fontWeight: 'bold', marginRight: '1rem', background: 'rgba(255,255,255,0.3)', padding: '0.5rem 1rem', borderRadius: '12px' }}>{opt}</span> {currentQuestion.options[opt]}
-             </div>
-           ))}
-           {/* If C and D exists */}
-           {currentQuestion.options.C && (
-             <div className={`option-card opt-c`} style={{ padding: '2rem', fontSize: '1.8rem', borderRadius: '16px', textAlign: 'center', boxShadow: '0 10px 20px rgba(0,0,0,0.1)', cursor: 'default' }}>
-               <span className="opt-label" style={{ fontWeight: 'bold', marginRight: '1rem', background: 'rgba(255,255,255,0.3)', padding: '0.5rem 1rem', borderRadius: '12px' }}>C</span> {currentQuestion.options.C}
-             </div>
-           )}
-           {currentQuestion.options.D && (
-             <div className={`option-card opt-d`} style={{ padding: '2rem', fontSize: '1.8rem', borderRadius: '16px', textAlign: 'center', boxShadow: '0 10px 20px rgba(0,0,0,0.1)', cursor: 'default' }}>
-               <span className="opt-label" style={{ fontWeight: 'bold', marginRight: '1rem', background: 'rgba(255,255,255,0.3)', padding: '0.5rem 1rem', borderRadius: '12px' }}>D</span> {currentQuestion.options.D}
-             </div>
-           )}
-        </div>
-        
-        <div className="status-bar" style={{ textAlign: 'center', marginTop: '3rem', fontSize: '1.4rem', color: 'var(--text-main)', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.5rem' }}>
-          <Users /> 作答進度: {answeredCount} / {players.length} 人
+      <div className="home-container" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', background: 'var(--bg-color)', padding: '2rem' }}>
+        <div className="app-tool-window large animate-fade-in">
+          <div className="app-tool-window-header">
+            <div className="app-tool-window-header-title">
+               <button onClick={terminateGame} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 'bold' }}>
+                  <ArrowLeft size={20} /> 終止測驗
+               </button>
+               <span style={{ color: 'rgba(255,255,255,0.4)' }}>|</span>
+               <span>👥 即時測驗進行中 (房間: {roomCode})</span>
+            </div>
+            <div className="app-tool-window-controls">
+               <span className="app-tool-window-control-dot minimize" />
+               <span className="app-tool-window-control-dot maximize" />
+               <span className="app-tool-window-control-dot close" onClick={terminateGame} title="終止" />
+            </div>
+          </div>
+          <div className="app-tool-window-body">
+            <div className="teacher-playing animate-fade-in" style={{ padding: 0 }}>
+              <div className="game-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '1.5rem', fontWeight: 'bold', color: '#00bcd4', padding: '1rem', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '15px' }}>
+                <div className="question-counter" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><BarChart3 /> 第 {currentQuestion.qIndex + 1} 題 / 共 {currentQuestion.total} 題</div>
+                <div className="timer" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><Clock /> {timeLeft}s</div>
+              </div>
+              
+              <h1 className="question-text" style={{ textAlign: 'center', fontSize: '2.5rem', margin: '3rem 0', color: '#fff' }}>{currentQuestion.question}</h1>
+              
+              <div className="options-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
+                 {['A', 'B'].map((opt) => (
+                   <div key={opt} className={`option-card opt-${opt.toLowerCase()}`} style={{ padding: '2rem', fontSize: '1.8rem', borderRadius: '16px', textAlign: 'center', boxShadow: '0 10px 20px rgba(0,0,0,0.1)', cursor: 'default' }}>
+                     <span className="opt-label" style={{ fontWeight: 'bold', marginRight: '1rem', background: 'rgba(255,255,255,0.3)', padding: '0.5rem 1rem', borderRadius: '12px' }}>{opt}</span> {currentQuestion.options[opt]}
+                   </div>
+                 ))}
+                 {currentQuestion.options.C && (
+                   <div className={`option-card opt-c`} style={{ padding: '2rem', fontSize: '1.8rem', borderRadius: '16px', textAlign: 'center', boxShadow: '0 10px 20px rgba(0,0,0,0.1)', cursor: 'default' }}>
+                     <span className="opt-label" style={{ fontWeight: 'bold', marginRight: '1rem', background: 'rgba(255,255,255,0.3)', padding: '0.5rem 1rem', borderRadius: '12px' }}>C</span> {currentQuestion.options.C}
+                   </div>
+                 )}
+                 {currentQuestion.options.D && (
+                   <div className={`option-card opt-d`} style={{ padding: '2rem', fontSize: '1.8rem', borderRadius: '16px', textAlign: 'center', boxShadow: '0 10px 20px rgba(0,0,0,0.1)', cursor: 'default' }}>
+                     <span className="opt-label" style={{ fontWeight: 'bold', marginRight: '1rem', background: 'rgba(255,255,255,0.3)', padding: '0.5rem 1rem', borderRadius: '12px' }}>D</span> {currentQuestion.options.D}
+                   </div>
+                 )}
+              </div>
+              
+              <div className="status-bar" style={{ textAlign: 'center', marginTop: '3rem', fontSize: '1.4rem', color: '#cbd5e1', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.5rem' }}>
+                <Users /> 作答進度: {answeredCount} / {players.length} 人
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -1057,54 +1259,74 @@ export default function TeacherDashboard({ onGoBack, user }) {
     const totalAns = distribution ? Object.values(distribution).reduce((a, b) => a + b, 0) : 0;
     
     return (
-      <div className="teacher-result animate-fade-in" style={{ padding: '2rem' }}>
-        <h2 style={{ textAlign: 'center', color: '#d32f2f', fontSize: '2rem' }}>作答結束！</h2>
-        <h3 className="correct-answer-display" style={{ textAlign: 'center', background: '#e8f5e9', padding: '1rem', borderRadius: '12px', margin: '1rem 0' }}>✅ 正確解答：{currentQuestion.correctOption}</h3>
-        
-        <div className="distribution-section" style={{ maxWidth: '800px', margin: 'auto' }}>
-          <h3 style={{ marginBottom: '1.5rem', textAlign: 'center', color: 'var(--primary-dark)' }}>📊 各選項作答人數比例</h3>
-          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-end', height: '220px', gap: '2.5rem', padding: '1.5rem', background: 'rgba(255,255,255,0.6)', borderRadius: '16px', boxShadow: 'inset 0 2px 10px rgba(0,0,0,0.05)' }}>
-          {['A', 'B', 'C', 'D'].filter(opt => currentQuestion.options[opt]).map((opt) => {
-            const count = distribution ? (distribution[opt] || 0) : 0;
-            const pct = totalAns > 0 ? (count / totalAns) * 100 : 0;
-            const isCorrect = currentQuestion.correctOption === opt;
-            
-            return (
-              <div key={opt} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', height: '100%', width: '80px' }}>
-                <div style={{ flex: 1, display: 'flex', alignItems: 'flex-end', width: '100%' }}>
-                     <div style={{ 
-                         width: '100%', 
-                         height: `${pct}%`, 
-                         background: isCorrect ? 'linear-gradient(to top, #43a047, #81c784)' : 'linear-gradient(to top, #9e9e9e, #e0e0e0)',
-                         borderRadius: '12px 12px 0 0',
-                         transition: 'height 1s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
-                         boxShadow: '0 4px 10px rgba(0,0,0,0.1)',
-                         position: 'relative'
-                     }}>
-                        <div style={{ position: 'absolute', top: '-30px', width: '100%', textAlign: 'center', fontWeight: 'bold', fontSize: '1.2rem', color: 'var(--text-main)' }}>{count}</div>
-                     </div>
-                </div>
-                <div style={{ textAlign: 'center', fontWeight: 'bold', color: isCorrect ? '#2e7d32' : '#777', marginTop: '12px', fontSize: '1.4rem', background: isCorrect ? 'rgba(76, 175, 80, 0.2)' : 'transparent', borderRadius: '50%', width: '40px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{opt}</div>
-              </div>
-            );
-          })}
-          </div>
-        </div>
-        
-        <div className="leaderboard" style={{ maxWidth: '800px', margin: '2rem auto', background: '#fff', padding: '2rem', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
-          <h2 style={{ textAlign: 'center', color: 'var(--secondary-color)' }}>🏆 英雄榜 🏆</h2>
-          {leaderboard.map((player, idx) => (
-            <div key={idx} className="leaderboard-item animate-slide-up" style={{ animationDelay: `${idx * 0.1}s`, display: 'flex', justifyContent: 'space-between', padding: '1rem', borderBottom: '1px solid #eee' }}>
-              <span className="rank" style={{ fontWeight: 'bold', color: '#d4af37' }}>#{idx + 1}</span>
-              <span className="nick" style={{ flex: 1, marginLeft: '1rem' }}>{player.nickname}</span>
-              <span className="score" style={{ fontWeight: 'bold' }}>{player.score} 分</span>
+      <div className="home-container" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', background: 'var(--bg-color)', padding: '2rem' }}>
+        <div className="app-tool-window large animate-fade-in">
+          <div className="app-tool-window-header">
+            <div className="app-tool-window-header-title">
+               <button onClick={terminateGame} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 'bold' }}>
+                  <ArrowLeft size={20} /> 終止測驗
+               </button>
+               <span style={{ color: 'rgba(255,255,255,0.4)' }}>|</span>
+               <span>📊 本題作答數據結果</span>
             </div>
-          ))}
-        </div>
-        <div style={{ textAlign: 'center' }}>
-          <ParticleButton className="btn primary-btn mt-4 xl-btn" onClick={nextQuestion}>
-            {(currentQuestion.qIndex + 1) === currentQuestion.total ? '查看最終總成績' : '前往下一題'}
-          </ParticleButton>
+            <div className="app-tool-window-controls">
+               <span className="app-tool-window-control-dot minimize" />
+               <span className="app-tool-window-control-dot maximize" />
+               <span className="app-tool-window-control-dot close" onClick={terminateGame} title="終止" />
+            </div>
+          </div>
+          <div className="app-tool-window-body">
+            <div className="teacher-result animate-fade-in" style={{ padding: 0 }}>
+              <h2 style={{ textAlign: 'center', color: '#ff5f56', fontSize: '2rem', fontWeight: '800' }}>作答結束！</h2>
+              <h3 className="correct-answer-display" style={{ textAlign: 'center', background: 'rgba(76, 175, 80, 0.1)', border: '1px solid rgba(76, 175, 80, 0.3)', padding: '1rem', borderRadius: '12px', margin: '1rem 0', color: '#4caf50' }}>✅ 正確解答：{currentQuestion.correctOption}</h3>
+              
+              <div className="distribution-section" style={{ maxWidth: '800px', margin: 'auto' }}>
+                <h3 style={{ marginBottom: '1.5rem', textAlign: 'center', color: '#00bcd4' }}>📊 各選項作答人數比例</h3>
+                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-end', height: '220px', gap: '2.5rem', padding: '1.5rem', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '16px', boxShadow: 'none' }}>
+                {['A', 'B', 'C', 'D'].filter(opt => currentQuestion.options[opt]).map((opt) => {
+                  const count = distribution ? (distribution[opt] || 0) : 0;
+                  const pct = totalAns > 0 ? (count / totalAns) * 100 : 0;
+                  const isCorrect = currentQuestion.correctOption === opt;
+                  
+                  return (
+                    <div key={opt} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', height: '100%', width: '80px' }}>
+                      <div style={{ flex: 1, display: 'flex', alignItems: 'flex-end', width: '100%' }}>
+                           <div style={{ 
+                                width: '100%', 
+                                height: `${pct}%`, 
+                                background: isCorrect ? 'linear-gradient(to top, #43a047, #81c784)' : 'linear-gradient(to top, #555, #888)',
+                                borderRadius: '12px 12px 0 0',
+                                transition: 'height 1s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
+                                boxShadow: '0 4px 10px rgba(0,0,0,0.2)',
+                                position: 'relative'
+                            }}>
+                               <div style={{ position: 'absolute', top: '-30px', width: '100%', textAlign: 'center', fontWeight: 'bold', fontSize: '1.2rem', color: '#fff' }}>{count}</div>
+                            </div>
+                      </div>
+                      <div style={{ textAlign: 'center', fontWeight: 'bold', color: isCorrect ? '#4caf50' : '#888', marginTop: '12px', fontSize: '1.4rem', background: isCorrect ? 'rgba(76, 175, 80, 0.2)' : 'transparent', borderRadius: '50%', width: '40px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{opt}</div>
+                    </div>
+                  );
+                })}
+                </div>
+              </div>
+              
+              <div className="leaderboard" style={{ maxWidth: '800px', margin: '2rem auto', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', padding: '2rem', borderRadius: '12px', boxShadow: 'none' }}>
+                <h2 style={{ textAlign: 'center', color: '#00bcd4', marginBottom: '1.5rem' }}>🏆 英雄榜 🏆</h2>
+                {leaderboard.map((player, idx) => (
+                  <div key={idx} className="leaderboard-item animate-slide-up" style={{ animationDelay: `${idx * 0.1}s`, display: 'flex', justifyContent: 'space-between', padding: '1rem', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                    <span className="rank" style={{ fontWeight: 'bold', color: '#ffbd2e' }}>#{idx + 1}</span>
+                    <span className="nick" style={{ flex: 1, marginLeft: '1rem', color: '#cbd5e1' }}>{player.nickname}</span>
+                    <span className="score" style={{ fontWeight: 'bold', color: '#00bcd4' }}>{player.score} 分</span>
+                  </div>
+                ))}
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <ParticleButton className="btn primary-btn mt-4 xl-btn" onClick={nextQuestion} style={{ borderRadius: '50px' }}>
+                  {(currentQuestion.qIndex + 1) === currentQuestion.total ? '查看最終總成績' : '前往下一題'}
+                </ParticleButton>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -1113,19 +1335,39 @@ export default function TeacherDashboard({ onGoBack, user }) {
   // --- GAME OVER ---
   if (step === 'game_over') {
     return (
-      <div className="teacher-game-over animate-fade-in" style={{ maxWidth: '800px', margin: 'auto', padding: '2rem', background: '#fff', borderRadius: '12px', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}>
-        <h1 className="title" style={{ textAlign: 'center', color: 'var(--primary-dark)', fontSize: '3rem' }}>🎉 測驗圓滿結束</h1>
-        <div className="leaderboard final-leaderboard" style={{ marginTop: '2rem' }}>
-          {finalReport.sort((a,b)=>b.score - a.score).map((player, idx) => (
-            <div key={idx} className="leaderboard-item" style={{ display: 'flex', alignItems: 'center', padding: '1.5rem', background: idx < 3 ? '#fff9c4' : '#f5f5f5', borderRadius: '12px', marginBottom: '1rem' }}>
-              <span className="rank" style={{ fontSize: '2rem', fontWeight: 'bold', width: '60px', color: '#fbc02d' }}>{idx < 3 ? ['🥇','🥈','🥉'][idx] : `#${idx + 1}`}</span>
-              <span className="nick" style={{ flex: 1, fontSize: '1.5rem', fontWeight: 'bold' }}>{player.nickname}</span>
-              <span className="score" style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#2e7d32' }}>{player.score} 分</span>
+      <div className="home-container" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', background: 'var(--bg-color)', padding: '2rem' }}>
+        <div className="app-tool-window large animate-fade-in">
+          <div className="app-tool-window-header">
+            <div className="app-tool-window-header-title">
+               <button onClick={() => window.location.reload()} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 'bold' }}>
+                  <ArrowLeft size={20} /> 返回控制面板
+               </button>
+               <span style={{ color: 'rgba(255,255,255,0.4)' }}>|</span>
+               <span>🏆 測驗總結算榜單</span>
             </div>
-          ))}
-        </div>
-        <div style={{ textAlign: 'center', marginTop: '3rem' }}>
-          <ParticleButton className="btn primary-btn xl-btn" onClick={() => window.location.reload()}>回到控制面板</ParticleButton>
+            <div className="app-tool-window-controls">
+               <span className="app-tool-window-control-dot minimize" />
+               <span className="app-tool-window-control-dot maximize" />
+               <span className="app-tool-window-control-dot close" onClick={() => window.location.reload()} title="返回" />
+            </div>
+          </div>
+          <div className="app-tool-window-body">
+            <div className="teacher-game-over animate-fade-in" style={{ padding: 0 }}>
+              <h1 className="title" style={{ textAlign: 'center', color: '#00bcd4', fontSize: '3rem', fontWeight: '800' }}>🎉 測驗圓滿結束</h1>
+              <div className="leaderboard final-leaderboard" style={{ marginTop: '2rem' }}>
+                {finalReport.sort((a,b)=>b.score - a.score).map((player, idx) => (
+                  <div key={idx} className="leaderboard-item" style={{ display: 'flex', alignItems: 'center', padding: '1.5rem', background: idx < 3 ? 'rgba(0, 188, 212, 0.15)' : 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', marginBottom: '1rem' }}>
+                    <span className="rank" style={{ fontSize: '2rem', fontWeight: 'bold', width: '60px', color: '#ffbd2e' }}>{idx < 3 ? ['🥇','🥈','🥉'][idx] : `#${idx + 1}`}</span>
+                    <span className="nick" style={{ flex: 1, fontSize: '1.5rem', fontWeight: 'bold', color: '#fff' }}>{player.nickname}</span>
+                    <span className="score" style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#00bcd4' }}>{player.score} 分</span>
+                  </div>
+                ))}
+              </div>
+              <div style={{ textAlign: 'center', marginTop: '3rem' }}>
+                <ParticleButton className="btn primary-btn xl-btn" onClick={() => window.location.reload()} style={{ borderRadius: '50px' }}>回到控制面板</ParticleButton>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     );

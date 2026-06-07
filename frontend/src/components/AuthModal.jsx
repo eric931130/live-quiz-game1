@@ -1,14 +1,22 @@
 import React, { useState } from 'react';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup } from 'firebase/auth';
-import { auth, googleProvider } from '../firebase';
-import { X, Mail, Lock, User, LogIn } from 'lucide-react';
+import { signInWithEmailAndPassword } from 'firebase/auth';
+import { auth } from '../firebase';
+import { X, Mail, Lock, User, LogIn, Calendar, Smile, ShieldAlert, ArrowLeft } from 'lucide-react';
 import ParticleButton from './ParticleButton';
+
+const AVATARS = ['🧑‍🚀', '🦸', '🥷', '🧙', '👽', '🤖', '🦊', '🦉'];
+const FREQUENCIES = ['每天 15 分鐘', '每週 3 次', '每週 1 次'];
 
 export default function AuthModal({ onClose, onSuccess }) {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [nickname, setNickname] = useState(''); // Only used for registration
+  const [avatar, setAvatar] = useState(AVATARS[0]);
+  const [playFrequency, setPlayFrequency] = useState(FREQUENCIES[1]);
+  const [allowPublicDisplayName, setAllowPublicDisplayName] = useState(false);
+  const [consent, setConsent] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -22,89 +30,205 @@ export default function AuthModal({ onClose, onSuccess }) {
         await signInWithEmailAndPassword(auth, email, password);
         onSuccess && onSuccess();
       } else {
-        if (!nickname.trim()) {
-           setError('請輸入綽號');
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!email.trim() || !emailRegex.test(email)) {
+           setError('請輸入有效的電子郵件格式');
            setLoading(false);
            return;
         }
-        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-        // Save nickname to profile or local storage for quick access
-        localStorage.setItem('userNickname', nickname);
+        if (password.length < 6) {
+           setError('密碼長度至少需要 6 碼');
+           setLoading(false);
+           return;
+        }
+        if (password !== confirmPassword) {
+           setError('密碼與確認密碼不符');
+           setLoading(false);
+           return;
+        }
+        if (!consent) {
+           setError('您必須同意隱私條款才能註冊');
+           setLoading(false);
+           return;
+        }
+
+        let registeredUid = null;
+        try {
+          const API_BASE_URL = window.location.hostname === 'localhost' 
+            ? 'http://localhost:3001' 
+            : 'https://live-quiz-game1.onrender.com';
+          const response = await fetch(`${API_BASE_URL}/api/register`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email: email.trim(),
+              password,
+              nickname: nickname.trim(), // Optional display name
+              allowPublicDisplayName,
+              avatarType: avatar,
+              playFrequency
+            })
+          });
+
+          const data = await response.json().catch(() => ({}));
+          if (response.ok && data.success) {
+            registeredUid = data.uid;
+          } else {
+            throw new Error(data.message || data.error || '註冊失敗，請確認資料填寫正確。');
+          }
+        } catch (fetchErr) {
+          throw new Error(fetchErr.message || '無法連線至註冊伺服器，請稍後再試。');
+        }
+
+        if (registeredUid) {
+          await signInWithEmailAndPassword(auth, email, password);
+        } else {
+          throw new Error('註冊失敗，伺服器未回傳有效帳號。');
+        }
+        localStorage.setItem('userNickname', nickname.trim() || '去識別化學員');
+        localStorage.setItem('userAvatar', avatar);
         onSuccess && onSuccess();
       }
     } catch (err) {
       console.error(err);
-      setError(err.message.includes('auth/invalid-credential') ? '帳號或密碼錯誤' : err.message.includes('auth/email-already-in-use') ? '此信箱已註冊' : '發生錯誤，請稍後再試');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleGoogleLogin = async () => {
-    setError('');
-    setLoading(true);
-    try {
-      await signInWithPopup(auth, googleProvider);
-      onSuccess && onSuccess();
-    } catch (err) {
-      console.error(err);
-      setError('Google 登入失敗');
+      let errorMsg = '發生錯誤，請稍後再試';
+      if (err.message.includes('auth/invalid-credential')) {
+        errorMsg = '帳號或密碼錯誤';
+      } else if (err.message.includes('auth/email-already-in-use') || err.message.includes('email-already-in-use')) {
+        errorMsg = '此信箱已註冊，請直接登入或更換信箱';
+      } else {
+        errorMsg = err.message;
+      }
+      setError(errorMsg);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '1rem' }}>
-      <div className="modal-content animate-pop-in" style={{ background: '#fff', borderRadius: '24px', padding: '2rem', width: '100%', maxWidth: '400px', position: 'relative', boxShadow: '0 20px 40px rgba(0,0,0,0.2)' }}>
-        <button onClick={onClose} style={{ position: 'absolute', top: '1.5rem', right: '1.5rem', background: 'transparent', border: 'none', cursor: 'pointer', color: '#666' }}>
-          <X size={24} />
-        </button>
+    <div className="app-tool-window-modal-overlay" onClick={onClose}>
+      <div className="app-tool-window-modal animate-pop-in" style={{ width: '100%', maxWidth: '450px', position: 'relative', overflow: 'hidden' }} onClick={e => e.stopPropagation()}>
+         
+         {/* Tool Window Header */}
+         <div className="app-tool-window-header">
+            <div className="app-tool-window-header-title">
+               <button onClick={onClose} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 'bold' }}>
+                  <ArrowLeft size={20} /> 返回
+               </button>
+               <span style={{ color: 'rgba(255,255,255,0.4)' }}>|</span>
+               <span>{isLogin ? '會員登入' : '註冊新帳號'}</span>
+            </div>
+            <div className="app-tool-window-controls">
+               <span className="app-tool-window-control-dot minimize" />
+               <span className="app-tool-window-control-dot maximize" />
+               <span className="app-tool-window-control-dot close" onClick={onClose} title="關閉" />
+            </div>
+         </div>
 
-        <h2 style={{ textAlign: 'center', color: 'var(--primary-dark)', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
-          <LogIn size={28} /> {isLogin ? '會員登入' : '註冊新帳號'}
-        </h2>
+         {/* Tool Window Body */}
+         <div className="app-tool-window-body" style={{ padding: '2rem' }}>
+            {error && (
+               <div style={{ background: 'rgba(229, 57, 53, 0.15)', color: '#EF5350', border: '1px solid rgba(229, 57, 53, 0.3)', padding: '0.8rem', borderRadius: '8px', marginBottom: '1.5rem', textAlign: 'center', fontSize: '0.9rem', fontWeight: 'bold' }}>
+                  {error}
+               </div>
+            )}
 
-        {error && <div style={{ background: '#FFEBEE', color: '#C62828', padding: '0.8rem', borderRadius: '8px', marginBottom: '1rem', textAlign: 'center', fontSize: '0.9rem', fontWeight: 'bold' }}>{error}</div>}
+            <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              {!isLogin && (
+                 <>
+                    <div className="input-group" style={{ position: 'relative' }}>
+                       <User size={20} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.4)' }} />
+                       <input type="text" placeholder="顯示名稱 (可選)" value={nickname} onChange={(e) => setNickname(e.target.value)} style={{ width: '100%', padding: '1rem 1rem 1rem 3rem', fontSize: '1rem' }} />
+                    </div>
+                   
+                   <div>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', fontWeight: 'bold', fontSize: '0.9rem' }}>
+                         <Smile size={16} /> 選擇你的虛擬分身
+                      </label>
+                      <div style={{ display: 'flex', gap: '0.5rem', overflowX: 'auto', paddingBottom: '0.5rem' }}>
+                         {AVATARS.map(a => (
+                            <button 
+                               key={a} type="button" 
+                               onClick={() => setAvatar(a)}
+                               style={{ fontSize: '1.5rem', padding: '0.5rem', background: avatar === a ? 'rgba(0, 188, 212, 0.25)' : 'rgba(255, 255, 255, 0.05)', border: avatar === a ? '2px solid #00bcd4' : '2px solid transparent', borderRadius: '12px', cursor: 'pointer', transition: 'all 0.2s', color: 'white' }}
+                            >
+                               {a}
+                            </button>
+                         ))}
+                      </div>
+                   </div>
 
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          {!isLogin && (
-             <div className="input-group" style={{ position: 'relative' }}>
-                <User size={20} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: '#999' }} />
-                <input type="text" placeholder="你的專屬綽號" required={!isLogin} value={nickname} onChange={(e) => setNickname(e.target.value)} style={{ width: '100%', padding: '1rem 1rem 1rem 3rem', borderRadius: '12px', border: '1px solid #ddd', fontSize: '1rem' }} />
-             </div>
-          )}
-          <div className="input-group" style={{ position: 'relative' }}>
-             <Mail size={20} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: '#999' }} />
-             <input type="email" placeholder="電子郵件" required value={email} onChange={(e) => setEmail(e.target.value)} style={{ width: '100%', padding: '1rem 1rem 1rem 3rem', borderRadius: '12px', border: '1px solid #ddd', fontSize: '1rem' }} />
-          </div>
-          <div className="input-group" style={{ position: 'relative' }}>
-             <Lock size={20} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: '#999' }} />
-             <input type="password" placeholder="密碼 (至少 6 碼)" required minLength="6" value={password} onChange={(e) => setPassword(e.target.value)} style={{ width: '100%', padding: '1rem 1rem 1rem 3rem', borderRadius: '12px', border: '1px solid #ddd', fontSize: '1rem' }} />
-          </div>
+                   <div>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', fontWeight: 'bold', fontSize: '0.9rem' }}>
+                         <Calendar size={16} /> 你的學習頻率目標
+                      </label>
+                      <select value={playFrequency} onChange={e => setPlayFrequency(e.target.value)} style={{ width: '100%', padding: '1rem', fontSize: '1rem', cursor: 'pointer' }}>
+                         {FREQUENCIES.map(f => (
+                            <option key={f} value={f} style={{ background: '#161c2d', color: '#fff' }}>{f}</option>
+                         ))}
+                      </select>
+                   </div>
+                 </>
+              )}
+               <div className="input-group" style={{ position: 'relative' }}>
+                  <Mail size={20} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.4)' }} />
+                  <input type="email" placeholder="電子郵件" required value={email} onChange={(e) => setEmail(e.target.value)} style={{ width: '100%', padding: '1rem 1rem 1rem 3rem', fontSize: '1rem' }} />
+               </div>
+               <div className="input-group" style={{ position: 'relative' }}>
+                  <Lock size={20} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.4)' }} />
+                  <input type="password" placeholder="密碼 (至少 6 碼)" required minLength="6" value={password} onChange={(e) => setPassword(e.target.value)} style={{ width: '100%', padding: '1rem 1rem 1rem 3rem', fontSize: '1rem' }} />
+               </div>
 
-          <ParticleButton type="submit" className="btn primary-btn btn-block" disabled={loading} style={{ padding: '1rem', borderRadius: '12px', fontSize: '1.1rem', marginTop: '0.5rem' }}>
-            {loading ? '處理中...' : (isLogin ? '登入' : '註冊')}
-          </ParticleButton>
-        </form>
+               {!isLogin && (
+                  <>
+                     <div className="input-group" style={{ position: 'relative' }}>
+                        <Lock size={20} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.4)' }} />
+                        <input type="password" placeholder="確認密碼" required value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} style={{ width: '100%', padding: '1rem 1rem 1rem 3rem', fontSize: '1rem' }} />
+                     </div>
 
-        <div style={{ margin: '1.5rem 0', display: 'flex', alignItems: 'center', textAlign: 'center', color: '#999' }}>
-           <div style={{ flex: 1, borderTop: '1px solid #eee' }}></div>
-           <span style={{ padding: '0 1rem', fontSize: '0.9rem' }}>或使用其他方式</span>
-           <div style={{ flex: 1, borderTop: '1px solid #eee' }}></div>
-        </div>
+                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: '0.5rem 0' }}>
+                        <input 
+                           type="checkbox" 
+                           id="allowPublicDisplayName" 
+                           checked={allowPublicDisplayName} 
+                           onChange={(e) => setAllowPublicDisplayName(e.target.checked)} 
+                           style={{ cursor: 'pointer', width: '18px', height: '18px' }}
+                        />
+                        <label htmlFor="allowPublicDisplayName" style={{ fontSize: '0.9rem', cursor: 'pointer', userSelect: 'none' }}>
+                           在公開排行榜上顯示我的真實綽號 (預設為隱藏並顯示去識別化代碼)
+                        </label>
+                     </div>
 
-        <button onClick={handleGoogleLogin} disabled={loading} style={{ width: '100%', padding: '1rem', borderRadius: '12px', border: '1px solid #ddd', background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', fontSize: '1rem', fontWeight: 'bold', color: '#555', transition: 'all 0.3s' }}>
-           <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" style={{ width: '20px' }} />
-           Google 快速登入
-        </button>
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', padding: '0.8rem', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', marginTop: '0.5rem' }}>
+                         <input 
+                            type="checkbox" 
+                            id="privacyConsent" 
+                            checked={consent} 
+                            onChange={(e) => setConsent(e.target.checked)} 
+                            style={{ cursor: 'pointer', marginTop: '0.2rem', width: '18px', height: '18px' }}
+                         />
+                         <label htmlFor="privacyConsent" style={{ fontSize: '0.85rem', color: '#94a3b8', cursor: 'pointer', userSelect: 'none', lineHeight: '1.4' }}>
+                            <span style={{ fontWeight: 'bold', color: '#cbd5e1', display: 'flex', alignItems: 'center', gap: '0.25rem', marginBottom: '0.2rem' }}>
+                               <ShieldAlert size={14} style={{ color: '#00bcd4' }} /> 隱私告知同意書 (必填)
+                            </span>
+                            我了解公開排行榜會使用去識別化學員代碼作為身份顯示。
+                         </label>
+                      </div>
+                  </>
+               )}
 
-        <div style={{ textAlign: 'center', marginTop: '1.5rem', fontSize: '0.95rem' }}>
-           <span style={{ color: '#666' }}>{isLogin ? '還沒有帳號嗎？' : '已經有帳號了？'}</span>
-           <button onClick={() => { setIsLogin(!isLogin); setError(''); }} style={{ background: 'transparent', border: 'none', color: 'var(--primary-dark)', fontWeight: 'bold', cursor: 'pointer', marginLeft: '0.5rem' }}>
-              {isLogin ? '立即註冊' : '返回登入'}
-           </button>
-        </div>
+               <ParticleButton type="submit" className="btn primary-btn btn-block" disabled={loading || (!isLogin && !consent)} style={{ padding: '1rem', borderRadius: '12px', fontSize: '1.1rem', marginTop: '0.5rem' }}>
+                 {loading ? '處理中...' : (isLogin ? '登入' : '註冊')}
+               </ParticleButton>
+            </form>
+
+            <div style={{ textAlign: 'center', marginTop: '2rem', fontSize: '0.95rem' }}>
+               <span style={{ color: '#cbd5e1' }}>{isLogin ? '還沒有帳號嗎？' : '已經有帳號了？'}</span>
+               <button onClick={() => { setIsLogin(!isLogin); setError(''); }} style={{ background: 'transparent', border: 'none', color: '#00bcd4', fontWeight: 'bold', cursor: 'pointer', marginLeft: '0.5rem' }}>
+                  {isLogin ? '立即註冊' : '返回登入'}
+               </button>
+            </div>
+         </div>
       </div>
     </div>
   );

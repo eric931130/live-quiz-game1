@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+/* eslint-disable react-hooks/preserve-manual-memoization */
+import React, { useState, useEffect, useCallback } from 'react';
 import { io } from 'socket.io-client';
 import { collection, query, where, getDocs, addDoc } from 'firebase/firestore';
 import { Play, ArrowLeft, CheckCircle2, XCircle, Flame, Trophy, ListChecks, Check, X } from 'lucide-react';
-import { db, auth } from '../firebase';
-import { signInAnonymously, setPersistence, inMemoryPersistence, updateProfile } from 'firebase/auth';
+import { db } from '../firebase';
 import ParticleButton from './ParticleButton';
 import PeerLearningHub from './PeerLearningHub';
 
@@ -24,6 +24,7 @@ export default function StudentView({ onGoBack, currentUser, initialCode }) {
   const [score, setScore] = useState(0);
   const [streak, setStreak] = useState(0);
   const [finalReport, setFinalReport] = useState(null);
+  const [showTransformation, setShowTransformation] = useState(false);
 
   // Assignment Mode State
   const [isAssignmentMode, setIsAssignmentMode] = useState(false);
@@ -51,8 +52,8 @@ export default function StudentView({ onGoBack, currentUser, initialCode }) {
      if (currentUser && currentUser.isAnonymous) {
         try {
            await currentUser.delete();
-        } catch (err) {
-           console.warn('匿名帳號刪除失敗', err);
+} catch {
+           // ignore
         }
      }
      if (onGoBack) onGoBack();
@@ -60,12 +61,17 @@ export default function StudentView({ onGoBack, currentUser, initialCode }) {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get('code')) {
-      setRoomCode(params.get('code'));
+    const code = params.get('code');
+    if (code) {
+      setTimeout(() => {
+        setRoomCode(code);
+      }, 0);
     }
 
     const newSocket = io(SOCKET_URL);
-    setSocket(newSocket);
+    setTimeout(() => {
+      setSocket(newSocket);
+    }, 0);
 
     newSocket.on('joined_room', () => {
       setStep('waiting');
@@ -106,6 +112,10 @@ export default function StudentView({ onGoBack, currentUser, initialCode }) {
     newSocket.on('game_over', (data) => {
       const myReport = data.players.find(p => p.nickname === nicknameRef.current);
       setFinalReport(myReport);
+      if (myReport && myReport.score >= 800) {
+         setShowTransformation(true);
+         setTimeout(() => setShowTransformation(false), 10000); // 10 seconds
+      }
       setStep('game_over');
     });
 
@@ -121,6 +131,21 @@ export default function StudentView({ onGoBack, currentUser, initialCode }) {
   const joinRoom = async (e) => {
     e.preventDefault();
     if (!roomCode) return;
+// Anti-addiction Check
+    const todayStr = new Date().toLocaleDateString();
+    let dailyPlayData = JSON.parse(localStorage.getItem('dailyPlayData') || '{"date": "", "count": 0}');
+    if (dailyPlayData.date !== todayStr) {
+       dailyPlayData = { date: todayStr, count: 0 };
+    }
+    if (dailyPlayData.count >= 5) {
+       const proceed = window.confirm('【防沉迷提醒】
+您今天已經進行了 5 次測驗，為了保護您的視力與維持學習效率，建議您先休息 10-15 分鐘再回來！
+
+確定要繼續參加測驗嗎？');
+       if (!proceed) return;
+    }
+    dailyPlayData.count += 1;
+    localStorage.setItem('dailyPlayData', JSON.stringify(dailyPlayData));
     
     // Check Firestore first for Assignments
     try {
@@ -168,28 +193,13 @@ export default function StudentView({ onGoBack, currentUser, initialCode }) {
     }
 
     let currentAuthUser = currentUser;
-    let finalNickname = nickname;
-
-    if (!currentAuthUser) {
-        if (!nickname.trim()) {
-            alert("請輸入訪客綽號！");
-            return;
-        }
-        try {
-            await setPersistence(auth, inMemoryPersistence);
-            const userCred = await signInAnonymously(auth);
-            currentAuthUser = userCred.user;
-            await updateProfile(currentAuthUser, { displayName: nickname });
-            localStorage.setItem('userNickname', nickname);
-        } catch (error) {
-            console.error("Anonymous auth failed", error);
-            alert("匿名登入失敗，請重試");
-            return;
-        }
-    } else {
-        finalNickname = currentAuthUser.displayName || localStorage.getItem('userNickname') || (currentAuthUser.email ? currentAuthUser.email.split('@')[0] : nickname);
+if (!currentAuthUser) {
+        alert("請先登入或註冊會員以加入挑戰！");
+        exitStudentView();
+        return;
     }
-    
+
+    let finalNickname = currentAuthUser.displayName || localStorage.getItem('userNickname') || (currentAuthUser.email ? currentAuthUser.email.split('@')[0] : '探索者');
     if (!finalNickname) finalNickname = "匿名用戶";
     nicknameRef.current = finalNickname;
     setNickname(finalNickname);
@@ -207,53 +217,75 @@ export default function StudentView({ onGoBack, currentUser, initialCode }) {
   };
 
   // --- Assignment Specific Logic ---
-  const startAssignment = () => {
-     let qs = [...assignment.questions];
-     if (assignment.mode === 'exam') {
-        qs = qs.sort(() => 0.5 - Math.random());
-     }
-     setAssignmentQuestions(qs);
-     setCurrentAQuestionIndex(0);
-     setScore(0);
-     setStreak(0);
-     aAnswersRef.current = [];
-     loadAssignmentQuestion(qs, 0);
-  };
-
-  const loadAssignmentQuestion = (qs, idx) => {
-     if (idx >= qs.length) {
-        finishAssignment(qs);
-        return;
-     }
-     const q = qs[idx];
-     // Map format to currentQuestion expected format
-     setCurrentQuestion({
-        question: q.Question || q.prompt,
-        options: {
-          A: q.OptA || q.options?.A,
-          B: q.OptB || q.options?.B,
-          C: q.OptC || q.options?.C,
-          D: q.OptD || q.options?.D
-        }
-     });
-     setATimeLeft(60);
-     setAQuestionStartTime(Date.now());
-     setStep('playing'); // We reuse playing step
-     
-     if (aTimerRef.current) clearInterval(aTimerRef.current);
-     aTimerRef.current = setInterval(() => {
-        setATimeLeft(prev => {
-           if (prev <= 1) {
-              clearInterval(aTimerRef.current);
-              handleAssignmentAnswer(null, qs, idx);
-              return 0;
-           }
-           return prev - 1;
+  const syncAssignmentAnswersToBackend = useCallback(async () => {
+     if (!assignment?.questionBankId || !aAnswersRef.current.length) return;
+     try {
+        const token = currentUser?.getIdToken ? await currentUser.getIdToken() : null;
+        await fetch(`${SOCKET_URL}/api/student-answers/bulk`, {
+           method: 'POST',
+           headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { Authorization: `Bearer ${token}` } : {})
+           },
+           body: JSON.stringify({
+              studentId,
+              studentName: nickname,
+              teacherUserId: assignment.teacherUserId || '',
+              classId: assignment.id,
+              activityId: assignment.activityId || '',
+              questionBankId: assignment.questionBankId,
+              answers: aAnswersRef.current.map((answer) => ({
+                 questionId: answer.questionId,
+                 questionBankId: answer.questionBankId || assignment.questionBankId,
+                 selectedAnswer: answer.selected,
+                 correctAnswer: answer.correctAnswer,
+                 isCorrect: answer.correct,
+                 timeSpent: answer.timeTaken,
+                 score: answer.score,
+                 question: {
+                    id: answer.questionId,
+                    questionBankId: answer.questionBankId || assignment.questionBankId,
+                    prompt: answer.prompt,
+                    Question: answer.prompt,
+                    answer: answer.correctAnswer,
+                    Answer: answer.correctAnswer,
+                    explanation: answer.explanation,
+                    knowledgePoint: answer.knowledgePoint,
+                    difficulty: answer.difficulty,
+                    options: answer.options
+                 }
+              }))
+           })
         });
-     }, 1000);
-  };
+     } catch (error) {
+        console.warn('同步作答分析失敗', error);
+     }
+  }, [assignment, studentId, nickname, currentUser]);
 
-  const handleAssignmentAnswer = (selectedOption, qs, idx) => {
+  const finishAssignment = useCallback(async () => {
+     try {
+        await addDoc(collection(db, "AssignmentResults"), {
+           assignmentId: assignment.id,
+           studentId,
+           nickname,
+           score: scoreRef.current,
+           attempts: assignmentAttemptsCount + 1,
+           answers: aAnswersRef.current,
+           completedAt: new Date().toISOString()
+        });
+        await syncAssignmentAnswersToBackend();
+        setFinalReport({ score: scoreRef.current, answers: aAnswersRef.current });
+        if (scoreRef.current >= 800) {
+           setShowTransformation(true);
+           setTimeout(() => setShowTransformation(false), 10000); // 10 seconds
+        }
+        setStep('game_over');
+     } catch (e) {
+        alert("儲存成績失敗：" + e.message);
+     }
+  }, [assignment, studentId, nickname, assignmentAttemptsCount, syncAssignmentAnswersToBackend]);
+
+  const handleAssignmentAnswer = useCallback((selectedOption, qs, idx) => {
      if (aTimerRef.current) clearInterval(aTimerRef.current);
      
      const timeTaken = (Date.now() - aQuestionStartTime) / 1000;
@@ -302,77 +334,54 @@ export default function StudentView({ onGoBack, currentUser, initialCode }) {
      
      setFeedback({ isCorrect, correctOption, points, currentScore, streak: newStreak });
      setStep('assignment_feedback');
-  };
+  }, [aQuestionStartTime, streak]);
 
-  const nextAssignmentQuestion = () => {
+  const loadAssignmentQuestion = useCallback((qs, idx) => {
+     if (idx >= qs.length) {
+        finishAssignment();
+        return;
+     }
+     const q = qs[idx];
+     // Map format to currentQuestion expected format
+     setCurrentQuestion({
+        question: q.Question,
+        options: { A: q.OptA, B: q.OptB, C: q.OptC, D: q.OptD }
+     });
+     setATimeLeft(60);
+     setAQuestionStartTime(Date.now());
+     setStep('playing'); // We reuse playing step
+     
+     if (aTimerRef.current) clearInterval(aTimerRef.current);
+     aTimerRef.current = setInterval(() => {
+        setATimeLeft(prev => {
+           if (prev <= 1) {
+              clearInterval(aTimerRef.current);
+              handleAssignmentAnswer(null, qs, idx);
+              return 0;
+           }
+           return prev - 1;
+        });
+     }, 1000);
+  }, [finishAssignment, handleAssignmentAnswer]);
+
+  const startAssignment = useCallback(() => {
+     let qs = [...assignment.questions];
+     if (assignment.mode === 'exam') {
+        qs = qs.sort(() => 0.5 - Math.random());
+     }
+     setAssignmentQuestions(qs);
+     setCurrentAQuestionIndex(0);
+     setScore(0);
+     setStreak(0);
+     aAnswersRef.current = [];
+     loadAssignmentQuestion(qs, 0);
+  }, [assignment, loadAssignmentQuestion]);
+
+  const nextAssignmentQuestion = useCallback(() => {
      const nextIdx = currentAQuestionIndex + 1;
      setCurrentAQuestionIndex(nextIdx);
      loadAssignmentQuestion(assignmentQuestions, nextIdx);
-  };
-
-  const syncAssignmentAnswersToBackend = async () => {
-     if (!assignment?.questionBankId || !aAnswersRef.current.length) return;
-     try {
-        const token = currentUser?.getIdToken ? await currentUser.getIdToken() : null;
-        await fetch(`${API_BASE}/api/student-answers/bulk`, {
-           method: 'POST',
-           headers: {
-              'Content-Type': 'application/json',
-              ...(token ? { Authorization: `Bearer ${token}` } : {})
-           },
-           body: JSON.stringify({
-              studentId,
-              studentName: nickname,
-              teacherUserId: assignment.teacherUserId || '',
-              classId: assignment.id,
-              activityId: assignment.activityId || '',
-              questionBankId: assignment.questionBankId,
-              answers: aAnswersRef.current.map((answer) => ({
-                 questionId: answer.questionId,
-                 questionBankId: answer.questionBankId || assignment.questionBankId,
-                 selectedAnswer: answer.selected,
-                 correctAnswer: answer.correctAnswer,
-                 isCorrect: answer.correct,
-                 timeSpent: answer.timeTaken,
-                 score: answer.score,
-                 question: {
-                    id: answer.questionId,
-                    questionBankId: answer.questionBankId || assignment.questionBankId,
-                    prompt: answer.prompt,
-                    Question: answer.prompt,
-                    answer: answer.correctAnswer,
-                    Answer: answer.correctAnswer,
-                    explanation: answer.explanation,
-                    knowledgePoint: answer.knowledgePoint,
-                    difficulty: answer.difficulty,
-                    options: answer.options
-                 }
-              }))
-           })
-        });
-     } catch (error) {
-        console.warn('同步作答分析失敗', error);
-     }
-  };
-
-  const finishAssignment = async () => {
-     try {
-        await addDoc(collection(db, "AssignmentResults"), {
-           assignmentId: assignment.id,
-           studentId,
-           nickname,
-           score: scoreRef.current,
-           attempts: assignmentAttemptsCount + 1,
-           answers: aAnswersRef.current,
-           completedAt: new Date().toISOString()
-        });
-        await syncAssignmentAnswersToBackend();
-        setFinalReport({ score: scoreRef.current, answers: aAnswersRef.current });
-        setStep('game_over');
-     } catch (e) {
-        alert("儲存成績失敗：" + e.message);
-     }
-  };
+  }, [currentAQuestionIndex, loadAssignmentQuestion, assignmentQuestions]);
 
   const buildPeerQuestionContext = () => {
      const assignmentQuestion = isAssignmentMode ? assignmentQuestions[currentAQuestionIndex] : null;
@@ -408,78 +417,124 @@ export default function StudentView({ onGoBack, currentUser, initialCode }) {
 
   if (step === 'join') {
     return (
-      <div className="card student-join animate-fade-in glass-panel" style={{ padding: '3rem', borderTop: '5px solid var(--primary-dark)', borderRadius: '24px' }}>
-        <h2 className="title" style={{ color: 'var(--primary-dark)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
-          <Play size={28} /> 加入師說新宇課堂
-        </h2>
-        <form onSubmit={joinRoom} className="join-form">
-          <input 
-            type="text" 
-            placeholder="請輸入即時課堂或單人任務代碼" 
-            value={roomCode} 
-            onChange={e => setRoomCode(e.target.value)} 
-            required 
-            maxLength={8}
-            className="input-field"
-            style={{ padding: '1rem', fontSize: '1.2rem', textAlign: 'center' }}
-          />
-          {/* Only ask for nickname if not logged in (Guest) */}
-          {!currentUser && (
-            <input 
-              type="text" 
-              placeholder="請輸入你的訪客綽號" 
-              value={nickname} 
-              onChange={e => setNickname(e.target.value)} 
-              required 
-              maxLength={15}
-              className="input-field"
-              style={{ padding: '1rem', fontSize: '1.2rem', textAlign: 'center' }}
-            />
-          )}
-          <ParticleButton type="submit" className="btn primary-btn btn-block mt-4 xl-btn" style={{ borderRadius: '50px' }}>進入房間</ParticleButton>
-        </form>
-        {currentUser && (
-          <p style={{ textAlign: 'center', marginTop: '1rem', color: '#666' }}>
-             將以 <strong style={{ color: 'var(--primary-dark)' }}>{localStorage.getItem('userNickname') || currentUser.displayName || (currentUser.email ? currentUser.email.split('@')[0] : nickname)}</strong> 的身分作答
-          </p>
-        )}
-        <ParticleButton className="btn back-btn mt-4 btn-block" onClick={exitStudentView} style={{ borderRadius: '50px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
-           <ArrowLeft size={20} /> 返回首頁
-        </ParticleButton>
+      <div className="home-container" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', background: 'var(--bg-color)', padding: '2rem' }}>
+        <div className="app-tool-window animate-fade-in">
+          <div className="app-tool-window-header">
+            <div className="app-tool-window-header-title">
+               <button onClick={exitStudentView} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 'bold' }}>
+                  <ArrowLeft size={20} /> 返回首頁
+               </button>
+               <span style={{ color: 'rgba(255,255,255,0.4)' }}>|</span>
+               <span>🎮 參加測驗挑戰</span>
+            </div>
+            <div className="app-tool-window-controls">
+               <span className="app-tool-window-control-dot minimize" />
+               <span className="app-tool-window-control-dot maximize" />
+               <span className="app-tool-window-control-dot close" onClick={exitStudentView} title="返回首頁" />
+            </div>
+          </div>
+          <div className="app-tool-window-body">
+            <h2 className="title" style={{ color: '#00bcd4', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', marginBottom: '2rem' }}>
+              <Play size={28} /> 加入測驗房間！
+            </h2>
+            <form onSubmit={joinRoom} className="join-form">
+              <input 
+                type="text" 
+                placeholder="請輸入即時對戰或單人任務代碼" 
+                value={roomCode} 
+                onChange={e => setRoomCode(e.target.value)} 
+                required 
+                maxLength={8}
+                className="input-field"
+                style={{ padding: '1rem', fontSize: '1.2rem', textAlign: 'center' }}
+              />
+              <ParticleButton type="submit" className="btn primary-btn btn-block mt-4 xl-btn" style={{ borderRadius: '50px' }}>進入房間</ParticleButton>
+            </form>
+            {currentUser && (
+              <p style={{ textAlign: 'center', marginTop: '1.5rem', color: '#cbd5e1' }}>
+                 將以 <strong style={{ color: '#00bcd4' }}>{localStorage.getItem('userNickname') || currentUser.displayName || (currentUser.email ? currentUser.email.split('@')[0] : nickname)}</strong> 的身分作答
+              </p>
+            )}
+          </div>
+        </div>
       </div>
     );
   }
 
   if (step === 'waiting') {
     return (
-      <div className="student-waiting animate-fade-in text-center" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--bg-color)' }}>
-        <h2 className="title" style={{ color: 'var(--primary-dark)', fontSize: '2.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <CheckCircle2 size={36} /> 成功進入房間！
-        </h2>
-        <p style={{ fontSize: '1.2rem', color: 'var(--text-muted)' }}>請確認在老師畫面上看到你的綽號</p>
-        <div className="spinner mt-4" style={{ borderColor: 'rgba(46, 125, 50, 0.2)', borderTopColor: '#2E7D32' }}></div>
-        <p className="mt-4" style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--primary)' }}>等待老師開始作答...</p>
+      <div className="home-container" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', background: 'var(--bg-color)', padding: '2rem' }}>
+        <div className="app-tool-window animate-fade-in">
+          <div className="app-tool-window-header">
+            <div className="app-tool-window-header-title">
+               <button onClick={() => {
+                  if (socket) {
+                     socket.emit('leave_room', { roomId: roomCode, nickname });
+                  }
+                  setStep('join');
+               }} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 'bold' }}>
+                  <ArrowLeft size={20} /> 離開房間
+               </button>
+               <span style={{ color: 'rgba(255,255,255,0.4)' }}>|</span>
+               <span>⏳ 等待作答開始 (房間: {roomCode})</span>
+            </div>
+            <div className="app-tool-window-controls">
+               <span className="app-tool-window-control-dot minimize" />
+               <span className="app-tool-window-control-dot maximize" />
+               <span className="app-tool-window-control-dot close" onClick={() => {
+                  if (socket) {
+                     socket.emit('leave_room', { roomId: roomCode, nickname });
+                  }
+                  setStep('join');
+               }} title="離開" />
+            </div>
+          </div>
+          <div className="app-tool-window-body text-center">
+            <h2 className="title" style={{ color: '#00bcd4', fontSize: '2.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+               <CheckCircle2 size={36} /> 成功進入房間！
+            </h2>
+            <p style={{ fontSize: '1.2rem', color: '#94a3b8' }}>請確認在大螢幕上看到你的綽號</p>
+            <div className="spinner mt-4" style={{ borderColor: 'rgba(0, 188, 212, 0.2)', borderTopColor: '#00bcd4', margin: '2rem auto' }}></div>
+            <p className="mt-4" style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#00bcd4' }}>等待小老師開始作答...</p>
+          </div>
+        </div>
       </div>
     );
   }
 
   if (step === 'assignment_intro') {
      return (
-      <div className="student-waiting animate-fade-in text-center" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: 'var(--bg-color)', padding: '2rem' }}>
-        <div style={{ background: '#fff', padding: '3rem', borderRadius: '24px', boxShadow: '0 10px 30px rgba(0,0,0,0.1)', maxWidth: '600px', width: '100%' }}>
-           <h2 style={{ color: 'var(--primary-dark)', fontSize: '2.2rem', marginBottom: '1rem' }}>{assignment.title}</h2>
-           <div style={{ background: '#f5f5f5', padding: '1.5rem', borderRadius: '12px', marginBottom: '2rem', textAlign: 'left', fontSize: '1.2rem' }}>
-              <p><strong>作答模式：</strong> {assignment.mode === 'exam' ? '考核 (題目隨機)' : '練習 (可重複挑戰)'}</p>
-              <p><strong>截止時間：</strong> {new Date(assignment.deadline).toLocaleString()}</p>
-              <p><strong>作答限制：</strong> 第 {assignmentAttemptsCount + 1} 次 / 共 {assignment.maxAttempts} 次</p>
-              <p><strong>總題數：</strong> {assignment.questions.length} 題</p>
+       <div className="home-container" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', background: 'var(--bg-color)', padding: '2rem' }}>
+         <div className="app-tool-window animate-fade-in">
+           <div className="app-tool-window-header">
+             <div className="app-tool-window-header-title">
+                <button onClick={() => setStep('join')} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 'bold' }}>
+                   <ArrowLeft size={20} /> 返回
+                </button>
+                <span style={{ color: 'rgba(255,255,255,0.4)' }}>|</span>
+                <span>📝 單人任務詳情</span>
+             </div>
+             <div className="app-tool-window-controls">
+                <span className="app-tool-window-control-dot minimize" />
+                <span className="app-tool-window-control-dot maximize" />
+                <span className="app-tool-window-control-dot close" onClick={() => setStep('join')} title="關閉" />
+             </div>
            </div>
-           <p style={{ color: 'var(--text-muted)', marginBottom: '2rem' }}>計時挑戰：單題基本 100 分，答題越快分數越高，連續答對還有額外加成！</p>
-           <ParticleButton className="btn primary-btn xl-btn btn-block" onClick={startAssignment} style={{ borderRadius: '50px' }}>
-              準備好了，開始作答！
-           </ParticleButton>
-        </div>
-      </div>
+           <div className="app-tool-window-body text-center">
+              <h2 style={{ color: '#00bcd4', fontSize: '2.2rem', marginBottom: '1rem' }}>{assignment.title}</h2>
+              <div style={{ background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255,255,255,0.08)', padding: '1.5rem', borderRadius: '12px', marginBottom: '2rem', textAlign: 'left', fontSize: '1.2rem' }}>
+                 <p><strong>作答模式：</strong> {assignment.mode === 'exam' ? '考核 (題目隨機)' : '練習 (可重複挑戰)'}</p>
+                 <p><strong>截止時間：</strong> {new Date(assignment.deadline).toLocaleString()}</p>
+                 <p><strong>作答限制：</strong> 第 {assignmentAttemptsCount + 1} 次 / 共 {assignment.maxAttempts} 次</p>
+                 <p><strong>總題數：</strong> {assignment.questions.length} 題</p>
+              </div>
+              <p style={{ color: '#94a3b8', marginBottom: '2rem' }}>計時挑戰：單題基本 100 分，答題越快分數越高，連續答對還有額外加成！</p>
+              <ParticleButton className="btn primary-btn xl-btn btn-block" onClick={startAssignment} style={{ borderRadius: '50px' }}>
+                 準備好了，開始作答！
+              </ParticleButton>
+           </div>
+         </div>
+       </div>
      );
   }
 
@@ -495,79 +550,102 @@ export default function StudentView({ onGoBack, currentUser, initialCode }) {
     </div>
   );
 
-  if (step === 'playing' && currentQuestion) {
-    const isTrueFalse = !currentQuestion.options.C && !currentQuestion.options.D;
+  if (step === 'playing' || step === 'feedback' || step === 'assignment_feedback') {
+    const isTrueFalse = currentQuestion && !currentQuestion.options.C && !currentQuestion.options.D;
     const availableOptions = isTrueFalse ? ['A', 'B'] : ['A', 'B', 'C', 'D'];
+    
+    const quitQuiz = () => {
+      if (window.confirm("確定要中途退出本場測驗嗎？您的成績將不會被儲存。")) {
+        if (aTimerRef.current) clearInterval(aTimerRef.current);
+        if (socket) {
+          socket.emit('leave_room', { roomId: roomCode, nickname });
+        }
+        exitStudentView();
+      }
+    };
 
     return (
-      <div className="student-playing">
-        {renderTopBar()}
-        <h2 className="mobile-question" style={{ color: 'var(--primary-dark)', fontSize: '2rem' }}>{currentQuestion.question}</h2>
-        <div className="student-options-grid" style={{
-           display: 'grid',
-           gridTemplateColumns: isTrueFalse ? '1fr' : '1fr 1fr',
-           gridTemplateRows: isTrueFalse ? '1fr 1fr' : '1fr 1fr',
-           gap: '1rem',
-           padding: '1rem'
-        }}>
-           {availableOptions.map((opt) => (
-             <ParticleButton 
-               key={opt} 
-               className={`student-btn-opt opt-${opt.toLowerCase()}`}
-               onClick={() => selectOption(opt)}
-               style={{ borderRadius: '24px', boxShadow: '0 8px 15px rgba(0,0,0,0.1)' }}
-             >
-               <span className="opt-label" style={{ background: 'rgba(255,255,255,0.4)', color: 'var(--text-main)' }}>{opt}</span>
-               <span className="opt-text" style={{ fontSize: isTrueFalse ? '2rem' : '1.2rem' }}>{currentQuestion.options[opt]}</span>
-             </ParticleButton>
-           ))}
-        </div>
-      </div>
-    );
-  }
-
-  if (step === 'feedback' && feedback) {
-    const isCorrect = feedback.isCorrect;
-    return (
-      <div className={`student-feedback flex-center animate-pop-in`} style={{ backgroundColor: isCorrect ? '#4CAF50' : '#E53935' }}>
-        {renderTopBar()}
-        <div className="feedback-content" style={{ background: 'rgba(255,255,255,0.95)', color: 'var(--text-main)', padding: '3rem', borderRadius: '24px', boxShadow: '0 10px 30px rgba(0,0,0,0.2)' }}>
-          <h1 style={{ color: isCorrect ? '#2E7D32' : '#C62828', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '1rem' }}>
-            {isCorrect ? <CheckCircle2 size={48} /> : <XCircle size={48} />} 
-            {isCorrect ? '答對了！' : '答錯囉...'}
-          </h1>
-          <div className="points-display" style={{ background: isCorrect ? '#E8F5E9' : '#FFEBEE', color: isCorrect ? '#2E7D32' : '#C62828', padding: '1rem 3rem' }}>
-             {isCorrect ? `+${feedback.points}` : '0'} 分
+      <div className="home-container" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', background: 'var(--bg-color)', padding: '2rem' }}>
+        <div className="app-tool-window large animate-fade-in">
+          <div className="app-tool-window-header">
+            <div className="app-tool-window-header-title">
+               <button onClick={quitQuiz} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 'bold' }}>
+                  <ArrowLeft size={20} /> 退出
+               </button>
+               <span style={{ color: 'rgba(255,255,255,0.4)' }}>|</span>
+               <span>{isAssignmentMode ? `📝 單人任務: ${assignment?.title}` : `👥 即時對戰房間: ${roomCode}`}</span>
+            </div>
+            <div className="app-tool-window-controls">
+               <span className="app-tool-window-control-dot minimize" />
+               <span className="app-tool-window-control-dot maximize" />
+               <span className="app-tool-window-control-dot close" onClick={quitQuiz} title="退出" />
+            </div>
           </div>
-          {!isCorrect && (
-             <h3 className="mt-4" style={{ color: '#C62828' }}>正確答案是： {feedback.correctOption}</h3>
-          )}
-          <p className="mt-4 text-small" style={{ color: '#666', fontWeight: 'bold' }}>請專心等待下一題 ⏳</p>
-        </div>
-        {renderPeerLearningPanel(roomCode)}
-      </div>
-    );
-  }
+          <div className="app-tool-window-body" style={{ padding: 0 }}>
+            {renderTopBar()}
+            
+            {step === 'playing' && currentQuestion && (
+              <div className="student-playing" style={{ padding: '2rem' }}>
+                <h2 className="mobile-question" style={{ color: '#00bcd4', fontSize: '2rem', textAlign: 'center', margin: '2rem 0' }}>{currentQuestion.question}</h2>
+                <div className="student-options-grid" style={{
+                   display: 'grid',
+                   gridTemplateColumns: isTrueFalse ? '1fr' : '1fr 1fr',
+                   gap: '1rem',
+                   padding: '1rem'
+                 }}>
+                   {availableOptions.map((opt) => (
+                      <ParticleButton 
+                        key={opt} 
+                        className={`student-btn-opt opt-${opt.toLowerCase()}`}
+                        onClick={() => selectOption(opt)}
+                        style={{ borderRadius: '16px', padding: '1.5rem' }}
+                      >
+                        <span className="opt-label" style={{ background: 'rgba(255,255,255,0.4)', color: 'var(--text-main)' }}>{opt}</span>
+                        <span className="opt-text" style={{ fontSize: '1.2rem' }}>{currentQuestion.options[opt]}</span>
+                      </ParticleButton>
+                   ))}
+                </div>
+              </div>
+            )}
 
-  if (step === 'assignment_feedback' && feedback) {
-    const isCorrect = feedback.isCorrect;
-    return (
-      <div className={`student-feedback flex-center animate-pop-in`} style={{ backgroundColor: isCorrect ? '#4CAF50' : '#E53935' }}>
-        {renderTopBar()}
-        <div className="feedback-content" style={{ background: 'rgba(255,255,255,0.95)', color: 'var(--text-main)', padding: '3rem', borderRadius: '24px', boxShadow: '0 10px 30px rgba(0,0,0,0.2)' }}>
-          <h1 style={{ color: isCorrect ? '#2E7D32' : '#C62828', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '1rem' }}>
-            {isCorrect ? <CheckCircle2 size={48} /> : <XCircle size={48} />} 
-            {isCorrect ? '答對了！' : '答錯囉...'}
-          </h1>
-          <div className="points-display" style={{ background: isCorrect ? '#E8F5E9' : '#FFEBEE', color: isCorrect ? '#2E7D32' : '#C62828', padding: '1rem 3rem' }}>
-             {isCorrect ? `+${feedback.points}` : '0'} 分
+            {step === 'feedback' && feedback && (
+              <div className="student-feedback flex-center animate-pop-in" style={{ backgroundColor: feedback.isCorrect ? '#4CAF50' : '#E53935', minHeight: '350px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
+                <div className="feedback-content" style={{ background: 'rgba(255,255,255,0.95)', color: 'var(--text-main)', padding: '2.5rem', borderRadius: '24px', boxShadow: '0 10px 30px rgba(0,0,0,0.2)', textAlign: 'center', width: '100%', maxWidth: '450px' }}>
+                  <h1 style={{ color: feedback.isCorrect ? '#2E7D32' : '#C62828', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '1rem', fontSize: '2rem' }}>
+                    {feedback.isCorrect ? <CheckCircle2 size={36} /> : <XCircle size={36} />} 
+                    {feedback.isCorrect ? '答對了！' : '答錯囉...'}
+                  </h1>
+                  <div className="points-display" style={{ background: feedback.isCorrect ? '#E8F5E9' : '#FFEBEE', color: feedback.isCorrect ? '#2E7D32' : '#C62828', padding: '0.5rem 2rem', margin: '1rem 0', borderRadius: '8px', fontSize: '1.2rem', fontWeight: 'bold' }}>
+                     {feedback.isCorrect ? `+${feedback.points}` : '0'} 分
+                  </div>
+                  {!feedback.isCorrect && (
+                     <h3 className="mt-4" style={{ color: '#C62828', fontSize: '1.2rem' }}>正確答案是： {feedback.correctOption}</h3>
+                  )}
+                  <p className="mt-4 text-small" style={{ color: '#666', fontWeight: 'bold' }}>請專心等待下一題 ⏳</p>
+                </div>
+              </div>
+            )}
+
+            {step === 'assignment_feedback' && feedback && (
+              <div className="student-feedback flex-center animate-pop-in" style={{ backgroundColor: feedback.isCorrect ? '#4CAF50' : '#E53935', minHeight: '350px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
+                <div className="feedback-content" style={{ background: 'rgba(255,255,255,0.95)', color: 'var(--text-main)', padding: '2.5rem', borderRadius: '24px', boxShadow: '0 10px 30px rgba(0,0,0,0.2)', textAlign: 'center', width: '100%', maxWidth: '450px' }}>
+                  <h1 style={{ color: feedback.isCorrect ? '#2E7D32' : '#C62828', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '1rem', fontSize: '2rem' }}>
+                    {feedback.isCorrect ? <CheckCircle2 size={36} /> : <XCircle size={36} />} 
+                    {feedback.isCorrect ? '答對了！' : '答錯囉...'}
+                  </h1>
+                  <div className="points-display" style={{ background: feedback.isCorrect ? '#E8F5E9' : '#FFEBEE', color: feedback.isCorrect ? '#2E7D32' : '#C62828', padding: '0.5rem 2rem', margin: '1rem 0', borderRadius: '8px', fontSize: '1.2rem', fontWeight: 'bold' }}>
+                     {feedback.isCorrect ? `+${feedback.points}` : '0'} 分
+                  </div>
+                  {!feedback.isCorrect && (
+                     <h3 className="mt-4" style={{ color: '#C62828', fontSize: '1.2rem' }}>正確答案是： {feedback.correctOption}</h3>
+                  )}
+                  <ParticleButton className="btn mt-4 primary-btn btn-block" onClick={nextAssignmentQuestion}>
+                     {currentAQuestionIndex + 1 === assignmentQuestions.length ? '查看成績結算' : '下一題'}
+                  </ParticleButton>
+                </div>
+              </div>
+            )}
           </div>
-          {!isCorrect && (
-             <h3 className="mt-4" style={{ color: '#C62828' }}>正確答案是： {feedback.correctOption}</h3>
-          )}
-          <ParticleButton className="btn mt-4 primary-btn" onClick={nextAssignmentQuestion}>
-             {currentAQuestionIndex + 1 === assignmentQuestions.length ? '查看成績結算' : '下一題'}
-          </ParticleButton>
         </div>
         {renderPeerLearningPanel(assignment?.id || roomCode)}
       </div>
@@ -577,47 +655,85 @@ export default function StudentView({ onGoBack, currentUser, initialCode }) {
   if (step === 'game_over' && finalReport) {
     const wrongAnswers = (finalReport.answers || []).filter((ans) => !ans.correct && ans.prompt);
 
-    return (
-      <div className="student-game-over animate-fade-in" style={{ background: 'var(--bg-color)' }}>
-        <h1 className="title text-center mt-2" style={{ color: '#2E7D32', fontSize: '2.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
-          <Trophy size={40} /> 最終結算單
-        </h1>
-        <div className="score-summary" style={{ background: 'linear-gradient(135deg, #4CAF50, #2E7D32)' }}>
-          <h2 style={{ fontSize: '2rem' }}>總成績： {finalReport.score} 分</h2>
-        </div>
-        <div className="history-list" style={{ boxShadow: '0 4px 15px rgba(0,0,0,0.05)' }}>
-          <h3 style={{ color: 'var(--primary-dark)', fontSize: '1.4rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <ListChecks size={24} /> 你的作答記錄
-          </h3>
-          {finalReport.answers.map((ans, i) => (
-             <div key={i} className={`history-item ${ans.correct ? 'item-correct' : 'item-wrong'}`} style={{ borderLeftWidth: '8px', alignItems: 'center' }}>
-               <div>第 {ans.qIndex + 1} 題：你選了 {ans.selected}</div>
-               <div style={{ color: ans.correct ? '#2E7D32' : '#E53935', display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
-                  {ans.correct ? <><Check size={16}/>答對</> : <><X size={16}/>答錯</>} ({ans.score}分)
-               </div>
-             </div>
-          ))}
-        </div>
-        {wrongAnswers.length > 0 && (
-          <div className="student-wrong-answer-book">
-            <h3><ListChecks size={24} /> 個人錯題本</h3>
-            <p>以下整理你本次需要複習的題目。錯題本會先在本次結算顯示，後續階段可延伸為長期追蹤。</p>
-            {wrongAnswers.map((ans, index) => (
-              <div key={`${ans.questionId || index}-wrong`} className="wrong-answer-card">
-                <strong>第 {ans.qIndex + 1} 題</strong>
-                <p>{ans.prompt}</p>
-                <div>
-                  <span>你的答案：{ans.selected}</span>
-                  <span>正確答案：{ans.correctAnswer}</span>
-                  {ans.knowledgePoint && <span>知識點：{ans.knowledgePoint}</span>}
+    if (showTransformation) {
+       return (
+          <div className="transformation-overlay" style={{
+             position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+             background: 'linear-gradient(135deg, #0d1b2a, #1b263b, #415a77)',
+             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+             zIndex: 10000, color: 'white', overflow: 'hidden'
+          }}>
+             <style>{`
+                @keyframes orbit { 0% { transform: rotate(0deg) translateX(100px) rotate(0deg); } 100% { transform: rotate(360deg) translateX(100px) rotate(-360deg); } }
+                @keyframes pulse-glow { 0%, 100% { box-shadow: 0 0 20px #FFD54F, 0 0 40px #FFD54F; } 50% { box-shadow: 0 0 50px #FFD54F, 0 0 80px #FFD54F; } }
+                @keyframes float-up { 0% { transform: translateY(50px); opacity: 0; } 100% { transform: translateY(0); opacity: 1; } }
+             `}</style>
+             <div style={{ position: 'absolute', width: '200vw', height: '200vw', background: 'radial-gradient(circle, rgba(0,255,255,0.1) 0%, transparent 60%)', animation: 'orbit 20s linear infinite' }}></div>
+             
+             <div style={{ zIndex: 2, textAlign: 'center', animation: 'float-up 2s ease-out' }}>
+                <div style={{ 
+                   fontSize: '6rem', margin: '0 auto 2rem', width: '150px', height: '150px', 
+                   display: 'flex', alignItems: 'center', justifyContent: 'center', 
+                   background: 'linear-gradient(45deg, #FFD54F, #FF8F00)', 
+                   borderRadius: '50%', animation: 'pulse-glow 2s infinite' 
+                }}>
+                   <Trophy size={80} color="white" />
                 </div>
-                {ans.explanation && <small>解析：{ans.explanation}</small>}
-              </div>
-            ))}
+                <h1 style={{ fontSize: '3.5rem', margin: '0 0 1rem', textShadow: '0 0 20px rgba(0,255,255,0.5)', background: '-webkit-linear-gradient(45deg, #FFD54F, #00BCD4)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+                   境界突破！
+                </h1>
+                <p style={{ fontSize: '1.5rem', color: '#B0BEC5', letterSpacing: '2px' }}>AI 知識宇宙的能量正在匯聚...</p>
+                <div style={{ marginTop: '3rem', width: '300px', height: '4px', background: 'rgba(255,255,255,0.2)', margin: '3rem auto 0', position: 'relative', overflow: 'hidden', borderRadius: '2px' }}>
+                   <div style={{ position: 'absolute', top: 0, left: 0, height: '100%', width: '100%', background: 'linear-gradient(90deg, transparent, #00BCD4, transparent)', animation: 'orbit 2s linear infinite' }}></div>
+                </div>
+                <p style={{ marginTop: '1rem', fontSize: '0.9rem', color: '#78909C' }}>請稍候 10 秒</p>
+             </div>
           </div>
-        )}
-        <div className="text-center mt-4 pb-4">
-           <ParticleButton className="btn primary-btn xl-btn" onClick={() => window.location.reload()} style={{ borderRadius: '50px' }}>再玩一次</ParticleButton>
+       );
+    }
+
+    return (
+      <div className="home-container" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', background: 'var(--bg-color)', padding: '2rem' }}>
+        <div className="app-tool-window large animate-fade-in">
+          <div className="app-tool-window-header">
+            <div className="app-tool-window-header-title">
+               <button onClick={exitStudentView} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 'bold' }}>
+                  <ArrowLeft size={20} /> 返回首頁
+               </button>
+               <span style={{ color: 'rgba(255,255,255,0.4)' }}>|</span>
+               <span>🏁 測驗結果結算</span>
+            </div>
+            <div className="app-tool-window-controls">
+               <span className="app-tool-window-control-dot minimize" />
+               <span className="app-tool-window-control-dot maximize" />
+               <span className="app-tool-window-control-dot close" onClick={exitStudentView} title="返回" />
+            </div>
+          </div>
+          <div className="app-tool-window-body">
+            <h1 className="title text-center mt-2" style={{ color: '#00bcd4', fontSize: '2.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+              <Trophy size={40} /> 最終結算單
+            </h1>
+            <div className="score-summary" style={{ background: 'linear-gradient(135deg, #00bcd4, #2E7D32)' }}>
+              <h2 style={{ fontSize: '2rem' }}>總成績： {finalReport.score} 分</h2>
+            </div>
+            <div className="history-list" style={{ boxShadow: 'none', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', padding: '1.5rem', marginTop: '2rem' }}>
+              <h3 style={{ color: '#00bcd4', fontSize: '1.4rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <ListChecks size={24} /> 你的作答記錄
+              </h3>
+              {finalReport.answers.map((ans, i) => (
+                 <div key={i} className={`history-item ${ans.correct ? 'item-correct' : 'item-wrong'}`} style={{ borderLeftWidth: '8px', alignItems: 'center', background: ans.correct ? 'rgba(76, 175, 80, 0.1)' : 'rgba(229, 57, 53, 0.1)', padding: '1rem', borderRadius: '4px', margin: '0.5rem 0', display: 'flex', justifyContent: 'space-between' }}>
+                   <div>第 {ans.qIndex + 1} 題：你選了 {ans.selected}</div>
+                   <div style={{ color: ans.correct ? '#4caf50' : '#f44336', display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
+                      {ans.correct ? <><Check size={16}/>答對</> : <><X size={16}/>答錯</>} ({ans.score}分)
+                   </div>
+                 </div>
+              ))}
+            </div>
+            <div className="text-center mt-4 pb-4">
+               <ParticleButton className="btn primary-btn xl-btn" onClick={() => window.location.reload()} style={{ borderRadius: '50px' }}>再玩一次</ParticleButton>
+            </div>
+          </div>
+>>>>>>> 421d087 (feat: implement user authentication redesign, anonymized student code generation, layout clipping fix, and production backend URL correction)
         </div>
       </div>
     );

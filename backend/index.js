@@ -8,6 +8,25 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const admin = require('firebase-admin');
+require('dotenv').config();
+const jwt = require('jsonwebtoken');
+
+// Initialize Firebase Admin (optional for local testing, required for production)
+try {
+  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount)
+    });
+    console.log('Firebase Admin initialized.');
+  } else {
+    console.warn('FIREBASE_SERVICE_ACCOUNT not set in environment. Firebase Admin will not connect.');
+  }
+} catch (error) {
+  console.error('Error initializing Firebase Admin:', error);
+}
+
+const db = admin.apps.length ? admin.firestore() : null;
 
 const app = express();
 const server = http.createServer(app);
@@ -33,6 +52,196 @@ function envList(name) {
     .split(',')
     .map((item) => item.trim().toLowerCase())
     .filter(Boolean);
+}
+
+const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret_for_dev';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'teacher123'; // Default for development
+
+app.post('/api/admin/login', (req, res) => {
+  const { password } = req.body;
+  if (password === ADMIN_PASSWORD) {
+    const token = jwt.sign({ role: 'teacher' }, JWT_SECRET, { expiresIn: '7d' });
+    return res.json({ success: true, token });
+  }
+  res.status(401).json({ success: false, error: '密碼錯誤' });
+});
+
+app.post('/api/admin/become-teacher', async (req, res) => {
+  const { password, uid, email } = req.body;
+  if (password !== ADMIN_PASSWORD) {
+    return res.status(401).json({ success: false, error: '密碼錯誤' });
+  }
+  
+  if (!db) {
+    return res.status(500).json({ success: false, error: '伺服器尚未設定 Firebase Admin 憑證，無法連線資料庫。請管理員設定環境變數。' });
+  }
+
+  try {
+    await db.collection('Users').doc(uid).set({
+      role: 'teacher',
+      email: email || ''
+    }, { merge: true });
+    
+    // Set custom claims (optional but good for future-proofing rules)
+    await admin.auth().setCustomUserClaims(uid, { admin: true });
+    
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Failed to upgrade user:', err);
+    res.status(500).json({ success: false, error: '授權失敗：' + err.message });
+  }
+});
+
+app.post('/api/register', async (req, res) => {
+  const { email, password, nickname, allowPublicDisplayName, avatarType, playFrequency } = req.body;
+  
+  if (!email || !email.includes('@')) {
+    return res.status(400).json({ success: false, error: 'invalid-email', message: '請輸入有效的電子郵件格式。' });
+  }
+  if (!password || password.length < 6) {
+    return res.status(400).json({ success: false, error: 'weak-password', message: '密碼長度至少需要 6 碼。' });
+  }
+  
+  if (!db) {
+    return res.status(503).json({ success: false, error: 'FIREBASE_NOT_CONFIGURED', message: '伺服器未設定 Firebase Admin。' });
+  }
+  
+  const displayNickname = nickname ? nickname.trim() : '';
+  
+  try {
+    const createUserParams = {
+      email,
+      password
+    };
+    if (displayNickname) {
+      createUserParams.displayName = displayNickname;
+    }
+    
+    const userRecord = await admin.auth().createUser(createUserParams);
+    
+    const counterRef = db.collection('SystemCounters').doc('user_counter');
+    const userRef = db.collection('Users').doc(userRecord.uid);
+    
+    await db.runTransaction(async (transaction) => {
+      const counterDoc = await transaction.get(counterRef);
+      let currentNumber = 0;
+      if (counterDoc.exists) {
+        currentNumber = counterDoc.data().currentNumber || 0;
+      }
+      const nextNumber = currentNumber + 1;
+      const anonymizedCode = 'S' + String(nextNumber).padStart(4, '0');
+      
+      transaction.set(userRef, {
+        id: userRecord.uid,
+        email: email,
+        emailVerified: false,
+        anonymizedStudentNumber: nextNumber,
+        anonymizedStudentCode: anonymizedCode,
+        displayName: displayNickname,
+        nickname: displayNickname,
+        allowPublicDisplayName: !!allowPublicDisplayName,
+        avatarType: avatarType || '🧑‍🚀',
+        avatar: avatarType || '🧑‍🚀',
+        playFrequency: playFrequency || '每週 3 次',
+        role: 'student',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      });
+      
+      transaction.set(counterRef, { currentNumber: nextNumber });
+    });
+    
+    res.json({ success: true, uid: userRecord.uid });
+  } catch (err) {
+    console.error('Registration failed:', err);
+    if (err.code === 'auth/email-already-exists' || err.code === 'auth/email-already-in-use' || err.message?.includes('already exists') || err.message?.includes('already in use')) {
+      return res.status(400).json({ success: false, error: 'email-already-in-use', message: '此信箱已註冊，請直接登入或更換信箱。' });
+    }
+    res.status(500).json({ success: false, error: err.code || 'unknown-error', message: err.message });
+  }
+});
+
+app.post('/api/admin/migrate-users', verifyAdmin, async (req, res) => {
+  if (!db) {
+    return res.status(503).json({ success: false, error: 'FIREBASE_NOT_CONFIGURED', message: '伺服器未設定 Firebase Admin。' });
+  }
+  
+  try {
+    const usersSnap = await db.collection('Users').get();
+    let migratedCount = 0;
+    
+    for (const userDoc of usersSnap.docs) {
+      const userData = userDoc.data();
+      if (!userData.anonymizedStudentCode && userData.role !== 'teacher') {
+        await db.runTransaction(async (transaction) => {
+          const counterRef = db.collection('SystemCounters').doc('user_counter');
+          const counterDoc = await transaction.get(counterRef);
+          let currentNumber = 0;
+          if (counterDoc.exists) {
+            currentNumber = counterDoc.data().currentNumber || 0;
+          }
+          const nextNumber = currentNumber + 1;
+          const anonymizedCode = 'S' + String(nextNumber).padStart(4, '0');
+          
+          // Query progress documents within the transaction
+          const progressQuery = db.collection('PlayerCompetitionProgress').where('playerId', '==', userDoc.id);
+          const progressSnap = await transaction.get(progressQuery);
+          
+          transaction.update(userDoc.ref, {
+            anonymizedStudentNumber: nextNumber,
+            anonymizedStudentCode: anonymizedCode,
+            avatarType: userData.avatar || '🧑‍🚀',
+            updatedAt: new Date().toISOString()
+          });
+          
+          progressSnap.forEach((progDoc) => {
+            transaction.update(progDoc.ref, {
+              anonymizedStudentCode: anonymizedCode,
+              allowPublicDisplayName: !!userData.allowPublicDisplayName
+            });
+          });
+          
+          transaction.set(counterRef, { currentNumber: nextNumber });
+        });
+        migratedCount++;
+      }
+    }
+    
+    res.json({ success: true, migratedCount });
+  } catch (err) {
+    console.error('Migration failed:', err);
+    res.status(500).json({ success: false, error: err.code || 'unknown-error', message: err.message });
+  }
+});
+
+app.get('/api/admin/verify', (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return res.status(401).json({ success: false });
+  const token = authHeader.split(' ')[1];
+  try {
+    jwt.verify(token, JWT_SECRET);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(401).json({ success: false });
+  }
+});
+
+function verifyAdmin(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return res.status(401).send('Unauthorized');
+  const token = authHeader.split(' ')[1];
+  try {
+    jwt.verify(token, JWT_SECRET);
+    next();
+  } catch (err) {
+    return res.status(401).send('Unauthorized');
+  }
+}
+
+// --- Question Bank Persistence Logic ---
+const banksFilePath = path.join(__dirname, 'banks.json');
+if (!fs.existsSync(banksFilePath)) {
+  fs.writeFileSync(banksFilePath, JSON.stringify([]));
 }
 
 function isAdminRole(role) {

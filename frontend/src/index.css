@@ -3688,3 +3688,602 @@ input[type="file"]::file-selector-button {
     flex-direction: column;
   }
 }
+/* --- World Checkpoint Challenge & Leaderboard Styles --- */
+
+.world-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 1.5rem;
+  margin-top: 2rem;
+}
+
+.world-card {
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 16px;
+  padding: 1.5rem;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 180px;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.1);
+}
+
+.world-card:hover {
+  transform: translateY(-8px);
+  border-color: var(--primary-light);
+  box-shadow: 0 12px 40px 0 rgba(31, 38, 135, 0.25);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.world-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 5px;
+  background: linear-gradient(90deg, var(--primary-color), var(--secondary-color));
+}
+
+.world-card.locked {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.world-card.locked:hover {
+  transform: none;
+  border-color: rgba(255,255,255,0.15);
+  box-shadow: none;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.world-title {
+  font-size: 1.3rem;
+  font-weight: 800;
+  color: var(--primary-dark);
+  margin-bottom: 0.5rem;
+}
+
+.world-stats {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  margin-bottom: 1rem;
+}
+
+.progress-bar-container {
+  background: rgba(0,0,0,0.1);
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  width: 100%;
+}
+
+.progress-bar-fill {
+  background: linear-gradient(90deg, #43a047, #00acc1);
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.5s ease-in-out;
+}
+
+/* Stage Path Map */
+.stage-path {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2rem;
+  position: relative;
+  padding: 3rem 0;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.stage-path::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: rgba(0,0,0,0.08);
+  z-index: 1;
+}
+
+.stage-node-container {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  position: relative;
+  z-index: 2;
+}
+
+.stage-node-container:nth-child(even) {
+  flex-direction: row-reverse;
+}
+
+.stage-node-container:nth-child(even) .stage-info {
+  text-align: right;
+  padding-right: 1.5rem;
+  padding-left: 0;
+}
+
+.stage-node {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.4rem;
+  font-weight: bold;
+  border: 4px solid white;
+  box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+  cursor: pointer;
+  transition: all 0.3s;
+  background: #ccc;
+  color: white;
+}
+
+.stage-node.locked {
+  background: #e0e0e0;
+  color: #9e9e9e;
+  cursor: not-allowed;
+  box-shadow: none;
+  border-color: #f5f5f5;
+}
+
+.stage-node.unlocked {
+  background: linear-gradient(135deg, var(--primary-color), var(--primary-dark));
+  color: white;
+  animation: pulseNode 2s infinite alternate;
+}
+
+@keyframes pulseNode {
+  0% { box-shadow: 0 0 10px rgba(46, 125, 50, 0.4), 0 8px 20px rgba(0,0,0,0.15); }
+  100% { box-shadow: 0 0 25px rgba(46, 125, 50, 0.8), 0 8px 20px rgba(0,0,0,0.15); }
+}
+
+.stage-node.cleared {
+  background: linear-gradient(135deg, #00acc1, #007c91);
+  color: white;
+}
+
+.stage-node:hover:not(.locked) {
+  transform: scale(1.1);
+  box-shadow: 0 12px 25px rgba(0,0,0,0.25);
+}
+
+.stage-info {
+  flex: 1;
+  padding-left: 1.5rem;
+}
+
+.stage-info h4 {
+  margin: 0;
+  font-size: 1.2rem;
+  color: var(--primary-dark);
+}
+
+.stage-info p {
+  margin: 0.2rem 0 0 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+/* Perfect Clear Screen */
+.clear-screen {
+  text-align: center;
+  padding: 3rem;
+  max-width: 600px;
+  margin: 0 auto;
+  border-radius: 24px;
+  background: white;
+  box-shadow: 0 20px 50px rgba(0,0,0,0.1);
+}
+
+.clear-screen h1 {
+  font-size: 3rem;
+  font-weight: 900;
+  margin-bottom: 1rem;
+}
+
+.clear-screen.perfect {
+  border-top: 8px solid #4caf50;
+}
+
+.clear-screen.failed {
+  border-top: 8px solid #e53935;
+}
+
+.feedback-details {
+  background: #f9f9f9;
+  padding: 1.5rem;
+  border-radius: 16px;
+  margin: 2rem 0;
+  text-align: left;
+}
+
+.feedback-details p {
+  margin: 0.5rem 0;
+  font-size: 1.1rem;
+}
+
+/* Custom Leaderboard Grid */
+.progression-leaderboard {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1rem;
+}
+
+.progression-leaderboard th, .progression-leaderboard td {
+  padding: 1rem;
+  text-align: left;
+  border-bottom: 1px solid rgba(0,0,0,0.05);
+}
+
+.progression-leaderboard th {
+  font-weight: bold;
+  color: var(--primary-dark);
+  background: rgba(0,0,0,0.02);
+}
+
+.progression-leaderboard tr:hover {
+  background: rgba(0,0,0,0.01);
+}
+
+.progression-rank {
+  font-size: 1.2rem;
+  font-weight: 800;
+  width: 60px;
+}
+
+.progression-rank.first { color: #fbc02d; }
+.progression-rank.second { color: #b0bec5; }
+.progression-rank.third { color: #a1887f; }
+
+/* AI Financial Cosmos Premium Tool Window Style */
+.app-tool-window {
+  background: rgba(14, 20, 35, 0.94); /* Premium Deep Blue */
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(0, 188, 212, 0.25); /* Cyan border */
+  border-top: 5px solid #00bcd4; /* Glowing top line */
+  border-radius: 20px;
+  box-shadow: 0 30px 60px rgba(0, 0, 0, 0.55), 0 0 30px rgba(0, 188, 212, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  color: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-width: 950px;
+  width: 100%;
+  margin: 0 auto;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  animation: slideUp 0.4s ease-out forwards;
+}
+
+.app-tool-window.large {
+  max-width: 1200px;
+}
+
+.app-tool-window-header {
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid rgba(0, 188, 212, 0.2);
+  padding: 1.25rem 2rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  user-select: none;
+}
+
+.app-tool-window-header-title {
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.app-tool-window-header-title button {
+  transition: all 0.2s ease;
+}
+
+.app-tool-window-header-title button:hover {
+  color: #00bcd4 !important;
+  transform: translateX(-3px);
+}
+
+.app-tool-window-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.app-tool-window-control-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.25);
+  display: inline-block;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.app-tool-window-control-dot.close {
+  background: #ff5f56;
+}
+.app-tool-window-control-dot.close:hover {
+  background: #ff3b30;
+  box-shadow: 0 0 8px #ff3b30;
+}
+.app-tool-window-control-dot.minimize {
+  background: #ffbd2e;
+}
+.app-tool-window-control-dot.minimize:hover {
+  background: #ffaa00;
+  box-shadow: 0 0 8px #ffaa00;
+}
+.app-tool-window-control-dot.maximize {
+  background: #27c93f;
+}
+.app-tool-window-control-dot.maximize:hover {
+  background: #15b32d;
+  box-shadow: 0 0 8px #15b32d;
+}
+
+.app-tool-window-body {
+  padding: 2.5rem;
+  overflow-y: auto;
+  flex: 1;
+}
+
+/* Scrollbar adjustment for dark tool windows */
+.app-tool-window-body::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.app-tool-window-body::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.app-tool-window-body::-webkit-scrollbar-thumb {
+  background: rgba(0, 188, 212, 0.3);
+  border-radius: 4px;
+}
+
+.app-tool-window-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 188, 212, 0.5);
+}
+
+/* Compatibility tweaks for components in tool window */
+.app-tool-window .card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+  color: #e2e8f0;
+}
+
+.app-tool-window input[type="text"], 
+.app-tool-window input[type="number"], 
+.app-tool-window input[type="datetime-local"], 
+.app-tool-window select {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  color: #fff !important;
+  border-radius: 10px;
+}
+
+.app-tool-window input[type="text"]:focus, 
+.app-tool-window input[type="number"]:focus, 
+.app-tool-window input[type="datetime-local"]:focus, 
+.app-tool-window select:focus {
+  border-color: #00bcd4 !important;
+  box-shadow: 0 0 0 3px rgba(0, 188, 212, 0.2) !important;
+}
+
+.app-tool-window .title {
+  color: #00bcd4;
+}
+
+.app-tool-window label {
+  color: #cbd5e1;
+}
+
+.app-tool-window th {
+  background: rgba(255, 255, 255, 0.05);
+  color: #00bcd4;
+}
+
+.app-tool-window td, .app-tool-window tr {
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  color: #e2e8f0;
+}
+
+.app-tool-window tr:hover {
+  background: rgba(255, 255, 255, 0.02) !important;
+}
+
+.app-tool-window .world-title {
+  color: #00bcd4;
+}
+
+.app-tool-window .world-stats {
+  color: #94a3b8;
+}
+
+.app-tool-window .stage-info h4 {
+  color: #00bcd4;
+}
+
+.app-tool-window .stage-info p {
+  color: #94a3b8;
+}
+
+.app-tool-window .stage-path::before {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.app-tool-window .stage-node.locked {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.3);
+  border-color: rgba(255, 255, 255, 0.05);
+}
+
+.app-tool-window .clear-screen {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+}
+
+.app-tool-window .feedback-details {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.app-tool-window .feedback-details p {
+  color: #cbd5e1;
+}
+
+.app-tool-window-tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 2rem;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 0.5rem;
+  border-radius: 12px;
+  flex-wrap: wrap;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.app-tool-window-tab-btn {
+  flex: 1;
+  min-width: 150px;
+  padding: 1rem;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.app-tool-window-tab-btn.active {
+  background: #00bcd4;
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(0, 188, 212, 0.3);
+}
+
+.app-tool-window-tab-btn:hover:not(.active) {
+  background: rgba(255, 255, 255, 0.05);
+  color: #ffffff;
+}
+
+/* Modals inside tool windows styling */
+.app-tool-window-modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(10, 16, 30, 0.85) !important;
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999 !important;
+  padding: 2rem;
+}
+
+.app-tool-window-modal {
+  background: rgba(22, 28, 45, 0.98) !important;
+  border: 1.5px solid rgba(0, 188, 212, 0.3) !important;
+  box-shadow: 0 30px 60px rgba(0,0,0,0.5), 0 0 30px rgba(0,188,212,0.15) !important;
+  border-radius: 20px;
+  color: #fff !important;
+  display: flex;
+  flex-direction: column;
+  max-height: 90vh;
+  overflow: hidden;
+}
+
+/* Dark theme role selection override for tool window */
+.app-tool-window .role-card {
+  background: rgba(22, 28, 45, 0.6) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  border: 1px solid rgba(0, 188, 212, 0.2) !important;
+  box-shadow: 0 15px 35px rgba(0, 0, 0, 0.4) !important;
+  color: #e2e8f0 !important;
+}
+
+.app-tool-window .role-card:hover {
+  border-color: #00bcd4 !important;
+  box-shadow: 0 20px 45px rgba(0, 188, 212, 0.25) !important;
+  transform: translateY(-8px);
+}
+
+.app-tool-window .role-card h2 {
+  color: #fff !important;
+}
+
+.app-tool-window .role-card p {
+  color: #94a3b8 !important;
+}
+
+.app-tool-window .role-card .icon {
+  background: rgba(0, 188, 212, 0.1) !important;
+  color: #00bcd4 !important;
+}
+
+/* Adjust form controls under both tool windows and modals */
+.app-tool-window .card, .app-tool-window-modal .card {
+  background: rgba(255, 255, 255, 0.03) !important;
+  border: 1px solid rgba(255, 255, 255, 0.07) !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25) !important;
+  color: #e2e8f0 !important;
+}
+
+.app-tool-window input[type="text"], .app-tool-window-modal input[type="text"],
+.app-tool-window input[type="number"], .app-tool-window-modal input[type="number"],
+.app-tool-window input[type="datetime-local"], .app-tool-window-modal input[type="datetime-local"],
+.app-tool-window input[type="password"], .app-tool-window-modal input[type="password"],
+.app-tool-window input[type="email"], .app-tool-window-modal input[type="email"],
+.app-tool-window select, .app-tool-window-modal select {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  color: #fff !important;
+  border-radius: 10px;
+}
+
+.app-tool-window input[type="text"]:focus, .app-tool-window-modal input[type="text"]:focus,
+.app-tool-window input[type="number"]:focus, .app-tool-window-modal input[type="number"]:focus,
+.app-tool-window input[type="datetime-local"]:focus, .app-tool-window-modal input[type="datetime-local"]:focus,
+.app-tool-window input[type="password"]:focus, .app-tool-window-modal input[type="password"]:focus,
+.app-tool-window input[type="email"]:focus, .app-tool-window-modal input[type="email"]:focus,
+.app-tool-window select:focus, .app-tool-window-modal select:focus {
+  border-color: #00bcd4 !important;
+  box-shadow: 0 0 0 3px rgba(0, 188, 212, 0.2) !important;
+}
+
+.app-tool-window label, .app-tool-window-modal label {
+  color: #cbd5e1 !important;
+}
+
+.app-tool-window th, .app-tool-window-modal th {
+  background: rgba(255, 255, 255, 0.05) !important;
+  color: #00bcd4 !important;
+}
+
+.app-tool-window td, .app-tool-window tr, .app-tool-window-modal td, .app-tool-window-modal tr {
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  color: #e2e8f0 !important;
+}
+
+.app-tool-window tr:hover, .app-tool-window-modal tr:hover {
+  background: rgba(255, 255, 255, 0.02) !important;
+}
+
+

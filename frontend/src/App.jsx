@@ -1,16 +1,22 @@
 import React, { Suspense, lazy, useState, useEffect } from 'react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { auth, db } from './firebase';
 import ParticleButton from './components/ParticleButton';
 import LazyErrorBoundary from './components/LazyErrorBoundary';
-import { LogOut, BookOpen, Users, Shield, ArrowRight, Play, BarChart3, Zap, Target, BookHeart, GraduationCap, Building2, Palette, BriefcaseBusiness, Code2, Brain, MessageSquareText, Layers3, ClipboardCheck, Sparkles } from 'lucide-react';
+import { Globe2, LogOut, BookOpen, Users, Shield, ArrowRight, Play, BarChart3, Clock, Zap, Target, BookHeart, GraduationCap, Building2, Palette, BriefcaseBusiness, Code2, Brain, MessageSquareText, Layers3, ClipboardCheck, Sparkles, Compass, Trophy } from 'lucide-react';
 import './index.css';
 
 const TeacherDashboard = lazy(() => import('./components/TeacherDashboard'));
 const StudentView = lazy(() => import('./components/StudentView'));
+const StudentAchievements = lazy(() => import('./components/StudentAchievements'));
+const WorldChallenges = lazy(() => import('./components/WorldChallenges'));
 const AuthModal = lazy(() => import('./components/AuthModal'));
 const TermsModal = lazy(() => import('./components/TermsModal'));
+
+const API_BASE_URL = window.location.hostname === 'localhost' 
+  ? 'http://localhost:3001' 
+  : 'https://live-quiz-game1.onrender.com';
 // Dev-only smoke path; Vite removes this from production unless explicitly enabled in dev.
 const E2E_TEACHER_ACCESS = import.meta.env.DEV && import.meta.env.VITE_E2E_TEACHER_ACCESS === 'true';
 const E2E_TEACHER_USER = {
@@ -113,12 +119,33 @@ function App() {
       setShowAuthModal(true);
       return;
     }
-
-    setRole('teacher');
-
     try {
-       if (E2E_TEACHER_ACCESS) return;
-       await setDoc(doc(db, 'Users', user.uid), { role: 'teacher', email: user.email }, { merge: true });
+       if (E2E_TEACHER_ACCESS) {
+          setRole('teacher');
+          return;
+       }
+       const userDocRef = doc(db, 'Users', user.uid);
+       const userDoc = await getDoc(userDocRef);
+       if (userDoc.exists() && userDoc.data().role === 'teacher') {
+          setRole('teacher');
+       } else {
+          const pass = prompt('請輸入教師開通密碼以獲取權限：');
+          if (pass) {
+             const response = await fetch(`${API_BASE_URL}/api/admin/become-teacher`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password: pass, uid: user.uid, email: user.email })
+             });
+             const data = await response.json();
+             
+             if (data.success) {
+                alert('教師權限開通成功！');
+                setRole('teacher');
+             } else {
+                alert(data.error || '密碼錯誤或伺服器未設置管理員金鑰，請重新嘗試。');
+             }
+          }
+       }
     } catch(err) {
        console.error("權限驗證失敗", err);
     }
@@ -127,8 +154,14 @@ function App() {
   const handleGuestSubmit = (e) => {
      e.preventDefault();
      if (!guestCode.trim()) return;
-     setInitialCode(guestCode);
-     setRole('student');
+     if (!user) {
+        alert("本平台已啟用學員去識別化隱私防護，請先登入或註冊會員以加入挑戰！");
+        setInitialCode(guestCode);
+        setShowAuthModal(true);
+     } else {
+        setInitialCode(guestCode);
+        setRole('student');
+     }
   };
 
   const clearRole = () => {
@@ -158,20 +191,37 @@ function App() {
       </Suspense>
     );
   }
+  if (role === 'achievements') {
+    return (
+      <Suspense fallback={<RouteFallback label="載入個人成就與錯題本..." />}>
+        <LazyErrorBoundary title="個人成就頁載入失敗">
+          <StudentAchievements currentUser={user} onGoBack={clearRole} />
+        </LazyErrorBoundary>
+      </Suspense>
+    );
+  }
+  if (role === 'world_challenges') {
+    return (
+      <Suspense fallback={<RouteFallback label="載入關卡挑戰世界..." />}>
+        <LazyErrorBoundary title="關卡挑戰頁載入失敗">
+          <WorldChallenges currentUser={user} onGoBack={clearRole} />
+        </LazyErrorBoundary>
+      </Suspense>
+    );
+  }
 
   // --- SaaS Landing Page (Not Logged In) ---
   if (!user) {
      return (
-        <div className="saas-page-shell">
+        <div style={{ background: '#fafafa', minHeight: '100vh', fontFamily: "'Noto Sans TC', sans-serif" }}>
           
           {/* 1. SaaS Navbar */}
           <nav className="saas-nav">
             <div className="saas-logo">
-               <GraduationCap size={28} color="var(--primary-color)" /> 師說新宇
+               <Globe2 size={28} color="var(--primary-color)" /> 用永續知識，做永續之事
             </div>
             <div className="saas-nav-links">
                <a href="#about" className="saas-nav-link" style={{display: window.innerWidth > 768 ? 'block' : 'none'}}>平台理念</a>
-               <a href="#categories" className="saas-nav-link" style={{display: window.innerWidth > 768 ? 'block' : 'none'}}>課程分類</a>
                <a href="#features" className="saas-nav-link" style={{display: window.innerWidth > 768 ? 'block' : 'none'}}>核心功能</a>
                <a href="#audience" className="saas-nav-link" style={{display: window.innerWidth > 768 ? 'block' : 'none'}}>適用對象</a>
                <button onClick={() => setShowAuthModal(true)} className="saas-btn-solid">
@@ -185,35 +235,29 @@ function App() {
              <div className="saas-hero-bg"></div>
              
              <div className="saas-hero-content">
-                <span className="saas-hero-badge">教師知識變現與互動教室平台</span>
+                <span className="saas-hero-badge">🌍 SDGs & ESG 教育科技創新平台</span>
                 <h1 className="saas-hero-title">
-                   師說新宇<br/><span>把一堂課長成一座知識宇宙</span>
+                   翻轉傳統教育的<br/><span>永續知識新解方</span>
                 </h1>
                 <p className="saas-hero-subtitle">
-                   這裡讓老師把專業知識整理成可互動、可追蹤、可反覆練習的線上課堂。從小學基礎、升學科目、大學專題，到藝能創作、企業內訓、證照與生活知識，都能用老師自己的語氣和分類方式被好好教授。
+                   本平台專為現代學校機構與企業內訓量身打造，將艱澀的 SDGs（聯合國永續發展目標）與 ESG（企業環境、社會與治理）知識，轉化為具備高度互動性的遊戲化學習體驗。透過即時連線對戰、單人自主考核與強大 AI 題庫解析，讓知識傳遞不再枯燥。
                 </p>
                 <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
                    <button onClick={() => setShowAuthModal(true)} className="saas-btn-solid" style={{ fontSize: '1.2rem', padding: '1rem 2rem' }}>
-                      免費建立專屬課程
+                      免費建立專屬題庫
                    </button>
                    <a href="#about" className="saas-btn-outline" style={{ display: 'flex', alignItems: 'center', textDecoration: 'none', fontSize: '1.2rem', padding: '1rem 2rem' }}>
                       了解平台理念
                    </a>
                 </div>
-                <div className="saas-hero-metrics">
-                  <div><strong>8+</strong><span>大類課程起點</span></div>
-                  <div><strong>3</strong><span>評量與互動模式</span></div>
-                  <div><strong>1</strong><span>老師專屬知識庫</span></div>
-                </div>
              </div>
 
              {/* Right side floating card for Game Join */}
              <div className="saas-hero-card">
-                <div className="hero-card-kicker">即時教室</div>
-                <h2 style={{ color: 'var(--primary-dark)', marginBottom: '1.5rem', textAlign: 'center', fontWeight: '800' }}>準備進教室了嗎？</h2>
+                <h2 style={{ color: 'var(--primary-dark)', marginBottom: '1.5rem', textAlign: 'center', fontWeight: '800' }}>準備好挑戰了嗎？</h2>
                 <form onSubmit={handleGuestSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
                    <div>
-                     <label style={{ display: 'block', marginBottom: '0.5rem', color: '#555', fontWeight: 'bold' }}>輸入課堂代碼：</label>
+                     <label style={{ display: 'block', marginBottom: '0.5rem', color: '#555', fontWeight: 'bold' }}>輸入遊戲代碼：</label>
                      <input 
                        type="text" 
                        placeholder="例如：12345678" 
@@ -224,39 +268,25 @@ function App() {
                      />
                    </div>
                    <ParticleButton type="submit" className="saas-btn-solid" style={{ width: '100%', fontSize: '1.2rem', display: 'flex', justifyContent: 'center', gap: '0.5rem' }}>
-                     以訪客身分加入課堂 <Play fill="currentColor" size={20} />
+                     以訪客身分加入 <Play fill="currentColor" size={20} />
                    </ParticleButton>
                 </form>
                 <div style={{ marginTop: '1.5rem', textAlign: 'center', borderTop: '1px solid #eee', paddingTop: '1.5rem' }}>
-                   <p style={{ color: '#888', fontSize: '0.95rem', marginBottom: '1rem' }}>準備進行課後任務或正式考核？</p>
+                   <p style={{ color: '#888', fontSize: '0.95rem', marginBottom: '1rem' }}>準備進行單人任務考核？</p>
                    <button onClick={() => setShowAuthModal(true)} className="saas-btn-outline" style={{ width: '100%' }}>
                       請先登入會員帳號
                    </button>
-                </div>
-                <div className="hero-classroom-preview">
-                  <div>
-                    <span>本週課堂</span>
-                    <strong>英文時態複習</strong>
-                  </div>
-                  <div>
-                    <span>待整理討論</span>
-                    <strong>12 則</strong>
-                  </div>
-                  <div>
-                    <span>練習完成率</span>
-                    <strong>86%</strong>
-                  </div>
                 </div>
              </div>
           </header>
 
           {/* 3. Social Proof */}
           <div className="saas-social-proof">
-             <span>專為老師授課與學生互動設計</span>
+             <span>專為現代教育與企業內訓設計</span>
              <span style={{color: '#ddd'}}>|</span>
-             <span>小學到大學、學科到專業知識皆可建立</span>
+             <span>🎯 聯合國 SDGs 指標對接</span>
              <span style={{color: '#ddd'}}>|</span>
-             <span>題庫、任務、討論與成績整合</span>
+             <span>🔒 企業級權限防護</span>
              <span style={{color: '#ddd'}}>|</span>
              <span>⚡ 即時百人連線</span>
           </div>
@@ -264,68 +294,51 @@ function App() {
           {/* 4. About Us & Mission */}
           <section id="about" className="saas-section" style={{ background: '#fff' }}>
              <div style={{ maxWidth: '1000px', margin: '0 auto', textAlign: 'center' }}>
-                <h2 className="saas-section-title">關於師說新宇</h2>
-                <p className="saas-section-subtitle">讓老師的知識，有一個能被看見、被練習、被討論、被延伸的教學宇宙。</p>
-                <div className="saas-belief-panel">
+                <h2 className="saas-section-title">關於我們與平台理念</h2>
+                <p className="saas-section-subtitle">為什麼我們致力於永續教育科技？</p>
+                <div style={{ textAlign: 'left', lineHeight: '1.8', color: '#555', fontSize: '1.1rem', marginTop: '2rem' }}>
                    <p style={{ marginBottom: '1.5rem' }}>
-                      「師說新宇」相信，好的教學不只是把答案傳出去，而是讓學生在一次次提問、練習、犯錯和修正裡，慢慢看見知識的結構。每位老師都有自己的解題方式、比喻、節奏與價值觀，這些才是一門課真正珍貴的地方。
+                      在現今全球推動永續發展的大環境下，無論是學術界的「聯合國永續發展目標 (SDGs)」或是企業界的「環境、社會與公司治理 (ESG)」，都已經成為必修的顯學。然而，傳統的單向授課或紙本測驗，往往難以引起學習者的共鳴，甚至讓這些極具意義的知識變得生硬且乏味。
                    </p>
                    <p style={{ marginBottom: '1.5rem' }}>
-                      因此平台不把老師限制在單一科目或單一模式裡。你可以教小學生乘法，也可以教高中生作文、大學生研究方法、上班族簡報、創作者攝影剪輯、銀髮族手機使用，甚至是任何你擅長、願意整理並傳授的專業知識。
+                      我們團隊深信：<strong>「優質教育（SDG 4）」是驅動其他所有永續目標的核心引擎。</strong> 因此，我們結合了現代化的 Web 系統架構、即時 Socket 連線技術與直覺的雲端數據庫，打造出這款完全免費、高互動性的遊戲化測驗平台。
                    </p>
                    <p>
-                      從一份 Excel 題庫開始，老師可以逐步建立課程分類、互動測驗、課後任務、正式考核與討論紀錄。每次授課都不只是一次活動，而是替下一次教學留下更清楚的材料。
+                      透過本平台，教育工作者只需上傳 Excel 題庫，系統即可自動生成具備微動畫與積分排行榜的「即時對戰」或「單人考核」任務。我們期望透過降低數位教育工具的使用門檻，協助所有推廣永續知識的先行者，能夠用更活潑、更高效的方式，將永續的種子深植於下一代與企業員工的心中。
                    </p>
                 </div>
-                <div className="saas-values-grid">
-                  {platformValues.map(value => (
-                    <div className="saas-value-card" key={value.title}>
-                      <h3>{value.title}</h3>
-                      <p>{value.text}</p>
-                    </div>
-                  ))}
-                </div>
-             </div>
-          </section>
-
-          <section id="categories" className="saas-section" style={{ background: '#f7fbff' }}>
-             <h2 className="saas-section-title">多元課程大類</h2>
-             <p className="saas-section-subtitle">從正規學科到興趣、藝能、職場與專業知識，都能先用標準分類起步，再改成老師自己的課綱。</p>
-             <div className="subject-category-grid">
-                {subjectCategories.map(category => (
-                  <div className="subject-category-card" key={category.title} style={{ '--category-accent': category.accent }}>
-                    <div className="subject-category-head">
-                      <category.Icon size={26} />
-                      <div>
-                        <h3>{category.title}</h3>
-                        <span>{category.level}</span>
-                      </div>
-                    </div>
-                    <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
-                      {category.items.map(item => (
-                        <span key={item} className="category-chip">{item}</span>
-                      ))}
-                    </div>
-                  </div>
-                ))}
              </div>
           </section>
 
           {/* 5. Features Grid */}
           <section id="features" className="saas-section" style={{ background: '#f0fdf4' }}>
              <h2 className="saas-section-title">核心功能與教學優勢</h2>
-             <p className="saas-section-subtitle">不只是測驗工具，而是一套能支援備課、授課、討論、評量與追蹤的教學工作台。</p>
+             <p className="saas-section-subtitle">我們不僅僅是一個測驗工具，更是一個完整的學習生態系統。</p>
              
              <div className="saas-features-grid">
-                {teachingModes.map(mode => (
-                  <div className="saas-feature-card" key={mode.title}>
-                    <div className="saas-feature-icon">
-                      <mode.Icon size={30} />
-                    </div>
-                    <h3 className="saas-feature-title">{mode.title}</h3>
-                    <p className="saas-feature-desc">{mode.text}</p>
-                  </div>
-                ))}
+                <div className="saas-feature-card">
+                   <div className="saas-feature-icon" style={{ background: '#e8f5e9', color: '#2e7d32' }}>
+                      <Zap size={32} />
+                   </div>
+                   <h3 className="saas-feature-title">即時動態對戰系統</h3>
+                   <p className="saas-feature-desc">最高 1000 分的動態給分機制設計，系統會依據學生的作答時間與該題的答對人數，進行分數的動態遞減。連續答對更享有累積加成，大幅提升課堂氣氛與學習專注度。支援百人同時在線不卡頓。</p>
+                </div>
+                
+                <div className="saas-feature-card">
+                   <div className="saas-feature-icon" style={{ background: '#e3f2fd', color: '#1565c0' }}>
+                      <Target size={32} />
+                   </div>
+                   <h3 className="saas-feature-title">嚴謹的單人考核模式</h3>
+                   <p className="saas-feature-desc">專為課後作業與企業內訓設計的單人任務模式。教師可一鍵派發「練習」或「考核」任務，系統將強制要求學生登入綁定身分，並支援作答次數限制與題目隨機排序，完美防堵作弊，確保測驗公信力。</p>
+                </div>
+                
+                <div className="saas-feature-card">
+                   <div className="saas-feature-icon" style={{ background: '#fff3e0', color: '#ef6c00' }}>
+                      <BarChart3 size={32} />
+                   </div>
+                   <h3 className="saas-feature-title">智慧題庫與數據分析</h3>
+                   <p className="saas-feature-desc">支援極簡 Excel 檔案一鍵匯入，系統內建 AI 輔助規則，能自動辨識選擇題、是非題及章節分類。後台提供詳細的數據分析，即時統整所有學生的學習狀況、錯題分佈與作答歷程，精準掌握教學成效。</p>
+                </div>
              </div>
           </section>
 
@@ -333,28 +346,18 @@ function App() {
           <section id="audience" className="saas-section" style={{ background: '#fff' }}>
              <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
                 <h2 className="saas-section-title">適用對象與應用情境</h2>
-                <p className="saas-section-subtitle">無論是學校老師、補教講師、企業內訓、技能教練或知識創作者，都能把專長變成可互動的學習歷程。</p>
+                <p className="saas-section-subtitle">無論您身處何種領域，都能找到最適合的使用方式。</p>
                 
-                <div className="audience-grid">
-                   <div className="audience-card">
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '2rem', marginTop: '3rem' }}>
+                   <div style={{ background: '#fafafa', padding: '2rem', borderRadius: '16px', border: '1px solid #eee' }}>
                       <GraduationCap size={40} color="#1565c0" style={{ marginBottom: '1rem' }} />
-                      <h3>校園教育工作者</h3>
+                      <h3 style={{ fontSize: '1.4rem', color: 'var(--primary-dark)', marginBottom: '1rem' }}>校園教育工作者</h3>
                       <p style={{ color: '#666', lineHeight: '1.6' }}>
-                         小學、國中、高中與大學課程都能建立自己的題庫與單元。老師可以把課堂練習、段考複習、專題討論與形成性評量放在同一個教學流程裡。
+                         對於中學與大專院校教師而言，本平台是翻轉課堂的絕佳利器。您可以在課堂上發起即時團戰，讓原本枯燥的法規與指標成為刺激的競賽；課後則可派發單人考核任務，輕鬆收集形成性評量數據。
                       </p>
                    </div>
-                   <div className="audience-card">
-                      <Palette size={40} color="#db2777" style={{ marginBottom: '1rem' }} />
-                      <h3>藝能與技能教練</h3>
-                      <p style={{ color: '#666', lineHeight: '1.6' }}>
-                         音樂、繪畫、設計、舞蹈、攝影、烘焙與手作課程，也能用小測驗確認觀念、用討論保存作品回饋，讓技能學習不只靠感覺。
-                      </p>
-                   </div>
-                   <div className="audience-card">
+                   <div style={{ background: '#fafafa', padding: '2rem', borderRadius: '16px', border: '1px solid #eee' }}>
                       <Building2 size={40} color="#2e7d32" style={{ marginBottom: '1rem' }} />
-                      <h3>企業 HR 與內訓部門</h3>
-                      <p style={{ color: '#666', lineHeight: '1.6' }}>
-                         企業可將新人訓練、產品知識、制度規範、資安測驗或 ESG 課程變成可追蹤的內訓任務。匿名快問快答適合暖場，登入考核則適合正式追蹤成果。
                       </p>
                    </div>
                    <div className="audience-card">
@@ -420,60 +423,81 @@ function App() {
 
   // --- Dashboard Page (Logged In) ---
   return (
-    <div className="home-container" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', background: 'var(--bg-color)' }}>
-      <nav style={{ padding: '1rem 2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.8)', backdropFilter: 'blur(10px)', borderBottom: '1px solid rgba(0,0,0,0.05)', position: 'sticky', top: 0, zIndex: 100 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 'bold', fontSize: '1.2rem', color: 'var(--primary-dark)' }}>
-           <GraduationCap size={24} color="var(--primary-color)" /> 師說新宇會員中心
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-           <span style={{ color: '#555', fontWeight: 'bold' }}>Hi, {user.displayName || (user.email ? user.email.split('@')[0] : '匿名用戶')}</span>
-           <button onClick={handleLogout} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', background: '#ffebee', color: '#c62828', border: 'none', padding: '0.5rem 1rem', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}>
-              <LogOut size={16} /> 登出
-           </button>
-        </div>
-      </nav>
+    <div className="home-container" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', background: 'var(--bg-color)', padding: '2rem' }}>
+      
+      <div className="app-tool-window large animate-fade-in">
+         {/* Tool Window Header */}
+         <div className="app-tool-window-header">
+            <div className="app-tool-window-header-title">
+               <button onClick={handleLogout} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 'bold' }}>
+                  <ArrowLeft size={20} /> 登出並返回首頁
+               </button>
+               <span style={{ color: 'rgba(255,255,255,0.4)' }}>|</span>
+               <span>💡 會員中心 Dashboard (Hi, {user.displayName || (user.email ? user.email.split('@')[0] : '探索者')})</span>
+            </div>
+            <div className="app-tool-window-controls">
+               <span className="app-tool-window-control-dot minimize" />
+               <span className="app-tool-window-control-dot maximize" />
+               <span className="app-tool-window-control-dot close" onClick={handleLogout} title="登出" />
+            </div>
+         </div>
 
-      <div style={{ flex: 1, padding: '4rem 2rem', maxWidth: '1000px', margin: '0 auto', width: '100%' }}>
-         <h2 style={{ fontSize: '2.5rem', color: 'var(--primary-dark)', marginBottom: '3rem', textAlign: 'center' }}>選擇您的教學 / 學習模式</h2>
-         
-         <div className="role-selection" style={{ display: 'flex', gap: '2rem', justifyContent: 'center', flexWrap: 'wrap' }}>
-          <div className="role-card" style={{ background: 'rgba(255,255,255,0.9)', flex: '1', minWidth: '300px', maxWidth: '350px' }}>
-            <div className="icon" style={{ background: '#e8f5e9', color: '#2e7d32' }}><Users size={40} /></div>
-            <h2 style={{ margin: '1rem 0 0.5rem' }}>參加測驗</h2>
-            <p style={{ color: '#666', marginBottom: '1.5rem' }}>輸入代碼，參與即時課堂、互動測驗或單人學習任務。</p>
-            <ParticleButton onClick={() => setRole('student')} className="btn primary-btn btn-block" style={{ borderRadius: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
-              進入測驗 <ArrowRight size={18} />
-            </ParticleButton>
-          </div>
-          
-          <div className="role-card teacher" style={{ background: 'rgba(255,255,255,0.9)', flex: '1', minWidth: '300px', maxWidth: '350px', borderTop: '5px solid var(--primary-dark)' }}>
-            <div className="icon" style={{ background: '#fff3e0', color: '#ef6c00' }}><BookOpen size={40} /></div>
-            <h2 style={{ margin: '1rem 0 0.5rem' }}>教師控制台</h2>
-            <p style={{ color: '#666', marginBottom: '1.5rem' }}>管理課程題庫、派發任務、發起即時教室與整理課堂討論。</p>
-            <ParticleButton onClick={handleTeacherAccess} className="btn btn-block" style={{ background: 'var(--primary-dark)', color: 'white', borderRadius: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
-              前往後台 <ArrowRight size={18} />
-            </ParticleButton>
-          </div>
-        </div>
-      </div>
+         {/* Tool Window Body */}
+         <div className="app-tool-window-body" style={{ padding: '3rem 2rem' }}>
+            <h2 style={{ fontSize: '2.5rem', color: '#00bcd4', marginBottom: '3rem', textAlign: 'center', fontWeight: '800' }}>選擇您的學習模式</h2>
+            
+            <div className="role-selection" style={{ display: 'flex', gap: '2rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+              <div className="role-card" onClick={() => setRole('student')} style={{ flex: '1', minWidth: '280px', maxWidth: '320px', padding: '2.5rem 1.5rem' }}>
+                <div className="icon"><Users size={40} /></div>
+                <h2 style={{ margin: '1rem 0 0.5rem' }}>參加測驗</h2>
+                <p style={{ marginBottom: '1.5rem' }}>輸入代碼，參與即時連線對戰或進行單人考核任務。</p>
+                <ParticleButton onClick={() => setRole('student')} className="btn primary-btn btn-block" style={{ borderRadius: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+                  進入測驗 <ArrowRight size={18} />
+                </ParticleButton>
+              </div>
 
-      <footer style={{ background: '#fff', padding: '2rem', textAlign: 'center', borderTop: '1px solid #eee', color: '#777', fontSize: '0.9rem' }}>
-         <div style={{ display: 'flex', justifyContent: 'center', gap: '2rem' }}>
-            <button onClick={() => setTermsMode('terms')} style={{ background: 'transparent', border: 'none', color: '#555', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+              <div className="role-card" onClick={() => setRole('world_challenges')} style={{ flex: '1', minWidth: '280px', maxWidth: '320px', padding: '2.5rem 1.5rem' }}>
+                 <div className="icon"><Compass size={40} /></div>
+                 <h2 style={{ margin: '1rem 0 0.5rem' }}>題庫闖關挑戰</h2>
+                 <p style={{ marginBottom: '1.5rem' }}>進入 20 個 SDGs 指標學習世界，以滿分挑戰各個檢查點，解鎖進度！</p>
+                 <ParticleButton onClick={() => setRole('world_challenges')} className="btn btn-block" style={{ background: '#00bcd4', color: 'white', borderRadius: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+                   開始挑戰 <ArrowRight size={18} />
+                 </ParticleButton>
+               </div>
+
+              <div className="role-card" onClick={() => setRole('achievements')} style={{ flex: '1', minWidth: '280px', maxWidth: '320px', padding: '2.5rem 1.5rem' }}>
+                 <div className="icon"><Trophy size={40} /></div>
+                 <h2 style={{ margin: '1rem 0 0.5rem' }}>個人成就與錯題本</h2>
+                 <p style={{ marginBottom: '1.5rem' }}>查看你的徽章、學習進度與錯題紀錄，規劃下一步！</p>
+                 <ParticleButton onClick={() => setRole('achievements')} className="btn btn-block" style={{ background: '#00bcd4', color: 'white', borderRadius: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+                   查看成就 <ArrowRight size={18} />
+                 </ParticleButton>
+              </div>
+              
+              <div className="role-card teacher" onClick={handleTeacherAccess} style={{ flex: '1', minWidth: '280px', maxWidth: '320px', padding: '2.5rem 1.5rem' }}>
+                <div className="icon"><BookOpen size={40} /></div>
+                <h2 style={{ margin: '1rem 0 0.5rem' }}>教師控制台</h2>
+                <p style={{ marginBottom: '1.5rem' }}>管理題庫、派發單人任務與發起即時團戰。</p>
+                <ParticleButton onClick={handleTeacherAccess} className="btn btn-block" style={{ background: '#00bcd4', color: 'white', borderRadius: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+                  前往後台 <ArrowRight size={18} />
+                </ParticleButton>
+              </div>
+            </div>
+         </div>
+
+         {/* Window Footer */}
+         <div style={{ display: 'flex', justifyContent: 'center', gap: '2rem', padding: '1.5rem', borderTop: '1px solid rgba(0, 188, 212, 0.2)', fontSize: '0.9rem' }}>
+            <button onClick={() => setTermsMode('terms')} style={{ background: 'transparent', border: 'none', color: '#cbd5e1', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.3rem', fontWeight: 'bold' }}>
                <Shield size={16} /> 服務條款
             </button>
-            <span style={{ color: '#ddd' }}>|</span>
-            <button onClick={() => setTermsMode('disclaimer')} style={{ background: 'transparent', border: 'none', color: '#555', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+            <span style={{ color: 'rgba(255,255,255,0.1)' }}>|</span>
+            <button onClick={() => setTermsMode('disclaimer')} style={{ background: 'transparent', border: 'none', color: '#cbd5e1', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.3rem', fontWeight: 'bold' }}>
                <Shield size={16} /> 免責聲明
             </button>
          </div>
-      </footer>
+      </div>
 
-      <Suspense fallback={<RouteFallback label="載入政策內容..." />}>
-        <LazyErrorBoundary title="政策內容載入失敗">
-          {termsMode && <TermsModal mode={termsMode} onClose={() => setTermsMode(null)} />}
-        </LazyErrorBoundary>
-      </Suspense>
+      {termsMode && <TermsModal mode={termsMode} onClose={() => setTermsMode(null)} />}
     </div>
   );
 }

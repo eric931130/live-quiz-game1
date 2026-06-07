@@ -9,6 +9,12 @@ service cloud.firestore {
       return signedIn() && request.auth.uid == userId;
     }
 
+    function isTeacher() {
+      return signedIn() && 
+             exists(/databases/$(database)/documents/Users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/Users/$(request.auth.uid)).data.role == 'teacher';
+    }
+
     // Question bank authority lives in the backend API. Teachers should not
     // bypass server-side ownership, sharing, legal acknowledgement, or audit checks.
     match /QuizBanks/{bankId} {
@@ -23,26 +29,83 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // User profiles - restricted read to prevent email disclosure
     match /Users/{userId} {
-      allow read: if signedIn();
-      allow create, update: if isSelf(userId);
-      allow delete: if false;
+      allow read: if isSelf(userId) || isTeacher();
+      allow create: if isSelf(userId) || isTeacher();
+      allow update: if (isSelf(userId) && 
+                        (request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']) == false))
+                    || isTeacher();
+      allow delete: if isTeacher();
+    }
+
+    match /SystemCounters/{counterId} {
+      allow read: if true;
+      allow write: if signedIn() || isTeacher();
     }
 
     // Existing classroom flows still use Firestore directly in this app.
     match /Assignments/{assignmentId} {
       allow read: if true;
-      allow create, update, delete: if signedIn();
+      allow create, update, delete: if isTeacher();
     }
 
     match /AssignmentResults/{resultId} {
-      allow read, create: if true;
-      allow update, delete: if signedIn();
+      allow read: if isTeacher() || (signedIn() && request.auth.uid == resource.data.userId);
+      allow create: if signedIn();
+      allow update, delete: if isTeacher();
     }
 
     match /ClassroomDiscussions/{messageId} {
       allow read, create: if true;
       allow update, delete: if signedIn();
+    }
+
+    match /StageAttempts/{attemptId} {
+      allow read: if isTeacher() || (signedIn() && request.auth.uid == resource.data.playerId);
+      allow create: if signedIn() && request.auth.uid == request.resource.data.playerId;
+      allow update, delete: if isTeacher();
+    }
+
+    match /StageAttempt/{attemptId} {
+      allow read: if isTeacher() || (signedIn() && request.auth.uid == resource.data.playerId);
+      allow create: if signedIn() && request.auth.uid == request.resource.data.playerId;
+      allow update, delete: if isTeacher();
+    }
+
+    match /UserStageProgress/{progressId} {
+      allow read: if true;
+      allow write: if signedIn() && (request.auth.uid == request.resource.data.playerId || isTeacher());
+    }
+
+    match /WorldSettings/{worldId} {
+      allow read: if true;
+      allow write: if isTeacher();
+    }
+
+    match /Worlds/{worldId} {
+      allow read: if true;
+      allow write: if isTeacher();
+    }
+
+    match /ChallengeRounds/{roundId} {
+      allow read: if true;
+      allow write: if isTeacher();
+    }
+
+    match /CompetitionRound/{roundId} {
+      allow read: if true;
+      allow write: if isTeacher();
+    }
+
+    match /PlayerCompetitionProgress/{progressId} {
+      allow read: if true;
+      allow write: if signedIn() && (request.auth.uid == request.resource.data.playerId || isTeacher());
+    }
+
+    match /TeacherAuditLogs/{logId} {
+      allow read, create: if isTeacher();
+      allow update, delete: if false;
     }
 
     match /{document=**} {
