@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import {
   AlertTriangle,
   BookOpenCheck,
@@ -203,14 +203,14 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
     knowledgePoint: questionContext.knowledgePoint || questionContext.chapter || questionContext.Chapter || ''
   });
 
-  const loadStudent = async () => {
+  const loadStudent = useCallback(async () => {
     const data = await peerLearningApi.overview(user, query);
     const board = await peerLearningApi.leaderboard(user);
     setOverview(data);
     setLeaderboard(board);
-  };
+  }, [user, query]);
 
-  const loadTeacher = async () => {
+  const loadTeacher = useCallback(async () => {
     const teacherFilter = { classId: settingsClassId };
     const [queueData, analyticsData, safetyData, settingsData, logsData, timelineData] = await Promise.all([
       peerLearningApi.teacherQueue(user, teacherFilter),
@@ -228,9 +228,9 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
     setModerationTimeline(timelineData);
     setSelectedModeration({});
     setTimelineCaseDetail(null);
-  };
+  }, [user, settingsClassId]);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setError('');
     try {
       if (mode === 'teacher') await loadTeacher();
@@ -238,11 +238,14 @@ export default function PeerLearningHub({ mode = 'student', user, questionContex
     } catch (err) {
       setError(err.message);
     }
-  };
+  }, [mode, loadTeacher, loadStudent]);
 
   useEffect(() => {
-    load();
-  }, [mode, query.questionId, query.classId, settingsClassId]);
+    const timer = setTimeout(() => {
+       load();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [load]);
 
   const runStudentAction = async (action) => {
     setBusy(true);

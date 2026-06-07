@@ -119,7 +119,7 @@ function visibilityText(visibility) {
   return VISIBILITY_LABELS[visibility] || visibility || '私人';
 }
 
-function rightsRiskText(status) {
+function _rightsRiskText(status) {
   return RIGHTS_RISK_LABELS[status] || status || '未檢查';
 }
 
@@ -1172,13 +1172,16 @@ export default function QuestionBankDashboard({
           ['manual', Pencil, '手動新增題目', '適合少量題目與精修題幹、解析、知識點。'],
           ['paste', UploadCloud, '複製貼上匯入', '支援以 | 或 tab 分隔題目與選項。'],
           ['batch', Rows3, '批量建立表單', '快速輸入多題，先驗證再儲存。']
-        ].map(([value, Icon, title, text]) => (
-          <button key={value} className={createMode === value ? 'active' : ''} onClick={() => setCreateMode(value)}>
-            <Icon size={22} />
-            <strong>{title}</strong>
-            <span>{text}</span>
-          </button>
-        ))}
+        ].map(([value, _Icon, title, text]) => {
+          const IconComponent = _Icon;
+          return (
+            <button key={value} className={createMode === value ? 'active' : ''} onClick={() => setCreateMode(value)}>
+              <IconComponent size={22} />
+              <strong>{title}</strong>
+              <span>{text}</span>
+            </button>
+          );
+        })}
       </div>
 
       {createMode === 'excel' && (

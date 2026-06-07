@@ -138,10 +138,7 @@ export default function StudentView({ onGoBack, currentUser, initialCode }) {
        dailyPlayData = { date: todayStr, count: 0 };
     }
     if (dailyPlayData.count >= 5) {
-       const proceed = window.confirm('【防沉迷提醒】
-您今天已經進行了 5 次測驗，為了保護您的視力與維持學習效率，建議您先休息 10-15 分鐘再回來！
-
-確定要繼續參加測驗嗎？');
+       const proceed = window.confirm(`【防沉迷提醒】\n您今天已經進行了 5 次測驗，為了保護您的視力與維持學習效率，建議您先休息 10-15 分鐘再回來！\n\n確定要繼續參加測驗嗎？`);
        if (!proceed) return;
     }
     dailyPlayData.count += 1;
@@ -334,7 +331,7 @@ if (!currentAuthUser) {
      
      setFeedback({ isCorrect, correctOption, points, currentScore, streak: newStreak });
      setStep('assignment_feedback');
-  }, [aQuestionStartTime, streak]);
+  }, [aQuestionStartTime, streak, assignment?.id, assignment?.questionBankId]);
 
   const loadAssignmentQuestion = useCallback((qs, idx) => {
      if (idx >= qs.length) {
@@ -653,7 +650,7 @@ if (!currentAuthUser) {
   }
 
   if (step === 'game_over' && finalReport) {
-    const wrongAnswers = (finalReport.answers || []).filter((ans) => !ans.correct && ans.prompt);
+    const _wrongAnswers = (finalReport.answers || []).filter((ans) => !ans.correct && ans.prompt);
 
     if (showTransformation) {
        return (
@@ -733,7 +730,6 @@ if (!currentAuthUser) {
                <ParticleButton className="btn primary-btn xl-btn" onClick={() => window.location.reload()} style={{ borderRadius: '50px' }}>再玩一次</ParticleButton>
             </div>
           </div>
->>>>>>> 421d087 (feat: implement user authentication redesign, anonymized student code generation, layout clipping fix, and production backend URL correction)
         </div>
       </div>
     );

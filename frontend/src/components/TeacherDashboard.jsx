@@ -1,7 +1,7 @@
 import React, { Suspense, lazy, useState, useEffect, useRef, useCallback } from 'react';
 import { io } from 'socket.io-client';
 import { QRCodeSVG } from 'qrcode.react';
-import { collection, addDoc, getDocs, deleteDoc, doc, updateDoc, setDoc } from 'firebase/firestore';
+import { collection, addDoc, getDocs, doc, updateDoc, setDoc } from 'firebase/firestore';
 import { Cloud, UploadCloud, Shuffle, ListChecks, Folder, FileText, CheckCircle, Trophy, BarChart3, Clock, Users, Trash2, ChevronDown, ChevronRight, MessageSquare, Save, Archive, PlusCircle, ArrowLeft } from 'lucide-react';
 import { db } from '../firebase';
 import ParticleButton from './ParticleButton';
@@ -318,19 +318,6 @@ export default function TeacherDashboard({ onGoBack, user }) {
     }
   };
 
-  const fetchDiscussionsFromFirebase = async () => {
-    try {
-      const querySnapshot = await getDocs(collection(db, "ClassroomDiscussions"));
-      const messages = [];
-      querySnapshot.forEach((doc) => {
-        messages.push({ id: doc.id, ...doc.data() });
-      });
-      messages.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-      setDiscussionMessages(messages);
-    } catch (e) {
-      console.log('載入課堂討論失敗', e);
-    }
-  };
 
   const addDiscussionMessage = async (e) => {
     e.preventDefault();
@@ -783,7 +770,7 @@ export default function TeacherDashboard({ onGoBack, user }) {
                <Suspense fallback={<DashboardChunkFallback label="載入同儕學習審核..." />}>
                  <LazyErrorBoundary title="同儕學習面板載入失敗">
                    <PeerLearningHub mode="teacher" user={user} />
-                 </Suspense>
+                 </LazyErrorBoundary>
                </Suspense>
             )}
 
@@ -906,7 +893,6 @@ export default function TeacherDashboard({ onGoBack, user }) {
             )}
 
             {(dashboardMode === 'live' || dashboardMode === 'assignment_setup') && (
->>>>>>> 421d087 (feat: implement user authentication redesign, anonymized student code generation, layout clipping fix, and production backend URL correction)
         <>
         {/* Setup Configuration Content */}
         {dashboardMode === 'assignment_setup' && (

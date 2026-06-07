@@ -1,6 +1,6 @@
 import React, { Suspense, lazy, useState, useEffect } from 'react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
 import { auth, db } from './firebase';
 import ParticleButton from './components/ParticleButton';
 import LazyErrorBoundary from './components/LazyErrorBoundary';
@@ -37,7 +37,7 @@ function RouteFallback({ label = '載入中...' }) {
   );
 }
 
-const subjectCategories = [
+const _subjectCategories = [
   { title: '小學基礎素養', level: '國小 1-6 年級', Icon: BookOpen, accent: '#2563eb', items: ['國語閱讀', '基礎數學', '自然觀察', '生活英語', '品格教育', '學習習慣'] },
   { title: '中學升學與素養', level: '國中 / 高中', Icon: Brain, accent: '#7c3aed', items: ['會考複習', '學測分科', '英文文法', '理化生物', '歷史地理', '公民素養'] },
   { title: '大學與研究方法', level: '大專院校', Icon: GraduationCap, accent: '#0f766e', items: ['通識課程', '研究方法', '統計分析', '論文寫作', '專題製作', '跨域學程'] },
@@ -48,7 +48,7 @@ const subjectCategories = [
   { title: '企業內訓與組織學習', level: '團隊培訓', Icon: Building2, accent: '#475569', items: ['新人訓練', '產品知識', 'SOP 測驗', '資安教育', 'ESG 永續', '管理領導'] }
 ];
 
-const platformValues = [
+const _platformValues = [
   {
     title: '讓老師保有自己的教學語氣',
     text: '平台不預設老師只能教某一種內容。課名、主題、單元名稱、題庫分類都能依照老師的課程設計調整，讓線上工具服務教學，而不是把教學塞進固定模板。'
@@ -63,7 +63,7 @@ const platformValues = [
   }
 ];
 
-const teachingModes = [
+const _teachingModes = [
   { title: '即時互動教室', Icon: Zap, text: '適合課堂暖身、複習搶答、講座互動與分組競賽，學生用代碼即可加入。' },
   { title: '課後練習任務', Icon: Target, text: '適合反覆練習、補救教學與自學檢核，老師可設定期限與作答次數。' },
   { title: '正式考核模式', Icon: ClipboardCheck, text: '適合需要登入身分、限制次數、保存成績的評量情境。' },
@@ -92,14 +92,18 @@ function App() {
   useEffect(() => {
     if (loading) return;
     if (E2E_TEACHER_ACCESS && !role) {
-       setRole('teacher');
+       setTimeout(() => {
+          setRole('teacher');
+       }, 0);
        return;
     }
     const params = new URLSearchParams(window.location.search);
     const code = params.get('code');
     if (code && !role) {
-       setInitialCode(code);
-       setRole('student');
+       setTimeout(() => {
+          setInitialCode(code);
+          setRole('student');
+       }, 0);
        window.history.replaceState({}, document.title, window.location.pathname);
     }
   }, [loading, user, role]);
@@ -358,11 +362,14 @@ function App() {
                    </div>
                    <div style={{ background: '#fafafa', padding: '2rem', borderRadius: '16px', border: '1px solid #eee' }}>
                       <Building2 size={40} color="#2e7d32" style={{ marginBottom: '1rem' }} />
+                      <h3 style={{ fontSize: '1.4rem', color: 'var(--primary-dark)', marginBottom: '1rem' }}>企業 HR 與培訓部門</h3>
+                      <p style={{ color: '#666', lineHeight: '1.6' }}>
+                         企業在推行 ESG 與永續轉型時，員工認同是第一步。本平台免去複雜帳號註冊，以代碼快速加入，非常適合企業內訓、新人引導培訓，大幅提升學習完成率。
                       </p>
                    </div>
-                   <div className="audience-card">
+                   <div style={{ background: '#fafafa', padding: '2rem', borderRadius: '16px', border: '1px solid #eee' }}>
                       <BookHeart size={40} color="#ef6c00" style={{ marginBottom: '1rem' }} />
-                      <h3>知識創作者與社群講師</h3>
+                      <h3 style={{ fontSize: '1.4rem', color: 'var(--primary-dark)', marginBottom: '1rem' }}>知識創作者與社群講師</h3>
                       <p style={{ color: '#666', lineHeight: '1.6' }}>
                          社群講師、工作坊主持人與知識型創作者，可以將專長整理成課程單元，用代碼讓學員快速加入互動，並把現場討論沉澱成可複用的教學內容。
                       </p>
