@@ -31,7 +31,7 @@ const E2E_TEACHER_USER = {
 function RouteFallback({ label = '載入中...' }) {
   return (
     <div className="route-fallback">
-      <div className="route-fallback-mark">師說新宇</div>
+      <div className="route-fallback-mark">用永續知識，做永續之事</div>
       <span>{label}</span>
     </div>
   );
@@ -392,7 +392,7 @@ function App() {
              <div className="saas-footer-grid">
                 <div className="saas-footer-col">
                    <div className="saas-logo" style={{ marginBottom: '1.5rem' }}>
-                      <GraduationCap size={24} color="var(--primary-color)" /> 師說新宇
+                      <Globe2 size={24} color="var(--primary-color)" /> 用永續知識，做永續之事
                    </div>
                    <p style={{ color: '#777', lineHeight: '1.6', maxWidth: '300px' }}>
                       我們致力於讓老師用更低門檻建立互動課程，讓學生在測驗、討論與回饋中真正吸收知識。
@@ -413,7 +413,7 @@ function App() {
                 </div>
              </div>
              <div className="saas-footer-bottom">
-                <span>&copy; {new Date().getFullYear()} 師說新宇。保留所有權利。</span>
+                <span>&copy; {new Date().getFullYear()} 用永續知識，做永續之事。保留所有權利。</span>
                 <span>系統版本 v2.1.0</span>
              </div>
           </footer>

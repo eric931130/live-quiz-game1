@@ -26,7 +26,7 @@ function isAdminUser(user) {
 function DashboardChunkFallback({ label = '載入模組...' }) {
   return (
     <div className="dashboard-chunk-fallback">
-      <strong>師說新宇</strong>
+      <strong>用永續知識，做永續之事</strong>
       <span>{label}</span>
     </div>
   );
