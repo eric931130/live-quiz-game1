@@ -217,12 +217,12 @@ function App() {
   // --- SaaS Landing Page (Not Logged In) ---
   if (!user) {
      return (
-        <div style={{ background: '#fafafa', minHeight: '100vh', fontFamily: "'Noto Sans TC', sans-serif" }}>
+        <div className="saas-page-shell">
           
           {/* 1. SaaS Navbar */}
           <nav className="saas-nav">
             <div className="saas-logo">
-               <Globe2 size={28} color="var(--primary-color)" /> 用永續知識，做永續之事
+               <Globe2 size={28} color="var(--gold-bright)" /> 用永續知識，做永續之事
             </div>
             <div className="saas-nav-links">
                <a href="#about" className="saas-nav-link" style={{display: window.innerWidth > 768 ? 'block' : 'none'}}>平台理念</a>
@@ -258,25 +258,25 @@ function App() {
 
              {/* Right side floating card for Game Join */}
              <div className="saas-hero-card">
-                <h2 style={{ color: 'var(--primary-dark)', marginBottom: '1.5rem', textAlign: 'center', fontWeight: '800' }}>準備好挑戰了嗎？</h2>
+                <h2 className="title" style={{ marginBottom: '1.5rem' }}>準備好挑戰了嗎？</h2>
                 <form onSubmit={handleGuestSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
                    <div>
-                     <label style={{ display: 'block', marginBottom: '0.5rem', color: '#555', fontWeight: 'bold' }}>輸入遊戲代碼：</label>
+                     <label style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-on-dark-secondary)', fontWeight: 'bold' }}>輸入遊戲代碼：</label>
                      <input 
                        type="text" 
                        placeholder="例如：12345678" 
                        value={guestCode}
                        onChange={(e) => setGuestCode(e.target.value)}
                        required
-                       style={{ width: '100%', padding: '1.2rem', borderRadius: '12px', border: '2px solid #e0e0e0', fontSize: '1.5rem', textAlign: 'center', fontWeight: 'bold', letterSpacing: '2px' }}
+                       style={{ width: '100%', padding: '1.2rem', borderRadius: '12px', border: '2px solid var(--gold-border)', background: 'rgba(8, 15, 10, 0.7)', color: 'var(--text-on-dark)', fontSize: '1.5rem', textAlign: 'center', fontWeight: 'bold', letterSpacing: '2px' }}
                      />
                    </div>
                    <ParticleButton type="submit" className="saas-btn-solid" style={{ width: '100%', fontSize: '1.2rem', display: 'flex', justifyContent: 'center', gap: '0.5rem' }}>
                      以訪客身分加入 <Play fill="currentColor" size={20} />
                    </ParticleButton>
                 </form>
-                <div style={{ marginTop: '1.5rem', textAlign: 'center', borderTop: '1px solid #eee', paddingTop: '1.5rem' }}>
-                   <p style={{ color: '#888', fontSize: '0.95rem', marginBottom: '1rem' }}>準備進行單人任務考核？</p>
+                <div style={{ marginTop: '1.5rem', textAlign: 'center', borderTop: '1px solid rgba(129, 199, 132, 0.2)', paddingTop: '1.5rem' }}>
+                   <p style={{ color: 'var(--text-on-dark-muted)', fontSize: '0.95rem', marginBottom: '1rem' }}>準備進行單人任務考核？</p>
                    <button onClick={() => setShowAuthModal(true)} className="saas-btn-outline" style={{ width: '100%' }}>
                       請先登入會員帳號
                    </button>
@@ -287,22 +287,22 @@ function App() {
           {/* 3. Social Proof */}
           <div className="saas-social-proof">
              <span>專為現代教育與企業內訓設計</span>
-             <span style={{color: '#ddd'}}>|</span>
+             <span style={{color: 'rgba(129, 199, 132, 0.3)'}}>|</span>
              <span>🎯 聯合國 SDGs 指標對接</span>
-             <span style={{color: '#ddd'}}>|</span>
+             <span style={{color: 'rgba(129, 199, 132, 0.3)'}}>|</span>
              <span>🔒 企業級權限防護</span>
-             <span style={{color: '#ddd'}}>|</span>
+             <span style={{color: 'rgba(129, 199, 132, 0.3)'}}>|</span>
              <span>⚡ 即時百人連線</span>
           </div>
 
           {/* 4. About Us & Mission */}
-          <section id="about" className="saas-section" style={{ background: '#fff' }}>
+          <section id="about" className="saas-section">
              <div style={{ maxWidth: '1000px', margin: '0 auto', textAlign: 'center' }}>
                 <h2 className="saas-section-title">關於我們與平台理念</h2>
                 <p className="saas-section-subtitle">為什麼我們致力於永續教育科技？</p>
-                <div style={{ textAlign: 'left', lineHeight: '1.8', color: '#555', fontSize: '1.1rem', marginTop: '2rem' }}>
+                <div style={{ textAlign: 'left', lineHeight: '1.8', color: 'var(--text-on-dark-secondary)', fontSize: '1.1rem', marginTop: '2rem' }}>
                    <p style={{ marginBottom: '1.5rem' }}>
-                      在現今全球推動永續發展的大環境下，無論是學術界的「聯合國永續發展目標 (SDGs)」或是企業界的「環境、社會與公司治理 (ESG)」，都已經成為必修的顯學。然而，傳統的單向授課或紙本測驗，往往難以引起學習者的共鳴，甚至讓這些極具意義的知識變得生硬且乏味。
+                      在現今全球推動永續發展的大環境下，無論es學術界的「聯合國永續發展目標 (SDGs)」或是企業界的「環境、社會與公司治理 (ESG)」，都已經成為必修的顯學。然而，傳統的單向授課或紙本測驗，往往難以引起學習者的共鳴，甚至讓這些極具意義的知識變得生硬且乏味。
                    </p>
                    <p style={{ marginBottom: '1.5rem' }}>
                       我們團隊深信：<strong>「優質教育（SDG 4）」是驅動其他所有永續目標的核心引擎。</strong> 因此，我們結合了現代化的 Web 系統架構、即時 Socket 連線技術與直覺的雲端數據庫，打造出這款完全免費、高互動性的遊戲化測驗平台。
@@ -315,13 +315,13 @@ function App() {
           </section>
 
           {/* 5. Features Grid */}
-          <section id="features" className="saas-section" style={{ background: '#f0fdf4' }}>
+          <section id="features" className="saas-section">
              <h2 className="saas-section-title">核心功能與教學優勢</h2>
              <p className="saas-section-subtitle">我們不僅僅是一個測驗工具，更是一個完整的學習生態系統。</p>
              
              <div className="saas-features-grid">
                 <div className="saas-feature-card">
-                   <div className="saas-feature-icon" style={{ background: '#e8f5e9', color: '#2e7d32' }}>
+                   <div className="saas-feature-icon" style={{ background: 'rgba(76, 175, 80, 0.15)', color: 'var(--primary-dark)' }}>
                       <Zap size={32} />
                    </div>
                    <h3 className="saas-feature-title">即時動態對戰系統</h3>
@@ -329,7 +329,7 @@ function App() {
                 </div>
                 
                 <div className="saas-feature-card">
-                   <div className="saas-feature-icon" style={{ background: '#e3f2fd', color: '#1565c0' }}>
+                   <div className="saas-feature-icon" style={{ background: 'rgba(76, 175, 80, 0.15)', color: 'var(--primary-dark)' }}>
                       <Target size={32} />
                    </div>
                    <h3 className="saas-feature-title">嚴謹的單人考核模式</h3>
@@ -337,7 +337,7 @@ function App() {
                 </div>
                 
                 <div className="saas-feature-card">
-                   <div className="saas-feature-icon" style={{ background: '#fff3e0', color: '#ef6c00' }}>
+                   <div className="saas-feature-icon" style={{ background: 'rgba(76, 175, 80, 0.15)', color: 'var(--primary-dark)' }}>
                       <BarChart3 size={32} />
                    </div>
                    <h3 className="saas-feature-title">智慧題庫與數據分析</h3>
@@ -347,30 +347,30 @@ function App() {
           </section>
 
           {/* 6. Target Audience */}
-          <section id="audience" className="saas-section" style={{ background: '#fff' }}>
+          <section id="audience" className="saas-section">
              <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
                 <h2 className="saas-section-title">適用對象與應用情境</h2>
                 <p className="saas-section-subtitle">無論您身處何種領域，都能找到最適合的使用方式。</p>
                 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '2rem', marginTop: '3rem' }}>
-                   <div style={{ background: '#fafafa', padding: '2rem', borderRadius: '16px', border: '1px solid #eee' }}>
-                      <GraduationCap size={40} color="#1565c0" style={{ marginBottom: '1rem' }} />
+                   <div className="audience-card">
+                      <GraduationCap size={40} color="var(--gold-bright)" style={{ marginBottom: '1rem' }} />
                       <h3 style={{ fontSize: '1.4rem', color: 'var(--primary-dark)', marginBottom: '1rem' }}>校園教育工作者</h3>
-                      <p style={{ color: '#666', lineHeight: '1.6' }}>
+                      <p style={{ lineHeight: '1.6' }}>
                          對於中學與大專院校教師而言，本平台是翻轉課堂的絕佳利器。您可以在課堂上發起即時團戰，讓原本枯燥的法規與指標成為刺激的競賽；課後則可派發單人考核任務，輕鬆收集形成性評量數據。
                       </p>
                    </div>
-                   <div style={{ background: '#fafafa', padding: '2rem', borderRadius: '16px', border: '1px solid #eee' }}>
-                      <Building2 size={40} color="#2e7d32" style={{ marginBottom: '1rem' }} />
+                   <div className="audience-card">
+                      <Building2 size={40} color="var(--gold-bright)" style={{ marginBottom: '1rem' }} />
                       <h3 style={{ fontSize: '1.4rem', color: 'var(--primary-dark)', marginBottom: '1rem' }}>企業 HR 與培訓部門</h3>
-                      <p style={{ color: '#666', lineHeight: '1.6' }}>
+                      <p style={{ lineHeight: '1.6' }}>
                          企業在推行 ESG 與永續轉型時，員工認同是第一步。本平台免去複雜帳號註冊，以代碼快速加入，非常適合企業內訓、新人引導培訓，大幅提升學習完成率。
                       </p>
                    </div>
-                   <div style={{ background: '#fafafa', padding: '2rem', borderRadius: '16px', border: '1px solid #eee' }}>
-                      <BookHeart size={40} color="#ef6c00" style={{ marginBottom: '1rem' }} />
+                   <div className="audience-card">
+                      <BookHeart size={40} color="var(--gold-bright)" style={{ marginBottom: '1rem' }} />
                       <h3 style={{ fontSize: '1.4rem', color: 'var(--primary-dark)', marginBottom: '1rem' }}>知識創作者與社群講師</h3>
-                      <p style={{ color: '#666', lineHeight: '1.6' }}>
+                      <p style={{ lineHeight: '1.6' }}>
                          社群講師、工作坊主持人與知識型創作者，可以將專長整理成課程單元，用代碼讓學員快速加入互動，並把現場討論沉澱成可複用的教學內容。
                       </p>
                    </div>
@@ -382,7 +382,7 @@ function App() {
           <div className="saas-cta">
              <h2>準備好改變您的教學方式了嗎？</h2>
              <p>立即建立第一門課，讓你的知識被更多真正想學習的人遇見。</p>
-             <button onClick={() => setShowAuthModal(true)} style={{ background: 'white', color: 'var(--primary-dark)', border: 'none', padding: '1.2rem 3rem', borderRadius: '50px', fontSize: '1.3rem', fontWeight: '800', cursor: 'pointer', boxShadow: '0 10px 20px rgba(0,0,0,0.1)' }}>
+             <button onClick={() => setShowAuthModal(true)} className="saas-btn-solid xl-btn">
                 立即免費註冊
              </button>
           </div>
@@ -392,9 +392,9 @@ function App() {
              <div className="saas-footer-grid">
                 <div className="saas-footer-col">
                    <div className="saas-logo" style={{ marginBottom: '1.5rem' }}>
-                      <Globe2 size={24} color="var(--primary-color)" /> 用永續知識，做永續之事
+                      <Globe2 size={24} color="var(--gold-bright)" /> 用永續知識，做永續之事
                    </div>
-                   <p style={{ color: '#777', lineHeight: '1.6', maxWidth: '300px' }}>
+                   <p style={{ color: 'var(--text-on-dark-muted)', lineHeight: '1.6', maxWidth: '300px' }}>
                       我們致力於讓老師用更低門檻建立互動課程，讓學生在測驗、討論與回饋中真正吸收知識。
                    </p>
                 </div>
