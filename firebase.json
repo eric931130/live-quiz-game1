@@ -1,6 +1,6 @@
 {
   "hosting": {
-    "site": "teach999-53c2d",
+    "site": "empath-os",
     "public": "frontend/dist",
     "ignore": [
       "firebase.json",
