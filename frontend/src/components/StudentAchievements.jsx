@@ -127,10 +127,10 @@ export default function StudentAchievements({ currentUser, onGoBack }) {
       <div className="app-tool-window large animate-fade-in">
         <div className="app-tool-window-header">
           <div className="app-tool-window-header-title">
-             <button onClick={onGoBack} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 'bold' }}>
+             <button onClick={onGoBack} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: 'var(--text-main)', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 'bold' }}>
                 <ArrowLeft size={20} /> 返回 Dashboard
              </button>
-             <span style={{ color: 'rgba(255,255,255,0.4)' }}>|</span>
+             <span style={{ color: 'rgba(31, 107, 58, 0.4)' }}>|</span>
              <span>🏆 個人成就與錯題本</span>
           </div>
           <div className="app-tool-window-controls">

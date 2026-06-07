@@ -418,7 +418,7 @@ if (!currentAuthUser) {
         <div className="app-tool-window animate-fade-in">
           <div className="app-tool-window-header">
             <div className="app-tool-window-header-title">
-               <button onClick={exitStudentView} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 'bold' }}>
+               <button onClick={exitStudentView} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: 'var(--text-main)', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 'bold' }}>
                   <ArrowLeft size={20} /> 返回首頁
                </button>
                <span style={{ color: 'rgba(255,255,255,0.4)' }}>|</span>
@@ -469,7 +469,7 @@ if (!currentAuthUser) {
                      socket.emit('leave_room', { roomId: roomCode, nickname });
                   }
                   setStep('join');
-               }} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 'bold' }}>
+               }} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: 'var(--text-main)', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 'bold' }}>
                   <ArrowLeft size={20} /> 離開房間
                </button>
                <span style={{ color: 'rgba(255,255,255,0.4)' }}>|</span>
@@ -505,7 +505,7 @@ if (!currentAuthUser) {
          <div className="app-tool-window animate-fade-in">
            <div className="app-tool-window-header">
              <div className="app-tool-window-header-title">
-                <button onClick={() => setStep('join')} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 'bold' }}>
+                <button onClick={() => setStep('join')} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: 'var(--text-main)', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 'bold' }}>
                    <ArrowLeft size={20} /> 返回
                 </button>
                 <span style={{ color: 'rgba(255,255,255,0.4)' }}>|</span>
@@ -566,7 +566,7 @@ if (!currentAuthUser) {
         <div className="app-tool-window large animate-fade-in">
           <div className="app-tool-window-header">
             <div className="app-tool-window-header-title">
-               <button onClick={quitQuiz} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 'bold' }}>
+               <button onClick={quitQuiz} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: 'var(--text-main)', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 'bold' }}>
                   <ArrowLeft size={20} /> 退出
                </button>
                <span style={{ color: 'rgba(255,255,255,0.4)' }}>|</span>
@@ -694,7 +694,7 @@ if (!currentAuthUser) {
         <div className="app-tool-window large animate-fade-in">
           <div className="app-tool-window-header">
             <div className="app-tool-window-header-title">
-               <button onClick={exitStudentView} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 'bold' }}>
+               <button onClick={exitStudentView} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: 'var(--text-main)', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 'bold' }}>
                   <ArrowLeft size={20} /> 返回首頁
                </button>
                <span style={{ color: 'rgba(255,255,255,0.4)' }}>|</span>

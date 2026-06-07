@@ -113,8 +113,9 @@ body {
   padding: 2rem;
   color: var(--text-on-dark);
   background:
-    radial-gradient(circle at 50% 0%, rgba(76, 175, 80, 0.16), transparent 42%),
-    #080808;
+    radial-gradient(circle at 50% 0%, rgba(123, 196, 127, 0.12), transparent 42%),
+    var(--white-2) !important;
+  color: var(--text-main) !important;
 }
 
 .route-fallback {
@@ -218,7 +219,7 @@ body {
   background: linear-gradient(90deg, #a5d6a7 0%, var(--primary) 45%, #81c784 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
-  text-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+  text-shadow: none !important;
   margin-bottom: 0.5rem;
 }
 
@@ -890,14 +891,14 @@ html {
 .saas-hero-badge {
   display: inline-block;
   padding: 0.45rem 1rem;
-  background: rgba(46, 125, 50, 0.25);
-  color: #a5d6a7;
-  border-radius: 999px;
-  font-weight: 700;
-  font-size: 0.9rem;
-  margin-bottom: 1.5rem;
-  border: 1px solid rgba(129, 199, 132, 0.35);
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+  background: rgba(123, 196, 127, 0.18) !important;
+  color: var(--green-5) !important;
+  border-radius: 999px !important;
+  font-weight: 700 !important;
+  font-size: 0.9rem !important;
+  margin-bottom: 1.5rem !important;
+  border: 1.5px solid rgba(123, 196, 127, 0.35) !important;
+  box-shadow: 0 4px 15px rgba(31, 107, 58, 0.03) !important;
 }
 
 .saas-hero-title {
@@ -912,7 +913,7 @@ html {
   background: linear-gradient(90deg, #a5d6a7 0%, var(--primary) 54%, #81c784 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
-  text-shadow: 0 2px 10px rgba(76, 175, 80, 0.15);
+  text-shadow: none !important;
 }
 
 .saas-hero-subtitle {
@@ -932,13 +933,14 @@ html {
 }
 
 .saas-hero-metrics div {
-  background: rgba(15, 30, 20, 0.65);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  border: 1px solid rgba(129, 199, 132, 0.25);
-  border-radius: 12px;
-  padding: 1.2rem;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2), inset 0 1px 1px rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.75) !important;
+  backdrop-filter: blur(10px) !important;
+  -webkit-backdrop-filter: blur(10px) !important;
+  border: 1.5px solid rgba(123, 196, 127, 0.25) !important;
+  border-radius: 12px !important;
+  padding: 1.2rem !important;
+  box-shadow: 0 8px 32px rgba(31, 107, 58, 0.03), inset 0 1px 1px rgba(255, 255, 255, 0.8) !important;
+  color: var(--text-main) !important;
 }
 
 .saas-hero-metrics strong {
@@ -1013,17 +1015,21 @@ html {
 
 .saas-social-proof {
   padding: 1.35rem 5%;
-  background: rgba(8, 15, 10, 0.95);
-  border-top: 1px solid rgba(129, 199, 132, 0.2);
-  border-bottom: 1px solid rgba(129, 199, 132, 0.2);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 3rem;
-  flex-wrap: wrap;
-  color: #a5d6a7;
-  font-weight: bold;
-  font-size: 1.1rem;
+  padding: 1.35rem 5% !important;
+  background: rgba(255, 255, 255, 0.72) !important;
+  backdrop-filter: blur(18px) !important;
+  -webkit-backdrop-filter: blur(18px) !important;
+  border-top: 1px solid rgba(62, 154, 82, 0.18) !important;
+  border-bottom: 1px solid rgba(62, 154, 82, 0.18) !important;
+  display: flex !important;
+  justify-content: center !important;
+  align-items: center !important;
+  gap: 3rem !important;
+  flex-wrap: wrap !important;
+  color: var(--text-main) !important;
+  font-weight: bold !important;
+  font-size: 1.1rem !important;
+  box-shadow: 0 4px 20px rgba(31, 107, 58, 0.03) !important;
 }
 
 .saas-section {
@@ -1441,9 +1447,9 @@ textarea:focus-visible {
 
 .saas-hero {
   background:
-    radial-gradient(circle at 16% 24%, rgba(123, 196, 127, 0.18), transparent 27%),
-    radial-gradient(circle at 82% 18%, rgba(242, 213, 107, 0.12), transparent 24%),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(248, 251, 249, 0.95) 48%, rgba(234, 247, 236, 0.9)) !important;
+    radial-gradient(circle at 16% 24%, rgba(123, 196, 127, 0.12), transparent 30%),
+    radial-gradient(circle at 82% 18%, rgba(124, 183, 243, 0.12), transparent 40%),
+    linear-gradient(135deg, var(--white-1), var(--white-2) 48%, var(--green-1) 100%) !important;
 }
 
 .saas-hero-title,
@@ -1480,8 +1486,9 @@ textarea:focus-visible {
 .highlight-url {
   color: var(--primary) !important;
   background-image: linear-gradient(90deg, var(--green-5) 0%, var(--green-4) 50%, var(--blue-3) 100%) !important;
-  -webkit-background-clip: text;
-  background-clip: text;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  text-shadow: none !important;
 }
 
 .saas-hero-title,
@@ -1543,10 +1550,12 @@ span {
 .teacher-game-over,
 .score-summary,
 .feedback-content {
-  background: linear-gradient(180deg, rgba(12, 24, 18, 0.86), rgba(22, 22, 22, 0.96)) !important;
-  border: 1px solid rgba(76, 175, 80, 0.25) !important;
+  background: rgba(255, 255, 255, 0.72) !important;
+  backdrop-filter: blur(18px) !important;
+  -webkit-backdrop-filter: blur(18px) !important;
+  border: 1.5px solid rgba(62, 154, 82, 0.18) !important;
   color: var(--text-main) !important;
-  box-shadow: var(--shadow-soft), inset 0 1px 0 rgba(129, 199, 132, 0.08) !important;
+  box-shadow: var(--shadow-soft), inset 0 1px 0 rgba(255, 255, 255, 0.8) !important;
 }
 
 .card:hover,
@@ -1622,9 +1631,9 @@ button[type="submit"] {
 .teacher-card button,
 .modal-content button,
 .home-container footer button {
-  background: rgba(12, 24, 18, 0.6) !important;
-  color: var(--primary) !important;
-  border: 1px solid rgba(76, 175, 80, 0.55) !important;
+  background: rgba(234, 247, 236, 0.6) !important;
+  color: var(--green-5) !important;
+  border: 1.5px solid rgba(123, 196, 127, 0.5) !important;
   box-shadow: none !important;
 }
 
@@ -1634,9 +1643,9 @@ button[type="submit"] {
 .teacher-card button:hover,
 .modal-content button:hover,
 .home-container footer button:hover {
-  background: rgba(76, 175, 80, 0.12) !important;
+  background: rgba(191, 231, 198, 0.8) !important;
   border-color: var(--green-4) !important;
-  color: var(--primary) !important;
+  color: var(--green-5) !important;
   transform: translateY(-1px) !important;
 }
 
@@ -1653,8 +1662,8 @@ button[style*="#ffebee"],
 button[style*="#c62828"],
 button[style*="#ef5350"],
 .home-container button[style*="#ffebee"] {
-  background: rgba(230, 90, 90, 0.1) !important;
-  color: #FF8A8A !important;
+  background: #FFEBEE !important;
+  color: #C62828 !important;
   border: 1px solid rgba(230, 90, 90, 0.45) !important;
 }
 
@@ -1662,11 +1671,11 @@ input:not([type="checkbox"]):not([type="radio"]),
 select,
 textarea,
 .input-field {
-  background: rgba(8, 15, 10, 0.8) !important;
-  border: 1px solid rgba(129, 199, 132, 0.35) !important;
+  background: var(--white-1) !important;
+  border: 1.5px solid rgba(123, 196, 127, 0.45) !important;
   color: var(--text-main) !important;
   border-radius: 12px !important;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
 }
 
 input::placeholder,
@@ -1699,10 +1708,10 @@ input[type="file"]::file-selector-button {
 }
 
 .modal-content {
-  background: linear-gradient(180deg, var(--surface-elevated), var(--surface-card)) !important;
-  border: 1px solid rgba(76, 175, 80, 0.3) !important;
+  background: rgba(255, 255, 255, 0.95) !important;
+  border: 1.5px solid rgba(123, 196, 127, 0.45) !important;
   color: var(--text-main) !important;
-  box-shadow: 0 26px 70px rgba(0,0,0,0.58), inset 0 1px 0 rgba(129, 199, 132, 0.08) !important;
+  box-shadow: 0 26px 70px rgba(31, 107, 58, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.8) !important;
 }
 
 .modal-content div,
@@ -1720,8 +1729,8 @@ input[type="file"]::file-selector-button {
 
 .modal-content [style*="#FFEBEE"],
 .modal-content [style*="#ffebee"] {
-  background: rgba(230, 90, 90, 0.12) !important;
-  color: #FF8A8A !important;
+  background: #FFEBEE !important;
+  color: #C62828 !important;
   border: 1px solid rgba(230, 90, 90, 0.35) !important;
 }
 
@@ -4374,3 +4383,9 @@ input[type="file"]::file-selector-button {
 }
 
 
+
+
+select option {
+  background: var(--white-1) !important;
+  color: var(--text-main) !important;
+}

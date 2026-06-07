@@ -662,7 +662,7 @@ export default function TeacherDashboard({ onGoBack, user }) {
         <div className="app-tool-window large animate-fade-in">
           <div className="app-tool-window-header">
             <div className="app-tool-window-header-title">
-               <button onClick={onGoBack} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 'bold' }}>
+               <button onClick={onGoBack} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: 'var(--text-main)', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 'bold' }}>
                   <ArrowLeft size={20} /> 返回會員中心
                </button>
                <span style={{ color: 'rgba(255,255,255,0.4)' }}>|</span>
@@ -814,7 +814,7 @@ export default function TeacherDashboard({ onGoBack, user }) {
                       onChange={e => setDiscussionInput(e.target.value)}
                       placeholder="輸入要保存或待整理的聊天內容、學生提問、老師補充說明..."
                       rows={4}
-                      style={{ width: '100%', marginTop: '0.5rem', padding: '1rem', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(0,0,0,0.2)', color: '#fff', fontFamily: 'inherit', fontSize: '1rem', resize: 'vertical' }}
+                      style={{ width: '100%', marginTop: '0.5rem', padding: '1rem', borderRadius: '12px', border: '1.5px solid rgba(123, 196, 127, 0.45)', background: 'var(--white-1)', color: 'var(--text-main)', fontFamily: 'inherit', fontSize: '1rem', resize: 'vertical' }}
                     />
                     <ParticleButton type="submit" className="btn primary-btn" style={{ marginTop: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
                       <PlusCircle size={18} /> 新增討論內容
@@ -831,7 +831,7 @@ export default function TeacherDashboard({ onGoBack, user }) {
                       <button
                         key={value}
                         onClick={() => setDiscussionFilter(value)}
-                        style={{ padding: '0.6rem 1rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)', background: discussionFilter === value ? 'var(--primary-dark)' : 'rgba(255,255,255,0.05)', color: '#fff', fontWeight: 'bold', cursor: 'pointer' }}
+                        style={{ padding: '0.6rem 1rem', borderRadius: '8px', border: '1.5px solid rgba(123, 196, 127, 0.45)', background: discussionFilter === value ? 'var(--green-2)' : 'var(--white-2)', color: 'var(--text-main)', fontWeight: 'bold', cursor: 'pointer' }}
                       >
                         {label}
                       </button>
@@ -1125,7 +1125,7 @@ export default function TeacherDashboard({ onGoBack, user }) {
         </>)}
 
         <div className="actions" style={{ marginTop: '2rem', display: 'flex', justifyContent: 'space-between' }}>
-          <ParticleButton className="btn back-btn" onClick={onGoBack} style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.2)', color: '#fff' }}>返回會員中心</ParticleButton>
+          <ParticleButton className="btn back-btn" onClick={onGoBack} style={{ background: 'transparent', border: '1.5px solid rgba(123, 196, 127, 0.4)', color: 'var(--text-main)' }}>返回會員中心</ParticleButton>
           <ParticleButton className="btn primary-btn" onClick={createRoom} disabled={selectedBankQuestions.length === 0 && setupTab === 'select'}>
              {dashboardMode === 'live' ? '建立測驗房間' : '派發單人任務'}
           </ParticleButton>
@@ -1146,7 +1146,7 @@ export default function TeacherDashboard({ onGoBack, user }) {
         <div className="app-tool-window animate-fade-in">
           <div className="app-tool-window-header">
             <div className="app-tool-window-header-title">
-               <button onClick={cancelWaiting} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 'bold' }}>
+               <button onClick={cancelWaiting} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: 'var(--text-main)', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 'bold' }}>
                   <ArrowLeft size={20} /> 取消並返回
                </button>
                <span style={{ color: 'rgba(255,255,255,0.4)' }}>|</span>
@@ -1172,7 +1172,7 @@ export default function TeacherDashboard({ onGoBack, user }) {
               <h3 style={{ color: 'var(--primary-color)' }}>已報到 ({players.length} 人)</h3>
               <div className="player-badges" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', justifyContent: 'center' }}>
                 {players.map(p => (
-                   <div key={p.id} className="player-badge animate-pop" style={{ background: 'rgba(214, 168, 79, 0.25)', color: '#fff', border: '1px solid rgba(214, 168, 79, 0.4)', padding: '0.5rem 1rem', borderRadius: '20px', fontWeight: 'bold' }}>{p.nickname}</div>
+                   <div key={p.id} className="player-badge animate-pop" style={{ background: 'var(--green-1)', color: 'var(--text-main)', border: '1.5px solid rgba(123, 196, 127, 0.45)', padding: '0.5rem 1rem', borderRadius: '20px', fontWeight: 'bold' }}>{p.nickname}</div>
                 ))}
               </div>
             </div>
@@ -1191,7 +1191,7 @@ export default function TeacherDashboard({ onGoBack, user }) {
         <div className="app-tool-window large animate-fade-in">
           <div className="app-tool-window-header">
             <div className="app-tool-window-header-title">
-               <button onClick={terminateGame} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 'bold' }}>
+               <button onClick={terminateGame} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: 'var(--text-main)', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 'bold' }}>
                   <ArrowLeft size={20} /> 終止測驗
                </button>
                <span style={{ color: 'rgba(255,255,255,0.4)' }}>|</span>
@@ -1210,7 +1210,7 @@ export default function TeacherDashboard({ onGoBack, user }) {
                 <div className="timer" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><Clock /> {timeLeft}s</div>
               </div>
               
-              <h1 className="question-text" style={{ textAlign: 'center', fontSize: '2.5rem', margin: '3rem 0', color: '#fff' }}>{currentQuestion.question}</h1>
+              <h1 className="question-text" style={{ textAlign: 'center', fontSize: '2.5rem', margin: '3rem 0', color: 'var(--text-main)' }}>{currentQuestion.question}</h1>
               
               <div className="options-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
                  {['A', 'B'].map((opt) => (
@@ -1249,7 +1249,7 @@ export default function TeacherDashboard({ onGoBack, user }) {
         <div className="app-tool-window large animate-fade-in">
           <div className="app-tool-window-header">
             <div className="app-tool-window-header-title">
-               <button onClick={terminateGame} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 'bold' }}>
+               <button onClick={terminateGame} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: 'var(--text-main)', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 'bold' }}>
                   <ArrowLeft size={20} /> 終止測驗
                </button>
                <span style={{ color: 'rgba(255,255,255,0.4)' }}>|</span>
@@ -1286,7 +1286,7 @@ export default function TeacherDashboard({ onGoBack, user }) {
                                 boxShadow: '0 4px 10px rgba(0,0,0,0.2)',
                                 position: 'relative'
                             }}>
-                               <div style={{ position: 'absolute', top: '-30px', width: '100%', textAlign: 'center', fontWeight: 'bold', fontSize: '1.2rem', color: '#fff' }}>{count}</div>
+                               <div style={{ position: 'absolute', top: '-30px', width: '100%', textAlign: 'center', fontWeight: 'bold', fontSize: '1.2rem', color: 'var(--text-main)' }}>{count}</div>
                             </div>
                       </div>
                       <div style={{ textAlign: 'center', fontWeight: 'bold', color: isCorrect ? '#4caf50' : '#888', marginTop: '12px', fontSize: '1.4rem', background: isCorrect ? 'rgba(76, 175, 80, 0.2)' : 'transparent', borderRadius: '50%', width: '40px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{opt}</div>
@@ -1325,7 +1325,7 @@ export default function TeacherDashboard({ onGoBack, user }) {
         <div className="app-tool-window large animate-fade-in">
           <div className="app-tool-window-header">
             <div className="app-tool-window-header-title">
-               <button onClick={() => window.location.reload()} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 'bold' }}>
+               <button onClick={() => window.location.reload()} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: 'var(--text-main)', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 'bold' }}>
                   <ArrowLeft size={20} /> 返回控制面板
                </button>
                <span style={{ color: 'rgba(255,255,255,0.4)' }}>|</span>
@@ -1344,7 +1344,7 @@ export default function TeacherDashboard({ onGoBack, user }) {
                 {finalReport.sort((a,b)=>b.score - a.score).map((player, idx) => (
                   <div key={idx} className="leaderboard-item" style={{ display: 'flex', alignItems: 'center', padding: '1.5rem', background: idx < 3 ? 'rgba(214, 168, 79, 0.15)' : 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', marginBottom: '1rem' }}>
                     <span className="rank" style={{ fontSize: '2rem', fontWeight: 'bold', width: '60px', color: '#ffbd2e' }}>{idx < 3 ? ['🥇','🥈','🥉'][idx] : `#${idx + 1}`}</span>
-                    <span className="nick" style={{ flex: 1, fontSize: '1.5rem', fontWeight: 'bold', color: '#fff' }}>{player.nickname}</span>
+                    <span className="nick" style={{ flex: 1, fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--text-main)' }}>{player.nickname}</span>
                     <span className="score" style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--primary-color)' }}>{player.score} 分</span>
                   </div>
                 ))}
