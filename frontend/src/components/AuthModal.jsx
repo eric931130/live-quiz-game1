@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 import { doc, runTransaction } from 'firebase/firestore';
 import { auth, db } from '../firebase';
-import { X, Mail, Lock, User, LogIn, Calendar, Smile, ShieldAlert, ArrowLeft } from 'lucide-react';
+import { X, Mail, Lock, User, LogIn, Calendar, Smile, ShieldAlert, ArrowLeft, Globe2 } from 'lucide-react';
 import ParticleButton from './ParticleButton';
 
 const AVATARS = ['🧑‍🚀', '🦸', '🥷', '🧙', '👽', '🤖', '🦊', '🦉'];
@@ -156,6 +156,7 @@ export default function AuthModal({ onClose, onSuccess }) {
                   <ArrowLeft size={20} /> 返回
                </button>
                <span style={{ color: 'rgba(255,255,255,0.4)' }}>|</span>
+               <Globe2 size={20} color="var(--primary-color)" />
                <span>{isLogin ? '會員登入' : '註冊新帳號'}</span>
             </div>
             <div className="app-tool-window-controls">
@@ -190,7 +191,7 @@ export default function AuthModal({ onClose, onSuccess }) {
                             <button 
                                key={a} type="button" 
                                onClick={() => setAvatar(a)}
-                               style={{ fontSize: '1.5rem', padding: '0.5rem', background: avatar === a ? 'rgba(0, 188, 212, 0.25)' : 'rgba(255, 255, 255, 0.05)', border: avatar === a ? '2px solid #00bcd4' : '2px solid transparent', borderRadius: '12px', cursor: 'pointer', transition: 'all 0.2s', color: 'white' }}
+                               style={{ fontSize: '1.5rem', padding: '0.5rem', background: avatar === a ? 'rgba(214, 168, 79, 0.25)' : 'rgba(255, 255, 255, 0.05)', border: avatar === a ? '2px solid var(--primary-color)' : '2px solid transparent', borderRadius: '12px', cursor: 'pointer', transition: 'all 0.2s', color: 'white' }}
                             >
                                {a}
                             </button>
@@ -249,7 +250,7 @@ export default function AuthModal({ onClose, onSuccess }) {
                          />
                          <label htmlFor="privacyConsent" style={{ fontSize: '0.85rem', color: '#94a3b8', cursor: 'pointer', userSelect: 'none', lineHeight: '1.4' }}>
                             <span style={{ fontWeight: 'bold', color: '#cbd5e1', display: 'flex', alignItems: 'center', gap: '0.25rem', marginBottom: '0.2rem' }}>
-                               <ShieldAlert size={14} style={{ color: '#00bcd4' }} /> 隱私告知同意書 (必填)
+                               <ShieldAlert size={14} style={{ color: 'var(--primary-color)' }} /> 隱私告知同意書 (必填)
                             </span>
                             我了解公開排行榜會使用去識別化學員代碼作為身份顯示。
                          </label>
@@ -264,7 +265,7 @@ export default function AuthModal({ onClose, onSuccess }) {
 
             <div style={{ textAlign: 'center', marginTop: '2rem', fontSize: '0.95rem' }}>
                <span style={{ color: '#cbd5e1' }}>{isLogin ? '還沒有帳號嗎？' : '已經有帳號了？'}</span>
-               <button onClick={() => { setIsLogin(!isLogin); setError(''); }} style={{ background: 'transparent', border: 'none', color: '#00bcd4', fontWeight: 'bold', cursor: 'pointer', marginLeft: '0.5rem' }}>
+               <button onClick={() => { setIsLogin(!isLogin); setError(''); }} style={{ background: 'transparent', border: 'none', color: 'var(--primary-color)', fontWeight: 'bold', cursor: 'pointer', marginLeft: '0.5rem' }}>
                   {isLogin ? '立即註冊' : '返回登入'}
                </button>
             </div>

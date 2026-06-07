@@ -15,7 +15,7 @@ export default function TermsModal({ mode = 'terms', onClose }) {
                </button>
                <span style={{ color: 'rgba(255,255,255,0.4)' }}>|</span>
                <span>
-                  <ShieldAlert size={20} style={{ display: 'inline', verticalAlign: 'text-bottom', marginRight: '0.3rem', color: '#00bcd4' }} />
+                  <ShieldAlert size={20} style={{ display: 'inline', verticalAlign: 'text-bottom', marginRight: '0.3rem', color: 'var(--primary-color)' }} />
                   {mode === 'terms' ? '服務條款' : mode === 'disclaimer' ? '免責聲明' : mode === 'privacy' ? '隱私權政策' : '聯絡我們'}
                </span>
             </div>
@@ -43,18 +43,18 @@ export default function TermsModal({ mode = 'terms', onClose }) {
 
           {mode === 'terms' && (
             <>
-              <h3 style={{ color: '#00bcd4', marginBottom: '0.5rem' }}>第一條：認知與接受條款</h3>
+              <h3 style={{ color: 'var(--primary-color)', marginBottom: '0.5rem' }}>第一條：認知與接受條款</h3>
               <p style={{ marginBottom: '1.5rem' }}>
                 歡迎使用「用永續知識，做永續之事」（以下簡稱「本服務」）。本服務條款（以下簡稱「本條款」）旨在規範您使用本服務時的權利與義務。當您註冊、登入、使用或繼續使用本服務時，即表示您已閱讀、瞭解並完全同意接受本條款之所有內容。若您為未滿十八歲之未成年人，應於您的家長（或監護人）閱讀、瞭解並同意本條款之所有內容及其後修改變更後，方得使用或繼續使用本服務。
               </p>
 
-              <h3 style={{ color: '#00bcd4', marginBottom: '0.5rem' }}>第二條：使用者註冊義務與帳號安全</h3>
+              <h3 style={{ color: 'var(--primary-color)', marginBottom: '0.5rem' }}>第二條：使用者註冊義務與帳號安全</h3>
               <p style={{ marginBottom: '1.5rem' }}>
                 1. 為了能使用本服務完整功能，您同意提供正確、最新及完整的個人資料（包含但不限於電子郵件與顯示暱稱）。若您提供任何錯誤、不實或不完整的資料，本服務有權暫停或終止您的帳號。
                 <br/>2. 您有義務妥善保管您的帳號及密碼，並對使用該帳號所進行的一切活動負責。如發現帳號遭到盜用或有其他任何安全問題發生時，您應立即通知我們。
               </p>
 
-              <h3 style={{ color: '#00bcd4', marginBottom: '0.5rem' }}>第三條：使用者行為與規範</h3>
+              <h3 style={{ color: 'var(--primary-color)', marginBottom: '0.5rem' }}>第三條：使用者行為與規範</h3>
               <p style={{ marginBottom: '1.5rem' }}>
                 您承諾絕不為任何非法目的或以任何非法方式使用本服務，並承諾遵守中華民國相關法規及一切使用網際網路之國際慣例。您同意並保證不得利用本服務從事侵害他人權益或違法之行為，包含但不限於：
                 <br/>- 破壞、干擾或企圖侵入本服務之伺服器、資料庫及相關安全防護機制。
@@ -63,17 +63,17 @@ export default function TermsModal({ mode = 'terms', onClose }) {
                 <br/>一旦發現上述行為，我們有權立即終止您的帳號，並保留依法向您請求損害賠償之權利。
               </p>
 
-              <h3 style={{ color: '#00bcd4', marginBottom: '0.5rem' }}>第四條：智慧財產權的保護</h3>
+              <h3 style={{ color: 'var(--primary-color)', marginBottom: '0.5rem' }}>第四條：智慧財產權的保護</h3>
               <p style={{ marginBottom: '1.5rem' }}>
                 本服務所使用之軟體或程式、網站上所有內容（包括但不限於文字、圖片、檔案、資訊、資料、網站架構、網站畫面的安排、網頁設計），均由本服務或其他權利人依法擁有其智慧財產權。任何人不得逕自使用、修改、重製、公開播送、改作、散布、發行、公開發表、進行還原工程、解編或反向組譯。
               </p>
 
-              <h3 style={{ color: '#00bcd4', marginBottom: '0.5rem' }}>第五條：服務變更與終止</h3>
+              <h3 style={{ color: 'var(--primary-color)', marginBottom: '0.5rem' }}>第五條：服務變更與終止</h3>
               <p style={{ marginBottom: '1.5rem' }}>
                 本服務保留於任何時點，不經事先通知，隨時修改、暫停或永久終止本服務之全部或一部份之權利。您同意對於本服務之暫停或終止，本服務對您或任何第三人均不負擔任何賠償或補償責任。
               </p>
               
-              <h3 style={{ color: '#00bcd4', marginBottom: '0.5rem' }}>第六條：準據法與管轄法院</h3>
+              <h3 style={{ color: 'var(--primary-color)', marginBottom: '0.5rem' }}>第六條：準據法與管轄法院</h3>
               <p style={{ marginBottom: '1.5rem' }}>
                 本條款之解釋與適用，以及與本條款有關的爭議，均應依照中華民國法律予以處理，並以台灣台北地方法院為第一審管轄法院。
               </p>
@@ -82,7 +82,7 @@ export default function TermsModal({ mode = 'terms', onClose }) {
 
           {mode === 'disclaimer' && (
             <>
-              <h3 style={{ color: '#00bcd4', marginBottom: '0.5rem' }}>免責聲明 (Disclaimer)</h3>
+              <h3 style={{ color: 'var(--primary-color)', marginBottom: '0.5rem' }}>免責聲明 (Disclaimer)</h3>
               <p style={{ marginBottom: '1.5rem', fontWeight: 'bold', color: '#ff5f56', background: 'rgba(255, 95, 86, 0.1)', border: '1px solid rgba(255, 95, 86, 0.2)', padding: '1rem', borderRadius: '8px' }}>
                 本服務係以「現況 (As Is)」及「現有 (As Available)」提供。我們不對本服務提供任何明示或默示的擔保，包含但不限於商業適售性、特定目的之適用性及未侵害他人權利。
                 <br/><br/>
@@ -98,7 +98,7 @@ export default function TermsModal({ mode = 'terms', onClose }) {
 
           {mode === 'privacy' && (
              <>
-              <h3 style={{ color: '#00bcd4', marginBottom: '0.5rem' }}>隱私權政策 (Privacy Policy)</h3>
+              <h3 style={{ color: 'var(--primary-color)', marginBottom: '0.5rem' }}>隱私權政策 (Privacy Policy)</h3>
               <p style={{ marginBottom: '1.5rem' }}>
                  我們極度重視您的隱私權。為了讓您能夠安心的使用本網站的各項服務與資訊，特此向您說明本網站的隱私權保護政策，以保障您的權益。
               </p>
@@ -134,14 +134,14 @@ export default function TermsModal({ mode = 'terms', onClose }) {
 
           {mode === 'contact' && (
              <>
-              <h3 style={{ color: '#00bcd4', marginBottom: '0.5rem' }}>聯絡我們 (Contact Us)</h3>
+              <h3 style={{ color: 'var(--primary-color)', marginBottom: '0.5rem' }}>聯絡我們 (Contact Us)</h3>
               <p style={{ marginBottom: '1.5rem' }}>
                  若您對我們的「服務條款」、「隱私權政策」或平台功能有任何疑問、建議，或者是帳號資料刪除請求、商業合作提案，非常歡迎您隨時與我們聯繫！
               </p>
               <div style={{ background: 'rgba(255,255,255,0.03)', padding: '1.5rem', borderRadius: '12px', marginTop: '1.5rem', border: '1px solid rgba(255,255,255,0.08)' }}>
                  <p style={{ margin: '0.5rem 0', fontSize: '1.1rem' }}>
                     <strong>📧 電子郵件 Email：</strong> <br/>
-                    <a href="mailto:dragonbabyliu1130@gmail.com" style={{ color: '#00bcd4', fontWeight: 'bold', textDecoration: 'none' }}>
+                    <a href="mailto:dragonbabyliu1130@gmail.com" style={{ color: 'var(--primary-color)', fontWeight: 'bold', textDecoration: 'none' }}>
                       dragonbabyliu1130@gmail.com
                     </a>
                  </p>
@@ -155,7 +155,7 @@ export default function TermsModal({ mode = 'terms', onClose }) {
           )}
         </div>
 
-        <div style={{ padding: '1.5rem', textAlign: 'center', borderTop: '1px solid rgba(0,188,212,0.2)', display: 'flex', justifyContent: 'center' }}>
+        <div style={{ padding: '1.5rem', textAlign: 'center', borderTop: '1px solid rgba(214, 168, 79, 0.2)', display: 'flex', justifyContent: 'center' }}>
           <ParticleButton className="btn primary-btn" onClick={onClose} style={{ padding: '0.8rem 2.5rem', borderRadius: '24px', fontSize: '1.1rem' }}>
             我已瞭解並同意
           </ParticleButton>

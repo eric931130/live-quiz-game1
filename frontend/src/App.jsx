@@ -451,7 +451,7 @@ function App() {
 
          {/* Tool Window Body */}
          <div className="app-tool-window-body" style={{ padding: '3rem 2rem' }}>
-            <h2 style={{ fontSize: '2.5rem', color: '#00bcd4', marginBottom: '3rem', textAlign: 'center', fontWeight: '800' }}>選擇您的學習模式</h2>
+            <h2 style={{ fontSize: '2.5rem', color: 'var(--primary-color)', marginBottom: '3rem', textAlign: 'center', fontWeight: '800' }}>選擇您的學習模式</h2>
             
             <div className="role-selection" style={{ display: 'flex', gap: '2rem', justifyContent: 'center', flexWrap: 'wrap' }}>
               <div className="role-card" onClick={() => setRole('student')} style={{ flex: '1', minWidth: '280px', maxWidth: '320px', padding: '2.5rem 1.5rem' }}>
@@ -467,7 +467,7 @@ function App() {
                  <div className="icon"><Compass size={40} /></div>
                  <h2 style={{ margin: '1rem 0 0.5rem' }}>題庫闖關挑戰</h2>
                  <p style={{ marginBottom: '1.5rem' }}>進入 20 個 SDGs 指標學習世界，以滿分挑戰各個檢查點，解鎖進度！</p>
-                 <ParticleButton onClick={() => setRole('world_challenges')} className="btn btn-block" style={{ background: '#00bcd4', color: 'white', borderRadius: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+                 <ParticleButton onClick={() => setRole('world_challenges')} className="btn btn-block" style={{ background: 'var(--primary-color)', color: 'white', borderRadius: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
                    開始挑戰 <ArrowRight size={18} />
                  </ParticleButton>
                </div>
@@ -476,7 +476,7 @@ function App() {
                  <div className="icon"><Trophy size={40} /></div>
                  <h2 style={{ margin: '1rem 0 0.5rem' }}>個人成就與錯題本</h2>
                  <p style={{ marginBottom: '1.5rem' }}>查看你的徽章、學習進度與錯題紀錄，規劃下一步！</p>
-                 <ParticleButton onClick={() => setRole('achievements')} className="btn btn-block" style={{ background: '#00bcd4', color: 'white', borderRadius: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+                 <ParticleButton onClick={() => setRole('achievements')} className="btn btn-block" style={{ background: 'var(--primary-color)', color: 'white', borderRadius: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
                    查看成就 <ArrowRight size={18} />
                  </ParticleButton>
               </div>
@@ -485,7 +485,7 @@ function App() {
                 <div className="icon"><BookOpen size={40} /></div>
                 <h2 style={{ margin: '1rem 0 0.5rem' }}>教師控制台</h2>
                 <p style={{ marginBottom: '1.5rem' }}>管理題庫、派發單人任務與發起即時團戰。</p>
-                <ParticleButton onClick={handleTeacherAccess} className="btn btn-block" style={{ background: '#00bcd4', color: 'white', borderRadius: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+                <ParticleButton onClick={handleTeacherAccess} className="btn btn-block" style={{ background: 'var(--primary-color)', color: 'white', borderRadius: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
                   前往後台 <ArrowRight size={18} />
                 </ParticleButton>
               </div>
@@ -493,7 +493,7 @@ function App() {
          </div>
 
          {/* Window Footer */}
-         <div style={{ display: 'flex', justifyContent: 'center', gap: '2rem', padding: '1.5rem', borderTop: '1px solid rgba(0, 188, 212, 0.2)', fontSize: '0.9rem' }}>
+         <div style={{ display: 'flex', justifyContent: 'center', gap: '2rem', padding: '1.5rem', borderTop: '1px solid rgba(214, 168, 79, 0.2)', fontSize: '0.9rem' }}>
             <button onClick={() => setTermsMode('terms')} style={{ background: 'transparent', border: 'none', color: '#cbd5e1', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.3rem', fontWeight: 'bold' }}>
                <Shield size={16} /> 服務條款
             </button>

@@ -704,7 +704,7 @@ export default function WorldStageEditor({ worldsList, roundsList, fetchWorldsAn
                      onChange={e => setNewWorldName(e.target.value)} 
                   />
                </div>
-               <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end', padding: '1.5rem', borderTop: '1px solid rgba(0, 188, 212, 0.2)', background: 'transparent' }}>
+               <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end', padding: '1.5rem', borderTop: '1px solid rgba(214, 168, 79, 0.2)', background: 'transparent' }}>
                   <button onClick={() => setShowCreateWorldModal(false)} style={{ padding: '0.6rem 1.2rem', background: 'rgba(255, 255, 255, 0.1)', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>取消</button>
                   <button onClick={handleCreateWorld} style={{ padding: '0.6rem 1.2rem', background: 'var(--primary-color)', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>建立</button>
                </div>
@@ -766,9 +766,9 @@ export default function WorldStageEditor({ worldsList, roundsList, fetchWorldsAn
                      </select>
                   </div>
                </div>
-               <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end', padding: '1.5rem', borderTop: '1px solid rgba(0, 188, 212, 0.2)', background: 'transparent' }}>
+               <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end', padding: '1.5rem', borderTop: '1px solid rgba(214, 168, 79, 0.2)', background: 'transparent' }}>
                   <button onClick={() => setShowRestartModal(false)} style={{ padding: '0.6rem 1.2rem', background: 'rgba(255, 255, 255, 0.1)', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>取消</button>
-                  <button onClick={handleRestartRound} style={{ padding: '0.6rem 1.2rem', background: '#00bcd4', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>確認重開</button>
+                  <button onClick={handleRestartRound} style={{ padding: '0.6rem 1.2rem', background: 'var(--primary-color)', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>確認重開</button>
                </div>
             </div>
          </div>
@@ -825,7 +825,7 @@ export default function WorldStageEditor({ worldsList, roundsList, fetchWorldsAn
                      </select>
                   </div>
                </div>
-               <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end', padding: '1.5rem', borderTop: '1px solid rgba(0, 188, 212, 0.2)', background: 'transparent' }}>
+               <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end', padding: '1.5rem', borderTop: '1px solid rgba(214, 168, 79, 0.2)', background: 'transparent' }}>
                   <button onClick={() => setShowEditTargetModal(false)} style={{ padding: '0.6rem 1.2rem', background: 'rgba(255, 255, 255, 0.1)', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>取消</button>
                   <button onClick={handleChangeTargetProgress} style={{ padding: '0.6rem 1.2rem', background: 'var(--primary-color)', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>儲存變更</button>
                </div>

@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { io } from 'socket.io-client';
 import { collection, query, where, getDocs, addDoc } from 'firebase/firestore';
-import { Play, ArrowLeft, CheckCircle2, XCircle, Flame, Trophy, ListChecks, Check, X } from 'lucide-react';
+import { Play, ArrowLeft, CheckCircle2, XCircle, Flame, Trophy, ListChecks, Check, X, Globe2 } from 'lucide-react';
 import { db } from '../firebase';
 import ParticleButton from './ParticleButton';
 import PeerLearningHub from './PeerLearningHub';
@@ -431,8 +431,8 @@ if (!currentAuthUser) {
             </div>
           </div>
           <div className="app-tool-window-body">
-            <h2 className="title" style={{ color: '#00bcd4', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', marginBottom: '2rem' }}>
-              <Play size={28} /> 加入測驗房間！
+            <h2 className="title" style={{ color: 'var(--primary-color)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', marginBottom: '2rem' }}>
+              <Globe2 size={28} /> 加入測驗房間！
             </h2>
             <form onSubmit={joinRoom} className="join-form">
               <input 
@@ -449,7 +449,7 @@ if (!currentAuthUser) {
             </form>
             {currentUser && (
               <p style={{ textAlign: 'center', marginTop: '1.5rem', color: '#cbd5e1' }}>
-                 將以 <strong style={{ color: '#00bcd4' }}>{localStorage.getItem('userNickname') || currentUser.displayName || (currentUser.email ? currentUser.email.split('@')[0] : nickname)}</strong> 的身分作答
+                 將以 <strong style={{ color: 'var(--primary-color)' }}>{localStorage.getItem('userNickname') || currentUser.displayName || (currentUser.email ? currentUser.email.split('@')[0] : nickname)}</strong> 的身分作答
               </p>
             )}
           </div>
@@ -487,12 +487,12 @@ if (!currentAuthUser) {
             </div>
           </div>
           <div className="app-tool-window-body text-center">
-            <h2 className="title" style={{ color: '#00bcd4', fontSize: '2.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
-               <CheckCircle2 size={36} /> 成功進入房間！
+            <h2 className="title" style={{ color: 'var(--primary-color)', fontSize: '2.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+               <Globe2 size={36} /> 成功進入房間！
             </h2>
             <p style={{ fontSize: '1.2rem', color: '#94a3b8' }}>請確認在大螢幕上看到你的綽號</p>
-            <div className="spinner mt-4" style={{ borderColor: 'rgba(0, 188, 212, 0.2)', borderTopColor: '#00bcd4', margin: '2rem auto' }}></div>
-            <p className="mt-4" style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#00bcd4' }}>等待小老師開始作答...</p>
+            <div className="spinner mt-4" style={{ borderColor: 'rgba(214, 168, 79, 0.2)', borderTopColor: 'var(--primary-color)', margin: '2rem auto' }}></div>
+            <p className="mt-4" style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--primary-color)' }}>等待小老師開始作答...</p>
           </div>
         </div>
       </div>
@@ -518,7 +518,7 @@ if (!currentAuthUser) {
              </div>
            </div>
            <div className="app-tool-window-body text-center">
-              <h2 style={{ color: '#00bcd4', fontSize: '2.2rem', marginBottom: '1rem' }}>{assignment.title}</h2>
+              <h2 style={{ color: 'var(--primary-color)', fontSize: '2.2rem', marginBottom: '1rem' }}>{assignment.title}</h2>
               <div style={{ background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255,255,255,0.08)', padding: '1.5rem', borderRadius: '12px', marginBottom: '2rem', textAlign: 'left', fontSize: '1.2rem' }}>
                  <p><strong>作答模式：</strong> {assignment.mode === 'exam' ? '考核 (題目隨機)' : '練習 (可重複挑戰)'}</p>
                  <p><strong>截止時間：</strong> {new Date(assignment.deadline).toLocaleString()}</p>
@@ -583,7 +583,7 @@ if (!currentAuthUser) {
             
             {step === 'playing' && currentQuestion && (
               <div className="student-playing" style={{ padding: '2rem' }}>
-                <h2 className="mobile-question" style={{ color: '#00bcd4', fontSize: '2rem', textAlign: 'center', margin: '2rem 0' }}>{currentQuestion.question}</h2>
+                <h2 className="mobile-question" style={{ color: 'var(--primary-color)', fontSize: '2rem', textAlign: 'center', margin: '2rem 0' }}>{currentQuestion.question}</h2>
                 <div className="student-options-grid" style={{
                    display: 'grid',
                    gridTemplateColumns: isTrueFalse ? '1fr' : '1fr 1fr',
@@ -665,23 +665,23 @@ if (!currentAuthUser) {
                 @keyframes pulse-glow { 0%, 100% { box-shadow: 0 0 20px #FFD54F, 0 0 40px #FFD54F; } 50% { box-shadow: 0 0 50px #FFD54F, 0 0 80px #FFD54F; } }
                 @keyframes float-up { 0% { transform: translateY(50px); opacity: 0; } 100% { transform: translateY(0); opacity: 1; } }
              `}</style>
-             <div style={{ position: 'absolute', width: '200vw', height: '200vw', background: 'radial-gradient(circle, rgba(0,255,255,0.1) 0%, transparent 60%)', animation: 'orbit 20s linear infinite' }}></div>
+             <div style={{ position: 'absolute', width: '200vw', height: '200vw', background: 'radial-gradient(circle, rgba(214, 168, 79, 0.15) 0%, transparent 60%)', animation: 'orbit 20s linear infinite' }}></div>
              
              <div style={{ zIndex: 2, textAlign: 'center', animation: 'float-up 2s ease-out' }}>
                 <div style={{ 
                    fontSize: '6rem', margin: '0 auto 2rem', width: '150px', height: '150px', 
                    display: 'flex', alignItems: 'center', justifyContent: 'center', 
-                   background: 'linear-gradient(45deg, #FFD54F, #FF8F00)', 
+                   background: 'linear-gradient(45deg, var(--primary-color), #FF8F00)', 
                    borderRadius: '50%', animation: 'pulse-glow 2s infinite' 
                 }}>
                    <Trophy size={80} color="white" />
                 </div>
-                <h1 style={{ fontSize: '3.5rem', margin: '0 0 1rem', textShadow: '0 0 20px rgba(0,255,255,0.5)', background: '-webkit-linear-gradient(45deg, #FFD54F, #00BCD4)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+                <h1 style={{ fontSize: '3.5rem', margin: '0 0 1rem', textShadow: '0 0 20px rgba(244, 211, 122, 0.5)', background: '-webkit-linear-gradient(45deg, #FFD54F, var(--primary-color))', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
                    境界突破！
                 </h1>
-                <p style={{ fontSize: '1.5rem', color: '#B0BEC5', letterSpacing: '2px' }}>AI 知識宇宙的能量正在匯聚...</p>
+                <p style={{ fontSize: '1.5rem', color: '#B0BEC5', letterSpacing: '2px' }}>永續知識的能量正在匯聚...</p>
                 <div style={{ marginTop: '3rem', width: '300px', height: '4px', background: 'rgba(255,255,255,0.2)', margin: '3rem auto 0', position: 'relative', overflow: 'hidden', borderRadius: '2px' }}>
-                   <div style={{ position: 'absolute', top: 0, left: 0, height: '100%', width: '100%', background: 'linear-gradient(90deg, transparent, #00BCD4, transparent)', animation: 'orbit 2s linear infinite' }}></div>
+                   <div style={{ position: 'absolute', top: 0, left: 0, height: '100%', width: '100%', background: 'linear-gradient(90deg, transparent, var(--primary-color), transparent)', animation: 'orbit 2s linear infinite' }}></div>
                 </div>
                 <p style={{ marginTop: '1rem', fontSize: '0.9rem', color: '#78909C' }}>請稍候 10 秒</p>
              </div>
@@ -707,14 +707,14 @@ if (!currentAuthUser) {
             </div>
           </div>
           <div className="app-tool-window-body">
-            <h1 className="title text-center mt-2" style={{ color: '#00bcd4', fontSize: '2.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+            <h1 className="title text-center mt-2" style={{ color: 'var(--primary-color)', fontSize: '2.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
               <Trophy size={40} /> 最終結算單
             </h1>
-            <div className="score-summary" style={{ background: 'linear-gradient(135deg, #00bcd4, #2E7D32)' }}>
+            <div className="score-summary" style={{ background: 'linear-gradient(135deg, var(--primary-color), #2E7D32)' }}>
               <h2 style={{ fontSize: '2rem' }}>總成績： {finalReport.score} 分</h2>
             </div>
             <div className="history-list" style={{ boxShadow: 'none', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', padding: '1.5rem', marginTop: '2rem' }}>
-              <h3 style={{ color: '#00bcd4', fontSize: '1.4rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <h3 style={{ color: 'var(--primary-color)', fontSize: '1.4rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <ListChecks size={24} /> 你的作答記錄
               </h3>
               {finalReport.answers.map((ans, i) => (

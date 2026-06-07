@@ -787,7 +787,7 @@ export default function TeacherDashboard({ onGoBack, user }) {
                   <form onSubmit={addDiscussionMessage} style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', padding: '1.5rem', marginBottom: '1.5rem' }}>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 180px', gap: '1rem' }}>
                       <div>
-                        <label style={{ fontWeight: 'bold', color: '#00bcd4' }}>課程 / 課堂名稱</label>
+                        <label style={{ fontWeight: 'bold', color: 'var(--primary-color)' }}>課程 / 課堂名稱</label>
                         <input
                            type="text"
                            className="input-field"
@@ -798,7 +798,7 @@ export default function TeacherDashboard({ onGoBack, user }) {
                         />
                       </div>
                       <div>
-                        <label style={{ fontWeight: 'bold', color: '#00bcd4' }}>內容類型</label>
+                        <label style={{ fontWeight: 'bold', color: 'var(--primary-color)' }}>內容類型</label>
                         <select className="input-field" value={discussionTag} onChange={e => setDiscussionTag(e.target.value)} style={{ width: '100%', marginTop: '0.5rem' }}>
                           <option value="提問">提問</option>
                           <option value="補充">補充</option>
@@ -808,7 +808,7 @@ export default function TeacherDashboard({ onGoBack, user }) {
                         </select>
                       </div>
                     </div>
-                    <label style={{ fontWeight: 'bold', color: '#00bcd4', marginTop: '1rem', display: 'block' }}>討論內容</label>
+                    <label style={{ fontWeight: 'bold', color: 'var(--primary-color)', marginTop: '1rem', display: 'block' }}>討論內容</label>
                     <textarea
                       value={discussionInput}
                       onChange={e => setDiscussionInput(e.target.value)}
@@ -846,7 +846,7 @@ export default function TeacherDashboard({ onGoBack, user }) {
                         <div key={item.id} style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', borderLeft: `6px solid ${discussionStatusColor[item.status] || '#90a4ae'}`, borderRadius: '12px', padding: '1rem' }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'flex-start' }}>
                             <div>
-                              <h4 style={{ color: '#00bcd4', marginBottom: '0.4rem' }}>{item.title}</h4>
+                              <h4 style={{ color: 'var(--primary-color)', marginBottom: '0.4rem' }}>{item.title}</h4>
                               <div style={{ color: '#94a3b8', fontSize: '0.9rem' }}>
                                 {item.tag} · {new Date(item.createdAt).toLocaleString()} · <strong style={{ color: discussionStatusColor[item.status] || '#777' }}>{discussionStatusText[item.status] || item.status}</strong>
                               </div>
@@ -1159,20 +1159,20 @@ export default function TeacherDashboard({ onGoBack, user }) {
             </div>
           </div>
           <div className="app-tool-window-body text-center">
-            <h2 className="title" style={{ color: '#00bcd4', marginBottom: '1.5rem' }}>等待永續夥伴加入...</h2>
+            <h2 className="title" style={{ color: 'var(--primary-color)', marginBottom: '1.5rem' }}>等待永續夥伴加入...</h2>
             <div className="room-info" style={{ background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255,255,255,0.08)', padding: '2rem', borderRadius: '12px' }}>
               <h3 style={{ color: '#cbd5e1' }}>學生請前往首頁並輸入代碼：</h3>
-              <div className="room-code" style={{ fontSize: '4rem', letterSpacing: '8px', color: '#00bcd4' }}>{roomCode}</div>
+              <div className="room-code" style={{ fontSize: '4rem', letterSpacing: '8px', color: 'var(--primary-color)' }}>{roomCode}</div>
               <div className="qr-container" style={{ marginTop: '1rem', background: '#fff', padding: '1rem', borderRadius: '8px', display: 'inline-block' }}>
                  <QRCodeSVG value={joinUrl} size={180} />
               </div>
             </div>
             
             <div className="players-list" style={{ marginTop: '2rem', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}>
-              <h3 style={{ color: '#00bcd4' }}>已報到 ({players.length} 人)</h3>
+              <h3 style={{ color: 'var(--primary-color)' }}>已報到 ({players.length} 人)</h3>
               <div className="player-badges" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', justifyContent: 'center' }}>
                 {players.map(p => (
-                  <div key={p.id} className="player-badge animate-pop" style={{ background: 'rgba(0, 188, 212, 0.25)', color: '#fff', border: '1px solid rgba(0, 188, 212, 0.4)', padding: '0.5rem 1rem', borderRadius: '20px', fontWeight: 'bold' }}>{p.nickname}</div>
+                   <div key={p.id} className="player-badge animate-pop" style={{ background: 'rgba(214, 168, 79, 0.25)', color: '#fff', border: '1px solid rgba(214, 168, 79, 0.4)', padding: '0.5rem 1rem', borderRadius: '20px', fontWeight: 'bold' }}>{p.nickname}</div>
                 ))}
               </div>
             </div>
@@ -1205,7 +1205,7 @@ export default function TeacherDashboard({ onGoBack, user }) {
           </div>
           <div className="app-tool-window-body">
             <div className="teacher-playing animate-fade-in" style={{ padding: 0 }}>
-              <div className="game-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '1.5rem', fontWeight: 'bold', color: '#00bcd4', padding: '1rem', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '15px' }}>
+              <div className="game-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--primary-color)', padding: '1rem', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '15px' }}>
                 <div className="question-counter" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><BarChart3 /> 第 {currentQuestion.qIndex + 1} 題 / 共 {currentQuestion.total} 題</div>
                 <div className="timer" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><Clock /> {timeLeft}s</div>
               </div>
@@ -1267,7 +1267,7 @@ export default function TeacherDashboard({ onGoBack, user }) {
               <h3 className="correct-answer-display" style={{ textAlign: 'center', background: 'rgba(76, 175, 80, 0.1)', border: '1px solid rgba(76, 175, 80, 0.3)', padding: '1rem', borderRadius: '12px', margin: '1rem 0', color: '#4caf50' }}>✅ 正確解答：{currentQuestion.correctOption}</h3>
               
               <div className="distribution-section" style={{ maxWidth: '800px', margin: 'auto' }}>
-                <h3 style={{ marginBottom: '1.5rem', textAlign: 'center', color: '#00bcd4' }}>📊 各選項作答人數比例</h3>
+                <h3 style={{ marginBottom: '1.5rem', textAlign: 'center', color: 'var(--primary-color)' }}>📊 各選項作答人數比例</h3>
                 <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-end', height: '220px', gap: '2.5rem', padding: '1.5rem', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '16px', boxShadow: 'none' }}>
                 {['A', 'B', 'C', 'D'].filter(opt => currentQuestion.options[opt]).map((opt) => {
                   const count = distribution ? (distribution[opt] || 0) : 0;
@@ -1297,12 +1297,12 @@ export default function TeacherDashboard({ onGoBack, user }) {
               </div>
               
               <div className="leaderboard" style={{ maxWidth: '800px', margin: '2rem auto', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', padding: '2rem', borderRadius: '12px', boxShadow: 'none' }}>
-                <h2 style={{ textAlign: 'center', color: '#00bcd4', marginBottom: '1.5rem' }}>🏆 英雄榜 🏆</h2>
+                <h2 style={{ textAlign: 'center', color: 'var(--primary-color)', marginBottom: '1.5rem' }}>🏆 英雄榜 🏆</h2>
                 {leaderboard.map((player, idx) => (
                   <div key={idx} className="leaderboard-item animate-slide-up" style={{ animationDelay: `${idx * 0.1}s`, display: 'flex', justifyContent: 'space-between', padding: '1rem', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
                     <span className="rank" style={{ fontWeight: 'bold', color: '#ffbd2e' }}>#{idx + 1}</span>
                     <span className="nick" style={{ flex: 1, marginLeft: '1rem', color: '#cbd5e1' }}>{player.nickname}</span>
-                    <span className="score" style={{ fontWeight: 'bold', color: '#00bcd4' }}>{player.score} 分</span>
+                    <span className="score" style={{ fontWeight: 'bold', color: 'var(--primary-color)' }}>{player.score} 分</span>
                   </div>
                 ))}
               </div>
@@ -1339,13 +1339,13 @@ export default function TeacherDashboard({ onGoBack, user }) {
           </div>
           <div className="app-tool-window-body">
             <div className="teacher-game-over animate-fade-in" style={{ padding: 0 }}>
-              <h1 className="title" style={{ textAlign: 'center', color: '#00bcd4', fontSize: '3rem', fontWeight: '800' }}>🎉 測驗圓滿結束</h1>
+              <h1 className="title" style={{ textAlign: 'center', color: 'var(--primary-color)', fontSize: '3rem', fontWeight: '800' }}>🎉 測驗圓滿結束</h1>
               <div className="leaderboard final-leaderboard" style={{ marginTop: '2rem' }}>
                 {finalReport.sort((a,b)=>b.score - a.score).map((player, idx) => (
-                  <div key={idx} className="leaderboard-item" style={{ display: 'flex', alignItems: 'center', padding: '1.5rem', background: idx < 3 ? 'rgba(0, 188, 212, 0.15)' : 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', marginBottom: '1rem' }}>
+                  <div key={idx} className="leaderboard-item" style={{ display: 'flex', alignItems: 'center', padding: '1.5rem', background: idx < 3 ? 'rgba(214, 168, 79, 0.15)' : 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', marginBottom: '1rem' }}>
                     <span className="rank" style={{ fontSize: '2rem', fontWeight: 'bold', width: '60px', color: '#ffbd2e' }}>{idx < 3 ? ['🥇','🥈','🥉'][idx] : `#${idx + 1}`}</span>
                     <span className="nick" style={{ flex: 1, fontSize: '1.5rem', fontWeight: 'bold', color: '#fff' }}>{player.nickname}</span>
-                    <span className="score" style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#00bcd4' }}>{player.score} 分</span>
+                    <span className="score" style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--primary-color)' }}>{player.score} 分</span>
                   </div>
                 ))}
               </div>
