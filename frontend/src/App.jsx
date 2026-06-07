@@ -261,14 +261,14 @@ function App() {
                 <h2 className="title" style={{ marginBottom: '1.5rem' }}>準備好挑戰了嗎？</h2>
                 <form onSubmit={handleGuestSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
                    <div>
-                     <label style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-on-dark-secondary)', fontWeight: 'bold' }}>輸入遊戲代碼：</label>
+                     <label style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-main)', fontWeight: 'bold' }}>輸入遊戲代碼：</label>
                      <input 
                        type="text" 
                        placeholder="例如：12345678" 
                        value={guestCode}
                        onChange={(e) => setGuestCode(e.target.value)}
                        required
-                       style={{ width: '100%', padding: '1.2rem', borderRadius: '12px', border: '2px solid var(--gold-border)', background: 'rgba(8, 15, 10, 0.7)', color: 'var(--text-on-dark)', fontSize: '1.5rem', textAlign: 'center', fontWeight: 'bold', letterSpacing: '2px' }}
+                       style={{ width: '100%', padding: '1.2rem', borderRadius: '12px', border: '2px solid var(--green-3)', background: 'rgba(255, 255, 255, 0.9)', color: 'var(--text-main)', fontSize: '1.5rem', textAlign: 'center', fontWeight: 'bold', letterSpacing: '2px' }}
                      />
                    </div>
                    <ParticleButton type="submit" className="saas-btn-solid" style={{ width: '100%', fontSize: '1.2rem', display: 'flex', justifyContent: 'center', gap: '0.5rem' }}>
@@ -276,7 +276,7 @@ function App() {
                    </ParticleButton>
                 </form>
                 <div style={{ marginTop: '1.5rem', textAlign: 'center', borderTop: '1px solid rgba(129, 199, 132, 0.2)', paddingTop: '1.5rem' }}>
-                   <p style={{ color: 'var(--text-on-dark-muted)', fontSize: '0.95rem', marginBottom: '1rem' }}>準備進行單人任務考核？</p>
+                   <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem', marginBottom: '1rem' }}>準備進行單人任務考核？</p>
                    <button onClick={() => setShowAuthModal(true)} className="saas-btn-outline" style={{ width: '100%' }}>
                       請先登入會員帳號
                    </button>
@@ -300,7 +300,7 @@ function App() {
              <div style={{ maxWidth: '1000px', margin: '0 auto', textAlign: 'center' }}>
                 <h2 className="saas-section-title">關於我們與平台理念</h2>
                 <p className="saas-section-subtitle">為什麼我們致力於永續教育科技？</p>
-                <div style={{ textAlign: 'left', lineHeight: '1.8', color: 'var(--text-on-dark-secondary)', fontSize: '1.1rem', marginTop: '2rem' }}>
+                <div style={{ textAlign: 'left', lineHeight: '1.8', color: 'var(--text-muted)', fontSize: '1.1rem', marginTop: '2rem' }}>
                    <p style={{ marginBottom: '1.5rem' }}>
                       在現今全球推動永續發展的大環境下，無論es學術界的「聯合國永續發展目標 (SDGs)」或是企業界的「環境、社會與公司治理 (ESG)」，都已經成為必修的顯學。然而，傳統的單向授課或紙本測驗，往往難以引起學習者的共鳴，甚至讓這些極具意義的知識變得生硬且乏味。
                    </p>
@@ -394,7 +394,7 @@ function App() {
                    <div className="saas-logo" style={{ marginBottom: '1.5rem' }}>
                       <Globe2 size={24} color="var(--gold-bright)" /> 用永續知識，做永續之事
                    </div>
-                   <p style={{ color: 'var(--text-on-dark-muted)', lineHeight: '1.6', maxWidth: '300px' }}>
+                   <p style={{ color: 'var(--text-muted)', lineHeight: '1.6', maxWidth: '300px' }}>
                       我們致力於讓老師用更低門檻建立互動課程，讓學生在測驗、討論與回饋中真正吸收知識。
                    </p>
                 </div>
@@ -430,16 +430,16 @@ function App() {
 
   // --- Dashboard Page (Logged In) ---
   return (
-    <div className="home-container" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', background: 'var(--bg-color)', padding: '2rem' }}>
+    <div className="home-container" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', padding: '2rem' }}>
       
       <div className="app-tool-window large animate-fade-in">
          {/* Tool Window Header */}
          <div className="app-tool-window-header">
             <div className="app-tool-window-header-title">
-               <button onClick={handleLogout} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 'bold' }}>
+               <button onClick={handleLogout} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: 'var(--text-main)', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 'bold' }}>
                   <ArrowLeft size={20} /> 登出並返回首頁
                </button>
-               <span style={{ color: 'rgba(255,255,255,0.4)' }}>|</span>
+               <span style={{ color: 'rgba(31, 107, 58, 0.3)' }}>|</span>
                <span>💡 會員中心 Dashboard (Hi, {user.displayName || (user.email ? user.email.split('@')[0] : '探索者')})</span>
             </div>
             <div className="app-tool-window-controls">
@@ -493,12 +493,12 @@ function App() {
          </div>
 
          {/* Window Footer */}
-         <div style={{ display: 'flex', justifyContent: 'center', gap: '2rem', padding: '1.5rem', borderTop: '1px solid rgba(214, 168, 79, 0.2)', fontSize: '0.9rem' }}>
-            <button onClick={() => setTermsMode('terms')} style={{ background: 'transparent', border: 'none', color: '#cbd5e1', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.3rem', fontWeight: 'bold' }}>
+         <div style={{ display: 'flex', justifyContent: 'center', gap: '2rem', padding: '1.5rem', borderTop: '1px solid rgba(123, 196, 127, 0.2)', fontSize: '0.9rem' }}>
+            <button onClick={() => setTermsMode('terms')} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.3rem', fontWeight: 'bold' }}>
                <Shield size={16} /> 服務條款
             </button>
-            <span style={{ color: 'rgba(255,255,255,0.1)' }}>|</span>
-            <button onClick={() => setTermsMode('disclaimer')} style={{ background: 'transparent', border: 'none', color: '#cbd5e1', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.3rem', fontWeight: 'bold' }}>
+            <span style={{ color: 'rgba(31, 107, 58, 0.15)' }}>|</span>
+            <button onClick={() => setTermsMode('disclaimer')} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.3rem', fontWeight: 'bold' }}>
                <Shield size={16} /> 免責聲明
             </button>
          </div>

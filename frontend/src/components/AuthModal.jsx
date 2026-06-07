@@ -152,10 +152,10 @@ export default function AuthModal({ onClose, onSuccess }) {
          {/* Tool Window Header */}
          <div className="app-tool-window-header">
             <div className="app-tool-window-header-title">
-               <button onClick={onClose} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 'bold' }}>
+               <button onClick={onClose} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: 'var(--text-main)', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 'bold' }}>
                   <ArrowLeft size={20} /> 返回
                </button>
-               <span style={{ color: 'rgba(255,255,255,0.4)' }}>|</span>
+               <span style={{ color: 'rgba(31, 107, 58, 0.4)' }}>|</span>
                <Globe2 size={20} color="var(--primary-color)" />
                <span>{isLogin ? '會員登入' : '註冊新帳號'}</span>
             </div>
@@ -178,7 +178,7 @@ export default function AuthModal({ onClose, onSuccess }) {
               {!isLogin && (
                  <>
                     <div className="input-group" style={{ position: 'relative' }}>
-                       <User size={20} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.4)' }} />
+                       <User size={20} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'rgba(31, 107, 58, 0.4)' }} />
                        <input type="text" placeholder="顯示名稱 (可選)" value={nickname} onChange={(e) => setNickname(e.target.value)} style={{ width: '100%', padding: '1rem 1rem 1rem 3rem', fontSize: '1rem' }} />
                     </div>
                    
@@ -191,7 +191,7 @@ export default function AuthModal({ onClose, onSuccess }) {
                             <button 
                                key={a} type="button" 
                                onClick={() => setAvatar(a)}
-                               style={{ fontSize: '1.5rem', padding: '0.5rem', background: avatar === a ? 'rgba(214, 168, 79, 0.25)' : 'rgba(255, 255, 255, 0.05)', border: avatar === a ? '2px solid var(--primary-color)' : '2px solid transparent', borderRadius: '12px', cursor: 'pointer', transition: 'all 0.2s', color: 'white' }}
+                               style={{ fontSize: '1.5rem', padding: '0.5rem', background: avatar === a ? 'var(--green-2)' : 'var(--white-3)', border: avatar === a ? '2px solid var(--green-4)' : '2px solid rgba(123, 196, 127, 0.25)', borderRadius: '12px', cursor: 'pointer', transition: 'all 0.2s', color: 'var(--text-main)' }}
                             >
                                {a}
                             </button>
@@ -205,25 +205,25 @@ export default function AuthModal({ onClose, onSuccess }) {
                       </label>
                       <select value={playFrequency} onChange={e => setPlayFrequency(e.target.value)} style={{ width: '100%', padding: '1rem', fontSize: '1rem', cursor: 'pointer' }}>
                          {FREQUENCIES.map(f => (
-                            <option key={f} value={f} style={{ background: '#161c2d', color: '#fff' }}>{f}</option>
+                            <option key={f} value={f} style={{ background: 'var(--white-1)', color: 'var(--text-main)' }}>{f}</option>
                          ))}
                       </select>
                    </div>
                  </>
               )}
                <div className="input-group" style={{ position: 'relative' }}>
-                  <Mail size={20} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.4)' }} />
+                  <Mail size={20} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'rgba(31, 107, 58, 0.4)' }} />
                   <input type="email" placeholder="電子郵件" required value={email} onChange={(e) => setEmail(e.target.value)} style={{ width: '100%', padding: '1rem 1rem 1rem 3rem', fontSize: '1rem' }} />
                </div>
                <div className="input-group" style={{ position: 'relative' }}>
-                  <Lock size={20} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.4)' }} />
+                  <Lock size={20} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'rgba(31, 107, 58, 0.4)' }} />
                   <input type="password" placeholder="密碼 (至少 6 碼)" required minLength="6" value={password} onChange={(e) => setPassword(e.target.value)} style={{ width: '100%', padding: '1rem 1rem 1rem 3rem', fontSize: '1rem' }} />
                </div>
 
                {!isLogin && (
                   <>
                      <div className="input-group" style={{ position: 'relative' }}>
-                        <Lock size={20} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.4)' }} />
+                        <Lock size={20} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'rgba(31, 107, 58, 0.4)' }} />
                         <input type="password" placeholder="確認密碼" required value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} style={{ width: '100%', padding: '1rem 1rem 1rem 3rem', fontSize: '1rem' }} />
                      </div>
 
@@ -240,7 +240,7 @@ export default function AuthModal({ onClose, onSuccess }) {
                         </label>
                      </div>
 
-                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', padding: '0.8rem', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', marginTop: '0.5rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', padding: '0.8rem', background: 'rgba(234, 247, 236, 0.4)', border: '1px solid rgba(123, 196, 127, 0.25)', borderRadius: '12px', marginTop: '0.5rem' }}>
                          <input 
                             type="checkbox" 
                             id="privacyConsent" 
@@ -248,8 +248,8 @@ export default function AuthModal({ onClose, onSuccess }) {
                             onChange={(e) => setConsent(e.target.checked)} 
                             style={{ cursor: 'pointer', marginTop: '0.2rem', width: '18px', height: '18px' }}
                          />
-                         <label htmlFor="privacyConsent" style={{ fontSize: '0.85rem', color: '#94a3b8', cursor: 'pointer', userSelect: 'none', lineHeight: '1.4' }}>
-                            <span style={{ fontWeight: 'bold', color: '#cbd5e1', display: 'flex', alignItems: 'center', gap: '0.25rem', marginBottom: '0.2rem' }}>
+                         <label htmlFor="privacyConsent" style={{ fontSize: '0.85rem', color: 'var(--text-muted)', cursor: 'pointer', userSelect: 'none', lineHeight: '1.4' }}>
+                            <span style={{ fontWeight: 'bold', color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '0.25rem', marginBottom: '0.2rem' }}>
                                <ShieldAlert size={14} style={{ color: 'var(--primary-color)' }} /> 隱私告知同意書 (必填)
                             </span>
                             我了解公開排行榜會使用去識別化學員代碼作為身份顯示。
@@ -264,7 +264,7 @@ export default function AuthModal({ onClose, onSuccess }) {
             </form>
 
             <div style={{ textAlign: 'center', marginTop: '2rem', fontSize: '0.95rem' }}>
-               <span style={{ color: '#cbd5e1' }}>{isLogin ? '還沒有帳號嗎？' : '已經有帳號了？'}</span>
+               <span style={{ color: 'var(--text-main)' }}>{isLogin ? '還沒有帳號嗎？' : '已經有帳號了？'}</span>
                <button onClick={() => { setIsLogin(!isLogin); setError(''); }} style={{ background: 'transparent', border: 'none', color: 'var(--primary-color)', fontWeight: 'bold', cursor: 'pointer', marginLeft: '0.5rem' }}>
                   {isLogin ? '立即註冊' : '返回登入'}
                </button>

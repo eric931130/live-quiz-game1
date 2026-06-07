@@ -1,52 +1,80 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+TC:wght@400;500;600;700;800&family=Fredoka:wght@600&display=swap');
 
 :root {
-  /* Premium sustainable green nature-inspired design tokens */
-  --bg: #040806;
-  --bg-soft: #070c09;
-  --surface: #0c1410;
-  --surface-card: #111d16;
-  --surface-elevated: #16281e;
-  --surface-ivory: #f4f9f5;
-  --gold: #2E7D32;
-  --gold-bright: #81C784;
-  --gold-deep: #1B5E20;
-  --gold-border: rgba(76, 175, 80, 0.35);
-  --text-on-dark: #f0f7f2;
-  --text-on-dark-secondary: #cbdcd0;
-  --text-on-dark-muted: #8ba391;
-  --text-on-light: #121c15;
-  --text-on-light-secondary: #2e4333;
+  /* Green Palette Tokens */
+  --green-1: #EAF7EC;
+  --green-2: #BFE7C6;
+  --green-3: #7BC47F;
+  --green-4: #3E9A52;
+  --green-5: #1F6B3A;
+
+  /* Yellow Palette Tokens */
+  --yellow-1: #FFF4CC;
+  --yellow-2: #F2D56B;
+  --yellow-3: #D4A72C;
+
+  /* Blue Palette Tokens */
+  --blue-1: #EAF4FF;
+  --blue-2: #7CB7F3;
+  --blue-3: #2F6FBB;
+
+  /* White Palette Tokens */
+  --white-1: #FFFFFF;
+  --white-2: #F8FBF9;
+  --white-3: #EEF4F1;
+
+  /* Theme tokens */
+  --bg: var(--white-2);
+  --bg-soft: var(--white-3);
+  --surface: var(--white-1);
+  --surface-card: var(--white-1);
+  --surface-elevated: var(--green-1);
+  --surface-ivory: var(--yellow-1);
+  
+  --gold: var(--green-4);
+  --gold-bright: var(--green-3);
+  --gold-deep: var(--green-5);
+  --gold-border: rgba(62, 154, 82, 0.25);
+  
+  --text-on-dark: var(--white-1);
+  --text-on-dark-secondary: var(--green-1);
+  --text-on-dark-muted: var(--green-2);
+  
+  --text-on-light: var(--green-5);
+  --text-on-light-secondary: var(--blue-3);
+  
   --danger: #E65A5A;
-  --success: #7FBF8E;
-  --warning: #81C784;
-  --shadow-soft: 0 18px 45px rgba(0, 0, 0, 0.45);
-  --shadow-gold: 0 18px 42px rgba(76, 175, 80, 0.15);
-  --gold-gradient: linear-gradient(135deg, #81C784, #2E7D32 48%, #1B5E20);
-  --dark-gradient: linear-gradient(135deg, #040806 0%, #0c1410 48%, #16281e 100%);
+  --success: var(--green-4);
+  --warning: var(--yellow-3);
+  
+  --shadow-soft: 0 12px 30px rgba(31, 107, 58, 0.08);
+  --shadow-gold: 0 12px 30px rgba(212, 167, 44, 0.15);
+  
+  --gold-gradient: linear-gradient(135deg, var(--green-3), var(--green-4) 48%, var(--green-5));
+  --dark-gradient: linear-gradient(135deg, var(--white-2) 0%, var(--white-3) 48%, var(--green-1) 100%);
 
   --primary: var(--gold);
   --primary-color: var(--gold);
-  --primary-light: #e8f5e9;
-  --primary-dark: var(--gold-bright);
-  --secondary: var(--gold-deep);
-  --secondary-color: var(--gold-bright);
+  --primary-light: var(--green-2);
+  --primary-dark: var(--gold-deep);
+  --secondary: var(--blue-3);
+  --secondary-color: var(--blue-2);
   --tertiary: var(--gold-bright);
   --bg-color: var(--bg-soft);
   --panel-bg: var(--surface-card);
-  --text-main: var(--text-on-dark);
-  --text-muted: var(--text-on-dark-secondary);
+  --text-main: var(--green-5);
+  --text-muted: #4a5d4e;
   
   /* Expanded teaching palette for variety */
-  --sdg-water: var(--gold-bright);
-  --sdg-edu: #C79A43;
-  --sdg-industry: #E6BF62;
+  --sdg-water: var(--blue-2);
+  --sdg-edu: var(--yellow-3);
+  --sdg-industry: var(--yellow-2);
   
   /* Option colors */
-  --opt-a: #1B5E20;
-  --opt-b: #161616;
-  --opt-c: #2E7D32;
-  --opt-d: #7A5A22;
+  --opt-a: var(--green-4);
+  --opt-b: var(--blue-3);
+  --opt-c: var(--yellow-3);
+  --opt-d: var(--green-3);
 }
 
 * {
@@ -1342,10 +1370,10 @@ textarea:focus-visible {
 .teacher-game-over,
 .flex-center {
   background:
-    radial-gradient(circle at 18% 0%, rgba(76, 175, 80, 0.16), transparent 28%),
-    radial-gradient(circle at 85% 12%, rgba(129, 199, 132, 0.08), transparent 24%),
+    radial-gradient(circle at 18% 0%, rgba(123, 196, 127, 0.18), transparent 28%),
+    radial-gradient(circle at 85% 12%, rgba(242, 213, 107, 0.12), transparent 24%),
     linear-gradient(180deg, var(--bg) 0%, var(--surface) 52%, var(--bg) 100%) !important;
-  color: var(--text-on-dark) !important;
+  color: var(--text-main) !important;
 }
 
 .home-container::before,
@@ -1360,40 +1388,42 @@ textarea:focus-visible {
     linear-gradient(90deg, rgba(76, 175, 80, 0.035) 1px, transparent 1px),
     linear-gradient(180deg, rgba(76, 175, 80, 0.025) 1px, transparent 1px);
   background-size: 64px 64px;
-  mask-image: linear-gradient(to bottom, rgba(0,0,0,0.8), transparent 72%);
+  mask-image: linear-gradient(to bottom, rgba(0,0,0,0.3), transparent 72%);
   z-index: 0;
 }
 
 .saas-nav,
 .home-container > nav,
 .student-topbar {
-  background: rgba(8, 8, 8, 0.92) !important;
+  background: rgba(255, 255, 255, 0.85) !important;
   border-bottom: 1px solid var(--gold-border) !important;
-  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.38) !important;
-  color: var(--text-on-dark) !important;
+  box-shadow: 0 10px 30px rgba(31, 107, 58, 0.06) !important;
+  color: var(--text-main) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
 }
 
 .saas-logo,
 .saas-logo *,
 .home-container > nav div,
 .home-container > nav span {
-  color: var(--text-on-dark) !important;
+  color: var(--text-main) !important;
 }
 
 .saas-logo svg,
 .home-container > nav svg {
-  color: var(--gold-bright) !important;
-  stroke: var(--gold-bright) !important;
+  color: var(--primary) !important;
+  stroke: var(--primary) !important;
 }
 
 .saas-nav-link,
 .saas-footer-link {
-  color: var(--text-on-dark-secondary) !important;
+  color: var(--text-muted) !important;
 }
 
 .saas-nav-link:hover,
 .saas-footer-link:hover {
-  color: var(--gold-bright) !important;
+  color: var(--primary) !important;
 }
 
 .saas-page-shell .saas-section,
@@ -1401,8 +1431,8 @@ textarea:focus-visible {
 .saas-mega-footer,
 .home-container footer {
   background: var(--bg-soft) !important;
-  color: var(--text-on-dark) !important;
-  border-color: rgba(76, 175, 80, 0.18) !important;
+  color: var(--text-main) !important;
+  border-color: rgba(123, 196, 127, 0.2) !important;
 }
 
 .saas-page-shell .saas-section:nth-of-type(even) {
@@ -1411,9 +1441,9 @@ textarea:focus-visible {
 
 .saas-hero {
   background:
-    radial-gradient(circle at 16% 24%, rgba(76, 175, 80, 0.24), transparent 27%),
-    radial-gradient(circle at 82% 18%, rgba(129, 199, 132, 0.12), transparent 24%),
-    linear-gradient(135deg, rgba(8, 8, 8, 0.98), rgba(17, 17, 17, 0.98) 48%, rgba(12, 24, 18, 0.86)) !important;
+    radial-gradient(circle at 16% 24%, rgba(123, 196, 127, 0.18), transparent 27%),
+    radial-gradient(circle at 82% 18%, rgba(242, 213, 107, 0.12), transparent 24%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(248, 251, 249, 0.95) 48%, rgba(234, 247, 236, 0.9)) !important;
 }
 
 .saas-hero-title,
@@ -1434,7 +1464,7 @@ textarea:focus-visible {
 .modal-content h2,
 .modal-content h3,
 .modal-content h4 {
-  color: var(--text-on-dark) !important;
+  color: var(--text-main) !important;
   letter-spacing: 0 !important;
 }
 
@@ -1448,8 +1478,8 @@ textarea:focus-visible {
 .history-list h3,
 .correct-answer-display,
 .highlight-url {
-  color: var(--gold-bright) !important;
-  background-image: linear-gradient(90deg, #a5d6a7 0%, var(--gold) 50%, var(--gold-deep) 100%) !important;
+  color: var(--primary) !important;
+  background-image: linear-gradient(90deg, var(--green-5) 0%, var(--green-4) 50%, var(--blue-3) 100%) !important;
   -webkit-background-clip: text;
   background-clip: text;
 }
@@ -1490,7 +1520,7 @@ span {
 .student-game-over p,
 .teacher-playing p,
 .teacher-result p {
-  color: var(--text-on-dark-secondary) !important;
+  color: var(--text-muted) !important;
 }
 
 .card,
@@ -1515,7 +1545,7 @@ span {
 .feedback-content {
   background: linear-gradient(180deg, rgba(12, 24, 18, 0.86), rgba(22, 22, 22, 0.96)) !important;
   border: 1px solid rgba(76, 175, 80, 0.25) !important;
-  color: var(--text-on-dark) !important;
+  color: var(--text-main) !important;
   box-shadow: var(--shadow-soft), inset 0 1px 0 rgba(129, 199, 132, 0.08) !important;
 }
 
@@ -1525,15 +1555,15 @@ span {
 .subject-category-card:hover,
 .audience-card:hover,
 .saas-value-card:hover {
-  border-color: rgba(129, 199, 132, 0.45) !important;
-  box-shadow: var(--shadow-soft), 0 0 30px rgba(76, 175, 80, 0.12) !important;
+  border-color: rgba(62, 154, 82, 0.6) !important;
+  box-shadow: var(--shadow-soft), 0 0 25px rgba(123, 196, 127, 0.22) !important;
 }
 
 .role-card .icon,
 .saas-feature-icon {
   background: rgba(76, 175, 80, 0.13) !important;
   border: 1px solid rgba(129, 199, 132, 0.22) !important;
-  color: var(--gold-bright) !important;
+  color: var(--primary) !important;
 }
 
 .saas-hero-card h2,
@@ -1543,7 +1573,7 @@ span {
 .players-list h3,
 .teacher-card strong,
 .student-waiting strong {
-  color: var(--gold-bright) !important;
+  color: var(--primary) !important;
 }
 
 .saas-hero-metrics div,
@@ -1554,11 +1584,11 @@ span {
 .leaderboard-item {
   background: rgba(129, 199, 132, 0.08) !important;
   border: 1px solid rgba(76, 175, 80, 0.18) !important;
-  color: var(--text-on-dark) !important;
+  color: var(--text-main) !important;
 }
 
 .player-badge {
-  color: var(--gold-bright) !important;
+  color: var(--primary) !important;
 }
 
 .btn,
@@ -1572,18 +1602,18 @@ button[type="submit"] {
 
 .primary-btn,
 .saas-btn-solid {
-  background: linear-gradient(135deg, #4CAF50, var(--primary) 50%, #1B5E20) !important;
-  color: var(--bg) !important;
-  border: 1px solid rgba(129, 199, 132, 0.35) !important;
-  box-shadow: 0 14px 28px rgba(129, 199, 132, 0.22) !important;
+  background: var(--gold-gradient) !important;
+  color: #ffffff !important;
+  border: 1px solid rgba(31, 107, 58, 0.2) !important;
+  box-shadow: 0 8px 20px rgba(62, 154, 82, 0.2) !important;
 }
 
 .primary-btn:hover,
 .saas-btn-solid:hover {
-  background: linear-gradient(135deg, #81C784, #4CAF50 48%, #1B5E20) !important;
-  color: var(--bg) !important;
+  background: linear-gradient(135deg, var(--green-3), var(--green-4) 50%, var(--green-5)) !important;
+  color: #ffffff !important;
   transform: translateY(-2px) !important;
-  box-shadow: 0 18px 36px rgba(129, 199, 132, 0.28) !important;
+  box-shadow: 0 12px 28px rgba(62, 154, 82, 0.3), 0 0 12px rgba(123, 196, 127, 0.25) !important;
 }
 
 .saas-btn-outline,
@@ -1593,7 +1623,7 @@ button[type="submit"] {
 .modal-content button,
 .home-container footer button {
   background: rgba(12, 24, 18, 0.6) !important;
-  color: var(--gold-bright) !important;
+  color: var(--primary) !important;
   border: 1px solid rgba(76, 175, 80, 0.55) !important;
   box-shadow: none !important;
 }
@@ -1605,8 +1635,8 @@ button[type="submit"] {
 .modal-content button:hover,
 .home-container footer button:hover {
   background: rgba(76, 175, 80, 0.12) !important;
-  border-color: var(--gold) !important;
-  color: var(--gold-bright) !important;
+  border-color: var(--green-4) !important;
+  color: var(--primary) !important;
   transform: translateY(-1px) !important;
 }
 
@@ -1614,9 +1644,9 @@ button[type="submit"] {
 .teacher-card button[style*="var(--primary-color)"],
 .teacher-card button[style*="primary-color"],
 .modal-content .primary-btn {
-  background: linear-gradient(135deg, #4CAF50, var(--primary) 50%, #1B5E20) !important;
-  color: var(--bg) !important;
-  border-color: rgba(129, 199, 132, 0.36) !important;
+  background: var(--gold-gradient) !important;
+  color: #ffffff !important;
+  border-color: rgba(31, 107, 58, 0.2) !important;
 }
 
 button[style*="#ffebee"],
@@ -1634,14 +1664,14 @@ textarea,
 .input-field {
   background: rgba(8, 15, 10, 0.8) !important;
   border: 1px solid rgba(129, 199, 132, 0.35) !important;
-  color: var(--text-on-dark) !important;
+  color: var(--text-main) !important;
   border-radius: 12px !important;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03) !important;
 }
 
 input::placeholder,
 textarea::placeholder {
-  color: var(--text-on-dark-muted) !important;
+  color: #9ab2a0 !important;
   opacity: 1 !important;
 }
 
@@ -1649,8 +1679,8 @@ input:not([type="checkbox"]):not([type="radio"]):focus,
 select:focus,
 textarea:focus,
 .input-field:focus {
-  border-color: var(--gold) !important;
-  box-shadow: 0 0 0 4px rgba(76, 175, 80, 0.18) !important;
+  border-color: var(--green-4) !important;
+  box-shadow: 0 0 0 4px rgba(62, 154, 82, 0.15) !important;
 }
 
 input[type="file"]::file-selector-button {
@@ -1664,28 +1694,28 @@ input[type="file"]::file-selector-button {
 }
 
 .modal-overlay {
-  background: rgba(0, 0, 0, 0.76) !important;
+  background: rgba(31, 107, 58, 0.3) !important;
   backdrop-filter: blur(8px) !important;
 }
 
 .modal-content {
   background: linear-gradient(180deg, var(--surface-elevated), var(--surface-card)) !important;
   border: 1px solid rgba(76, 175, 80, 0.3) !important;
-  color: var(--text-on-dark) !important;
+  color: var(--text-main) !important;
   box-shadow: 0 26px 70px rgba(0,0,0,0.58), inset 0 1px 0 rgba(129, 199, 132, 0.08) !important;
 }
 
 .modal-content div,
 .modal-content p,
 .modal-content span {
-  color: var(--text-on-dark-secondary) !important;
+  color: var(--text-muted) !important;
 }
 
 .modal-content h2,
 .modal-content h3,
 .modal-content h4,
 .modal-content button:not(.primary-btn) {
-  color: var(--gold-bright) !important;
+  color: var(--primary) !important;
 }
 
 .modal-content [style*="#FFEBEE"],
@@ -1699,15 +1729,15 @@ input[type="file"]::file-selector-button {
 .modal-content [style*="#fff"],
 .modal-content [style*="white"] {
   background: rgba(129, 199, 132, 0.1) !important;
-  border-color: rgba(129, 199, 132, 0.22) !important;
-  color: var(--text-on-dark-secondary) !important;
+  border-color: rgba(123, 196, 127, 0.22) !important;
+  color: var(--text-muted) !important;
 }
 
 .teacher-card [style*="background"],
 .teacher-waiting [style*="background"],
 .student-game-over [style*="background"] {
-  background: rgba(129, 199, 132, 0.08) !important;
-  border-color: rgba(129, 199, 132, 0.22) !important;
+  background: rgba(234, 247, 236, 0.4) !important;
+  border-color: rgba(123, 196, 127, 0.25) !important;
 }
 
 .teacher-card table,
@@ -1716,14 +1746,14 @@ input[type="file"]::file-selector-button {
 .teacher-card tr,
 .teacher-card td,
 .teacher-card th {
-  color: var(--text-on-dark) !important;
-  border-color: rgba(76, 175, 80, 0.18) !important;
+  color: var(--text-main) !important;
+  border-color: rgba(123, 196, 127, 0.2) !important;
 }
 
 .teacher-card thead tr,
 .teacher-card th {
-  background: rgba(76, 175, 80, 0.16) !important;
-  color: var(--gold-bright) !important;
+  background: rgba(123, 196, 127, 0.15) !important;
+  color: var(--primary) !important;
 }
 
 .teacher-card [style*="#666"],
@@ -1733,13 +1763,13 @@ input[type="file"]::file-selector-button {
 .teacher-card [style*="var(--text-muted)"],
 .teacher-card label,
 .teacher-card p {
-  color: var(--text-on-dark-secondary) !important;
+  color: var(--text-muted) !important;
 }
 
 .teacher-card [style*="var(--primary-dark)"],
 .teacher-card [style*="var(--secondary)"],
 .teacher-card [style*="var(--secondary-color)"] {
-  color: var(--gold-bright) !important;
+  color: var(--primary) !important;
 }
 
 .room-info,
@@ -1748,7 +1778,7 @@ input[type="file"]::file-selector-button {
 .leaderboard,
 .teacher-game-over {
   background: linear-gradient(180deg, rgba(12, 24, 18, 0.86), rgba(22, 22, 22, 0.96)) !important;
-  color: var(--text-on-dark) !important;
+  color: var(--text-main) !important;
   border: 1px solid rgba(76, 175, 80, 0.25) !important;
 }
 
@@ -1757,7 +1787,7 @@ input[type="file"]::file-selector-button {
 .teacher-result .leaderboard,
 .teacher-game-over .leaderboard-item {
   background: rgba(129, 199, 132, 0.08) !important;
-  color: var(--text-on-dark) !important;
+  color: var(--text-main) !important;
   border: 1px solid rgba(76, 175, 80, 0.2) !important;
 }
 
@@ -1769,53 +1799,53 @@ input[type="file"]::file-selector-button {
 
 .bg-correct {
   background: linear-gradient(135deg, #1B3A28, #2D6E48) !important;
-  color: var(--text-on-dark) !important;
+  color: var(--text-main) !important;
 }
 
 .bg-incorrect {
   background: linear-gradient(135deg, #3A1515, #7A2A2A) !important;
-  color: var(--text-on-dark) !important;
+  color: var(--text-main) !important;
 }
 
 .option-card,
 .student-btn-opt {
-  border: 1px solid rgba(129, 199, 132, 0.22) !important;
-  box-shadow: 0 14px 30px rgba(0,0,0,0.32), inset 0 -4px 0 rgba(0,0,0,0.18) !important;
+  border: 1.5px solid rgba(123, 196, 127, 0.35) !important;
+  box-shadow: 0 8px 20px rgba(31, 107, 58, 0.05), inset 0 -4px 0 rgba(0,0,0,0.1) !important;
 }
 
 .opt-a,
 .student-btn-opt.opt-a {
   background: linear-gradient(135deg, #1B5E20, #0a2d10) !important;
-  color: var(--text-on-dark) !important;
+  color: var(--text-main) !important;
 }
 
 .opt-b,
 .student-btn-opt.opt-b {
   background: linear-gradient(135deg, #111d16, #070e0a) !important;
-  color: var(--text-on-dark) !important;
+  color: var(--text-main) !important;
 }
 
 .opt-c,
 .student-btn-opt.opt-c {
-  background: linear-gradient(135deg, #81C784, #2E7D32, #1B5E20) !important;
-  color: var(--bg) !important;
+  background: linear-gradient(135deg, var(--yellow-1), var(--white-1)) !important;
+  color: var(--yellow-3) !important;
 }
 
 .opt-d,
 .student-btn-opt.opt-d {
   background: linear-gradient(135deg, #388E3C, #1B5E20) !important;
-  color: var(--text-on-dark) !important;
+  color: var(--text-main) !important;
 }
 
 .opt-label {
-  background: rgba(255, 255, 255, 0.16) !important;
+  background: rgba(255, 255, 255, 0.6) !important;
   color: inherit !important;
-  border: 1px solid rgba(255, 255, 255, 0.18) !important;
+  border: 1px solid rgba(123, 196, 127, 0.4) !important;
 }
 
 .score-summary {
-  background: linear-gradient(135deg, #4CAF50, var(--primary) 50%, #1B5E20) !important;
-  color: var(--bg) !important;
+  background: var(--gold-gradient) !important;
+  color: #ffffff !important;
 }
 
 .score-summary * {
@@ -1829,7 +1859,7 @@ input[type="file"]::file-selector-button {
 
 .leaderboard-item .rank,
 .leaderboard-item .score {
-  color: var(--gold-bright) !important;
+  color: var(--primary) !important;
 }
 
 .qr-container {
@@ -1839,7 +1869,7 @@ input[type="file"]::file-selector-button {
 
 .spinner {
   border-color: rgba(129, 199, 132, 0.18) !important;
-  border-top-color: var(--gold-bright) !important;
+  border-top-color: var(--primary) !important;
 }
 
 .success-text,
@@ -2162,7 +2192,7 @@ input[type="file"]::file-selector-button {
 
 .rights-notice-box p {
   margin-top: 0.3rem;
-  color: var(--text-on-dark-secondary) !important;
+  color: var(--text-muted) !important;
 }
 
 .rights-notice-icon {
@@ -2215,7 +2245,7 @@ input[type="file"]::file-selector-button {
 }
 
 .question-bank-card p {
-  color: var(--text-on-dark-secondary) !important;
+  color: var(--text-muted) !important;
 }
 
 .permission-badge-row {
@@ -2322,7 +2352,7 @@ input[type="file"]::file-selector-button {
   border: 1px solid rgba(76, 175, 80, 0.18);
   border-radius: 8px;
   padding: 0.45rem 0.65rem;
-  color: var(--text-on-dark-secondary) !important;
+  color: var(--text-muted) !important;
 }
 
 .excel-drop {
@@ -2332,7 +2362,7 @@ input[type="file"]::file-selector-button {
   min-height: 130px;
   border: 1px dashed rgba(129, 199, 132, 0.4);
   border-radius: 8px;
-  color: var(--gold-bright) !important;
+  color: var(--primary) !important;
   cursor: pointer;
   background: rgba(76, 175, 80, 0.07);
 }
@@ -2445,7 +2475,7 @@ input[type="file"]::file-selector-button {
   align-items: flex-start;
   gap: 0.6rem;
   margin: 1rem 0;
-  color: var(--text-on-dark-secondary) !important;
+  color: var(--text-muted) !important;
 }
 
 .ack-checkbox input {
@@ -2498,7 +2528,7 @@ input[type="file"]::file-selector-button {
 
 .selected-question-list p {
   margin: 0;
-  color: var(--text-on-dark-secondary) !important;
+  color: var(--text-muted) !important;
 }
 
 .audit-panel {
@@ -2562,7 +2592,7 @@ input[type="file"]::file-selector-button {
 .secondary-gold-outline-btn:hover:not(:disabled),
 .dark-action-btn:hover:not(:disabled) {
   transform: translateY(-1px);
-  border-color: var(--gold) !important;
+  border-color: var(--green-4) !important;
   box-shadow: 0 10px 28px rgba(76, 175, 80, 0.18);
 }
 
@@ -3095,7 +3125,7 @@ input[type="file"]::file-selector-button {
 .qb-modal label {
   display: block;
   margin: 0.7rem 0 0.35rem;
-  color: var(--text-on-dark-secondary) !important;
+  color: var(--text-muted) !important;
 }
 
 .qb-modal input:not([type="checkbox"]) {
@@ -4004,14 +4034,14 @@ input[type="file"]::file-selector-button {
 
 /* AI Financial Cosmos Premium Tool Window Style */
 .app-tool-window {
-  background: rgba(12, 24, 18, 0.88); /* Premium Deep Blue */
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(76, 175, 80, 0.25); /* Cyan border */
-  border-top: 5px solid var(--gold-bright); /* Glowing top line */
-  border-radius: 20px;
-  box-shadow: 0 30px 60px rgba(0, 0, 0, 0.55), 0 0 30px rgba(76, 175, 80, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  color: #f8fafc;
+  background: rgba(255, 255, 255, 0.82) !important; /* Glassmorphic Light */
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+  border: 1.5px solid rgba(123, 196, 127, 0.45) !important; 
+  border-top: 5px solid var(--green-4) !important; /* Glowing top line */
+  border-radius: 20px !important;
+  box-shadow: 0 30px 60px rgba(31, 107, 58, 0.1), 0 0 30px rgba(123, 196, 127, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.8) !important;
+  color: var(--text-main) !important;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -4027,8 +4057,8 @@ input[type="file"]::file-selector-button {
 }
 
 .app-tool-window-header {
-  background: rgba(255, 255, 255, 0.03);
-  border-bottom: 1px solid rgba(76, 175, 80, 0.2);
+  background: rgba(234, 247, 236, 0.4) !important;
+  border-bottom: 1px solid rgba(123, 196, 127, 0.35) !important;
   padding: 1.25rem 2rem;
   display: flex;
   justify-content: space-between;
@@ -4039,7 +4069,7 @@ input[type="file"]::file-selector-button {
 .app-tool-window-header-title {
   font-size: 1.3rem;
   font-weight: 700;
-  color: #ffffff;
+  color: var(--text-main) !important;
   display: flex;
   align-items: center;
   gap: 0.75rem;
@@ -4050,7 +4080,7 @@ input[type="file"]::file-selector-button {
 }
 
 .app-tool-window-header-title button:hover {
-  color: var(--gold-bright) !important;
+  color: var(--primary) !important;
   transform: translateX(-3px);
 }
 
@@ -4139,7 +4169,7 @@ input[type="file"]::file-selector-button {
 .app-tool-window input[type="number"]:focus, 
 .app-tool-window input[type="datetime-local"]:focus, 
 .app-tool-window select:focus {
-  border-color: var(--gold) !important;
+  border-color: var(--green-4) !important;
   box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.2) !important;
 }
 
@@ -4277,7 +4307,7 @@ input[type="file"]::file-selector-button {
 }
 
 .app-tool-window .role-card:hover {
-  border-color: var(--gold) !important;
+  border-color: var(--green-4) !important;
   box-shadow: 0 20px 45px rgba(76, 175, 80, 0.25) !important;
   transform: translateY(-8px);
 }
@@ -4292,7 +4322,7 @@ input[type="file"]::file-selector-button {
 
 .app-tool-window .role-card .icon {
   background: rgba(76, 175, 80, 0.1) !important;
-  color: var(--gold-bright) !important;
+  color: var(--primary) !important;
 }
 
 /* Adjust form controls under both tool windows and modals */
@@ -4321,7 +4351,7 @@ input[type="file"]::file-selector-button {
 .app-tool-window input[type="password"]:focus, .app-tool-window-modal input[type="password"]:focus,
 .app-tool-window input[type="email"]:focus, .app-tool-window-modal input[type="email"]:focus,
 .app-tool-window select:focus, .app-tool-window-modal select:focus {
-  border-color: var(--gold) !important;
+  border-color: var(--green-4) !important;
   box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.2) !important;
 }
 
@@ -4331,7 +4361,7 @@ input[type="file"]::file-selector-button {
 
 .app-tool-window th, .app-tool-window-modal th {
   background: rgba(255, 255, 255, 0.05) !important;
-  color: var(--gold-bright) !important;
+  color: var(--primary) !important;
 }
 
 .app-tool-window td, .app-tool-window tr, .app-tool-window-modal td, .app-tool-window-modal tr {
