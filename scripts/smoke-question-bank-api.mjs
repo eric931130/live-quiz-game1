@@ -109,7 +109,9 @@ const child = spawn(process.execPath, ['backend/index.js'], {
     ...process.env,
     PORT: String(port),
     QUESTION_BANK_STORE_PATH: storePath,
-    REQUIRE_FIREBASE_AUTH: 'false'
+    REQUIRE_FIREBASE_AUTH: 'false',
+    JWT_SECRET: 'test_jwt_secret',
+    ADMIN_PASSWORD: 'test_admin_password'
   },
   stdio: ['ignore', 'pipe', 'pipe'],
   windowsHide: true

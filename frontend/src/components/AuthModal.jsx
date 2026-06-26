@@ -37,6 +37,11 @@ export default function AuthModal({ onClose, onSuccess }) {
            setLoading(false);
            return;
         }
+        if (email.trim().toLowerCase() === 'star00000@gmail.com') {
+           setError('該管理員帳號不開放手動註冊。');
+           setLoading(false);
+           return;
+        }
         if (password.length < 6) {
            setError('密碼長度至少需要 6 碼');
            setLoading(false);
@@ -113,7 +118,7 @@ export default function AuthModal({ onClose, onSuccess }) {
               avatarType: avatar || '🧑‍🚀',
               avatar: avatar || '🧑‍🚀',
               playFrequency: playFrequency || '每週 3 次',
-              role: 'student',
+              role: 'player',
               createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString()
             });

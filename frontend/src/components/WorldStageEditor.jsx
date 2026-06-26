@@ -738,7 +738,7 @@ export default function WorldStageEditor({ worldsList, roundsList, fetchWorldsAn
                      <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '0.3rem' }}>目標通關階段 (Stage Index)</label>
                      <select className="input-field" style={{ width: '100%' }} value={restartTargetStageIndex} onChange={e => setRestartTargetStageIndex(e.target.value)}>
                         {Array.from({ length: 10 }, (_, i) => (
-                           <option key={i+1} value={i+1} style={{ background: '#161c2d', color: '#fff' }}>達到第 {i+1} 階段</option>
+                           <option key={i+1} value={i+1} style={{ background: '#14532D', color: '#fff' }}>達到第 {i+1} 階段</option>
                         ))}
                      </select>
                   </div>
@@ -761,8 +761,8 @@ export default function WorldStageEditor({ worldsList, roundsList, fetchWorldsAn
                   <div>
                      <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '0.3rem' }}>排行榜顯示人數 (5 或 10)</label>
                      <select className="input-field" style={{ width: '100%' }} value={restartLeaderboardLimit} onChange={e => setRestartLeaderboardLimit(e.target.value)}>
-                        <option value="5" style={{ background: '#161c2d', color: '#fff' }}>顯示前 5 名</option>
-                        <option value="10" style={{ background: '#161c2d', color: '#fff' }}>顯示前 10 名</option>
+                        <option value="5" style={{ background: '#14532D', color: '#fff' }}>顯示前 5 名</option>
+                        <option value="10" style={{ background: '#14532D', color: '#fff' }}>顯示前 10 名</option>
                      </select>
                   </div>
                </div>
@@ -797,7 +797,7 @@ export default function WorldStageEditor({ worldsList, roundsList, fetchWorldsAn
                      <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '0.3rem' }}>目標通關階段 (Stage Index)</label>
                      <select className="input-field" style={{ width: '100%' }} value={editTargetStageIndex} onChange={e => setEditTargetStageIndex(e.target.value)}>
                         {Array.from({ length: 10 }, (_, i) => (
-                           <option key={i+1} value={i+1} style={{ background: '#161c2d', color: '#fff' }}>達到第 {i+1} 階段</option>
+                           <option key={i+1} value={i+1} style={{ background: '#14532D', color: '#fff' }}>達到第 {i+1} 階段</option>
                         ))}
                      </select>
                   </div>
@@ -820,8 +820,8 @@ export default function WorldStageEditor({ worldsList, roundsList, fetchWorldsAn
                   <div>
                      <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '0.3rem' }}>排行榜顯示人數 (5 或 10)</label>
                      <select className="input-field" style={{ width: '100%' }} value={editLeaderboardLimit} onChange={e => setEditLeaderboardLimit(e.target.value)}>
-                        <option value="5" style={{ background: '#161c2d', color: '#fff' }}>顯示前 5 名</option>
-                        <option value="10" style={{ background: '#161c2d', color: '#fff' }}>顯示前 10 名</option>
+                        <option value="5" style={{ background: '#14532D', color: '#fff' }}>顯示前 5 名</option>
+                        <option value="10" style={{ background: '#14532D', color: '#fff' }}>顯示前 10 名</option>
                      </select>
                   </div>
                </div>

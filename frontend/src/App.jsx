@@ -7,12 +7,14 @@ import LazyErrorBoundary from './components/LazyErrorBoundary';
 import { Globe2, LogOut, BookOpen, Users, Shield, ArrowRight, ArrowLeft, Play, BarChart3, Clock, Zap, Target, BookHeart, GraduationCap, Building2, Palette, BriefcaseBusiness, Code2, Brain, MessageSquareText, Layers3, ClipboardCheck, Sparkles, Compass, Trophy } from 'lucide-react';
 import './index.css';
 
-const TeacherDashboard = lazy(() => import('./components/TeacherDashboard'));
+const GMControlPanel = lazy(() => import('./components/GMControlPanel'));
 const StudentView = lazy(() => import('./components/StudentView'));
 const StudentAchievements = lazy(() => import('./components/StudentAchievements'));
 const WorldChallenges = lazy(() => import('./components/WorldChallenges'));
 const AuthModal = lazy(() => import('./components/AuthModal'));
 const TermsModal = lazy(() => import('./components/TermsModal'));
+const StarterSelectionModal = lazy(() => import('./components/StarterSelectionModal'));
+const EvolutionAnimation = lazy(() => import('./components/EvolutionAnimation'));
 
 const API_BASE_URL = window.location.hostname === 'localhost' 
   ? 'http://localhost:3001' 
@@ -21,11 +23,11 @@ const API_BASE_URL = window.location.hostname === 'localhost'
 const E2E_TEACHER_ACCESS = import.meta.env.DEV && import.meta.env.VITE_E2E_TEACHER_ACCESS === 'true';
 const E2E_TEACHER_USER = {
   uid: 'e2e-teacher',
-  email: 'e2e-teacher@example.test',
-  displayName: 'E2E Teacher',
-  role: 'teacher',
+  email: 'STAR00000@gmail.com',
+  displayName: 'GM Teacher Admin',
+  role: 'gm_teacher_admin',
   schoolId: 'e2e-school',
-  getIdToken: async () => null
+  getIdToken: async () => 'mock-token'
 };
 
 function RouteFallback({ label = '載入中...' }) {
@@ -73,86 +75,160 @@ const _teachingModes = [
 ];
 
 function App() {
-  const [role, setRole] = useState(null); 
+  const [subpage, setSubpage] = useState(null); 
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [termsMode, setTermsMode] = useState(null); // 'terms' | 'disclaimer' | null
   const [guestCode, setGuestCode] = useState('');
   const [initialCode, setInitialCode] = useState('');
+  const [currentPath, setCurrentPath] = useState(window.location.pathname);
+  const [userRole, setUserRole] = useState(null); // 'gm_teacher_admin' | 'player' | null
+  const [announcements, setAnnouncements] = useState([]);
+  const [, setPlayerProfile] = useState(null);
+  const [, setProfileLoading] = useState(false);
+  const [showStarterSelection, setShowStarterSelection] = useState(false);
+  const [activeEvolution, setActiveEvolution] = useState(null);
+
+  const loadPlayerProfile = React.useCallback(async () => {
+    if (!auth.currentUser || userRole !== 'player') return;
+    setProfileLoading(true);
+    try {
+      const token = await auth.currentUser.getIdToken();
+      const res = await fetch(`${API_BASE_URL}/api/player/profile`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPlayerProfile(data.profile);
+        if (!data.profile.selectedCharacterId) {
+          setShowStarterSelection(true);
+        } else {
+          setShowStarterSelection(false);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to load player profile:", err);
+    } finally {
+      setProfileLoading(false);
+    }
+  }, [userRole]);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser || (E2E_TEACHER_ACCESS ? E2E_TEACHER_USER : null));
+    if (user && userRole === 'player') {
+      setTimeout(() => {
+        loadPlayerProfile();
+      }, 0);
+    } else {
+      setTimeout(() => {
+        setPlayerProfile(null);
+        setShowStarterSelection(false);
+      }, 0);
+    }
+  }, [user, userRole, loadPlayerProfile]);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      const activeUser = currentUser || (E2E_TEACHER_ACCESS ? E2E_TEACHER_USER : null);
+      setUser(activeUser);
+      if (activeUser) {
+        try {
+          if (activeUser.uid === 'e2e-teacher') {
+            setUserRole('gm_teacher_admin');
+          } else {
+            // Force token refresh to ensure custom claims are read
+            const idTokenResult = await activeUser.getIdTokenResult(true);
+            if (idTokenResult.claims.role === 'gm_teacher_admin') {
+              setUserRole('gm_teacher_admin');
+            } else {
+              // Fallback to checking the Users collection
+              const userDocRef = doc(db, 'Users', activeUser.uid);
+              const userDoc = await getDoc(userDocRef);
+              if (userDoc.exists() && userDoc.data().role === 'gm_teacher_admin') {
+                setUserRole('gm_teacher_admin');
+              } else {
+                setUserRole('player');
+              }
+            }
+          }
+        } catch (err) {
+          console.error("Error verifying user role:", err);
+          setUserRole('player');
+        }
+      } else {
+        setUserRole(null);
+      }
       setLoading(false);
     });
     return () => unsubscribe();
   }, []);
 
+  // Sync pathname changes
+  useEffect(() => {
+    const handlePopState = () => {
+      setCurrentPath(window.location.pathname);
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  const navigateTo = (path) => {
+    window.history.pushState(null, '', path);
+    setCurrentPath(path);
+  };
+
+  const isAdminPath = currentPath === '/gm-control-panel' || currentPath === '/teacher-admin';
+
+  // Automatically prompt auth modal when accessing administrative pages anonymously
+  useEffect(() => {
+    if (!loading && !user && isAdminPath) {
+      setTimeout(() => {
+        setShowAuthModal(true);
+      }, 0);
+    }
+  }, [loading, user, isAdminPath]);
+
+  // Load active announcements when authenticated
+  useEffect(() => {
+    if (user) {
+      fetch(`${API_BASE_URL}/api/announcements`)
+        .then(res => res.json())
+        .then(data => {
+          if (Array.isArray(data)) {
+            setAnnouncements(data);
+          }
+        })
+        .catch(err => console.error("Error loading announcements:", err));
+    }
+  }, [user]);
+
   useEffect(() => {
     if (loading) return;
-    if (E2E_TEACHER_ACCESS && !role) {
-       setTimeout(() => {
-          setRole('teacher');
-       }, 0);
-       return;
-    }
     const params = new URLSearchParams(window.location.search);
     const code = params.get('code');
-    if (code && !role) {
+    if (code && !subpage) {
        setTimeout(() => {
           setInitialCode(code);
-          setRole('student');
+          setSubpage('student');
        }, 0);
        window.history.replaceState({}, document.title, window.location.pathname);
     }
-  }, [loading, user, role]);
+  }, [loading, user, subpage]);
 
   const handleLogout = async () => {
     if (E2E_TEACHER_ACCESS) {
-      setRole(null);
+      setSubpage(null);
       setUser(E2E_TEACHER_USER);
+      setUserRole('gm_teacher_admin');
+      navigateTo('/');
       return;
     }
     await signOut(auth);
-    setRole(null);
-  };
-
-  const handleTeacherAccess = async () => {
-    if (!user) {
-      setShowAuthModal(true);
-      return;
-    }
-    try {
-       if (E2E_TEACHER_ACCESS) {
-          setRole('teacher');
-          return;
-       }
-       const userDocRef = doc(db, 'Users', user.uid);
-       const userDoc = await getDoc(userDocRef);
-       if (userDoc.exists() && userDoc.data().role === 'teacher') {
-          setRole('teacher');
-       } else {
-          const pass = prompt('請輸入教師開通密碼以獲取權限：');
-          if (pass) {
-             const response = await fetch(`${API_BASE_URL}/api/admin/become-teacher`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ password: pass, uid: user.uid, email: user.email })
-             });
-             const data = await response.json();
-             
-             if (data.success) {
-                alert('教師權限開通成功！');
-                setRole('teacher');
-             } else {
-                alert(data.error || '密碼錯誤或伺服器未設置管理員金鑰，請重新嘗試。');
-             }
-          }
-       }
-    } catch(err) {
-       console.error("權限驗證失敗", err);
-    }
+    setSubpage(null);
+    setUserRole(null);
+    navigateTo('/');
   };
 
   const handleGuestSubmit = (e) => {
@@ -164,12 +240,12 @@ function App() {
         setShowAuthModal(true);
      } else {
         setInitialCode(guestCode);
-        setRole('student');
+        setSubpage('student');
      }
   };
 
-  const clearRole = () => {
-     setRole(null);
+  const clearSubpage = () => {
+     setSubpage(null);
      setInitialCode('');
   };
 
@@ -177,38 +253,61 @@ function App() {
     return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', fontSize: '1.5rem', color: 'var(--primary-dark)' }}>載入中...</div>;
   }
 
-  if (role === 'teacher') {
-    return (
-      <Suspense fallback={<RouteFallback label="載入教師控制台..." />}>
-        <LazyErrorBoundary title="教師控制台載入失敗">
-          <TeacherDashboard onGoBack={clearRole} user={user} />
-        </LazyErrorBoundary>
-      </Suspense>
-    );
+  if (isAdminPath) {
+    if (user && userRole === null) {
+      return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', fontSize: '1.5rem', color: 'var(--primary-dark)' }}>驗證管理權限中...</div>;
+    }
+    if (user && userRole === 'gm_teacher_admin') {
+      return (
+        <Suspense fallback={<RouteFallback label="載入管理控制台..." />}>
+          <LazyErrorBoundary title="管理控制台載入失敗">
+            <GMControlPanel user={user} onGoBack={() => navigateTo('/')} />
+          </LazyErrorBoundary>
+        </Suspense>
+      );
+    }
+    if (user) {
+      alert("權限不足，只有最高管理員可以存取此頁面！");
+      setTimeout(() => {
+        navigateTo('/');
+      }, 0);
+      return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', fontSize: '1.5rem', color: 'var(--primary-dark)' }}>跳轉中...</div>;
+    }
   }
-  if (role === 'student') {
+
+  if (subpage === 'student') {
     return (
       <Suspense fallback={<RouteFallback label="載入學生作答頁..." />}>
         <LazyErrorBoundary title="學生作答頁載入失敗">
-          <StudentView onGoBack={clearRole} currentUser={user} initialCode={initialCode} />
+          <StudentView onGoBack={clearSubpage} currentUser={user} initialCode={initialCode} />
         </LazyErrorBoundary>
       </Suspense>
     );
   }
-  if (role === 'achievements') {
+  if (subpage === 'achievements') {
     return (
       <Suspense fallback={<RouteFallback label="載入個人成就與錯題本..." />}>
         <LazyErrorBoundary title="個人成就頁載入失敗">
-          <StudentAchievements currentUser={user} onGoBack={clearRole} />
+          <StudentAchievements 
+            currentUser={user} 
+            onGoBack={clearSubpage} 
+            API_BASE_URL={API_BASE_URL}
+            onEvolveTriggered={(data) => setActiveEvolution(data)} 
+          />
         </LazyErrorBoundary>
       </Suspense>
     );
   }
-  if (role === 'world_challenges') {
+  if (subpage === 'world_challenges') {
     return (
       <Suspense fallback={<RouteFallback label="載入關卡挑戰世界..." />}>
         <LazyErrorBoundary title="關卡挑戰頁載入失敗">
-          <WorldChallenges currentUser={user} onGoBack={clearRole} />
+          <WorldChallenges 
+            currentUser={user} 
+            onGoBack={clearSubpage} 
+            API_BASE_URL={API_BASE_URL}
+            onEvolveTriggered={(data) => setActiveEvolution(data)} 
+          />
         </LazyErrorBoundary>
       </Suspense>
     );
@@ -451,44 +550,90 @@ function App() {
 
          {/* Tool Window Body */}
          <div className="app-tool-window-body" style={{ padding: '3rem 2rem' }}>
+            {/* Active Announcements Feed */}
+            {announcements.length > 0 && (
+              <div className="announcements-panel" style={{
+                background: 'rgba(255, 255, 255, 0.7)',
+                border: '1px solid rgba(129, 199, 132, 0.3)',
+                borderRadius: '16px',
+                padding: '1.5rem',
+                marginBottom: '2.5rem',
+                backdropFilter: 'blur(10px)',
+                boxShadow: '0 8px 32px rgba(76, 175, 80, 0.08)',
+                textAlign: 'left'
+              }}>
+                <h3 style={{
+                  color: 'var(--primary-dark)',
+                  margin: '0 0 1rem 0',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  fontSize: '1.25rem',
+                  fontWeight: 'bold'
+                }}>
+                  📢 最新公告
+                </h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  {announcements.map((ann, idx) => (
+                    <div key={idx} style={{
+                      paddingBottom: idx !== announcements.length - 1 ? '1rem' : '0',
+                      borderBottom: idx !== announcements.length - 1 ? '1px solid rgba(129, 199, 132, 0.2)' : 'none'
+                    }}>
+                      <h4 style={{ color: 'var(--primary-color)', margin: '0 0 0.5rem 0', fontWeight: 'bold' }}>
+                        {ann.title}
+                      </h4>
+                      <p style={{ color: 'var(--text-main)', margin: '0', fontSize: '0.95rem', lineHeight: '1.6', whiteSpace: 'pre-wrap' }}>
+                        {ann.content}
+                      </p>
+                      <small style={{ color: 'var(--text-muted)', display: 'block', marginTop: '0.5rem' }}>
+                        發布於：{ann.createdAt ? new Date(ann.createdAt).toLocaleString() : '最近'}
+                      </small>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <h2 style={{ fontSize: '2.5rem', color: 'var(--primary-color)', marginBottom: '3rem', textAlign: 'center', fontWeight: '800' }}>選擇您的學習模式</h2>
             
             <div className="role-selection" style={{ display: 'flex', gap: '2rem', justifyContent: 'center', flexWrap: 'wrap' }}>
-              <div className="role-card" onClick={() => setRole('student')} style={{ flex: '1', minWidth: '280px', maxWidth: '320px', padding: '2.5rem 1.5rem' }}>
+              <div className="role-card" onClick={() => setSubpage('student')} style={{ flex: '1', minWidth: '280px', maxWidth: '320px', padding: '2.5rem 1.5rem' }}>
                 <div className="icon"><Users size={40} /></div>
                 <h2 style={{ margin: '1rem 0 0.5rem' }}>參加測驗</h2>
                 <p style={{ marginBottom: '1.5rem' }}>輸入代碼，參與即時連線對戰或進行單人考核任務。</p>
-                <ParticleButton onClick={() => setRole('student')} className="btn primary-btn btn-block" style={{ borderRadius: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+                <ParticleButton onClick={() => setSubpage('student')} className="btn primary-btn btn-block" style={{ borderRadius: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
                   進入測驗 <ArrowRight size={18} />
                 </ParticleButton>
               </div>
 
-              <div className="role-card" onClick={() => setRole('world_challenges')} style={{ flex: '1', minWidth: '280px', maxWidth: '320px', padding: '2.5rem 1.5rem' }}>
+              <div className="role-card" onClick={() => setSubpage('world_challenges')} style={{ flex: '1', minWidth: '280px', maxWidth: '320px', padding: '2.5rem 1.5rem' }}>
                  <div className="icon"><Compass size={40} /></div>
                  <h2 style={{ margin: '1rem 0 0.5rem' }}>題庫闖關挑戰</h2>
                  <p style={{ marginBottom: '1.5rem' }}>進入 20 個 SDGs 指標學習世界，以滿分挑戰各個檢查點，解鎖進度！</p>
-                 <ParticleButton onClick={() => setRole('world_challenges')} className="btn btn-block" style={{ background: 'var(--primary-color)', color: 'white', borderRadius: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+                 <ParticleButton onClick={() => setSubpage('world_challenges')} className="btn btn-block" style={{ background: 'var(--primary-color)', color: 'white', borderRadius: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
                    開始挑戰 <ArrowRight size={18} />
                  </ParticleButton>
                </div>
 
-              <div className="role-card" onClick={() => setRole('achievements')} style={{ flex: '1', minWidth: '280px', maxWidth: '320px', padding: '2.5rem 1.5rem' }}>
+              <div className="role-card" onClick={() => setSubpage('achievements')} style={{ flex: '1', minWidth: '280px', maxWidth: '320px', padding: '2.5rem 1.5rem' }}>
                  <div className="icon"><Trophy size={40} /></div>
                  <h2 style={{ margin: '1rem 0 0.5rem' }}>個人成就與錯題本</h2>
                  <p style={{ marginBottom: '1.5rem' }}>查看你的徽章、學習進度與錯題紀錄，規劃下一步！</p>
-                 <ParticleButton onClick={() => setRole('achievements')} className="btn btn-block" style={{ background: 'var(--primary-color)', color: 'white', borderRadius: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+                 <ParticleButton onClick={() => setSubpage('achievements')} className="btn btn-block" style={{ background: 'var(--primary-color)', color: 'white', borderRadius: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
                    查看成就 <ArrowRight size={18} />
                  </ParticleButton>
               </div>
               
-              <div className="role-card teacher" onClick={handleTeacherAccess} style={{ flex: '1', minWidth: '280px', maxWidth: '320px', padding: '2.5rem 1.5rem' }}>
-                <div className="icon"><BookOpen size={40} /></div>
-                <h2 style={{ margin: '1rem 0 0.5rem' }}>教師控制台</h2>
-                <p style={{ marginBottom: '1.5rem' }}>管理題庫、派發單人任務與發起即時團戰。</p>
-                <ParticleButton onClick={handleTeacherAccess} className="btn btn-block" style={{ background: 'var(--primary-color)', color: 'white', borderRadius: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
-                  前往後台 <ArrowRight size={18} />
-                </ParticleButton>
-              </div>
+              {userRole === 'gm_teacher_admin' && (
+                <div className="role-card teacher" onClick={() => navigateTo('/gm-control-panel')} style={{ flex: '1', minWidth: '280px', maxWidth: '320px', padding: '2.5rem 1.5rem', border: '1px solid rgba(212, 175, 55, 0.4)', background: 'linear-gradient(135deg, rgba(13, 21, 59, 0.05), rgba(2, 6, 23, 0.15))' }}>
+                  <div className="icon" style={{ color: '#d4af37' }}><Shield size={40} /></div>
+                  <h2 style={{ margin: '1rem 0 0.5rem', color: '#d4af37' }}>管理控制台 (GM)</h2>
+                  <p style={{ marginBottom: '1.5rem' }}>管理題庫、派發關卡、學員進度與系統稽核日誌。</p>
+                  <ParticleButton onClick={() => navigateTo('/gm-control-panel')} className="btn btn-block" style={{ background: 'linear-gradient(135deg, #d4af37, #b8860b)', color: '#000', border: 'none', borderRadius: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', fontWeight: 'bold' }}>
+                    進入後台 <ArrowRight size={18} />
+                  </ParticleButton>
+                </div>
+              )}
             </div>
          </div>
 
@@ -505,6 +650,31 @@ function App() {
       </div>
 
       {termsMode && <TermsModal mode={termsMode} onClose={() => setTermsMode(null)} />}
+
+      {showStarterSelection && (
+        <Suspense fallback={<RouteFallback label="開啟夥伴選擇中..." />}>
+          <StarterSelectionModal 
+            user={user} 
+            API_BASE_URL={API_BASE_URL} 
+            onSelectSuccess={() => {
+              setShowStarterSelection(false);
+              loadPlayerProfile();
+            }} 
+          />
+        </Suspense>
+      )}
+
+      {activeEvolution && (
+        <Suspense fallback={<RouteFallback label="進化動畫準備中..." />}>
+          <EvolutionAnimation 
+            evolutionData={activeEvolution} 
+            onClose={() => {
+              setActiveEvolution(null);
+              loadPlayerProfile();
+            }} 
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

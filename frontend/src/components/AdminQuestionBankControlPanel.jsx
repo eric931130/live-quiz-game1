@@ -39,7 +39,7 @@ function visibilityText(visibility) {
 
 function isAdminUser(user) {
   const role = String(user?.role || user?.customClaims?.role || '').toLowerCase();
-  return ['admin', 'developer', 'owner', 'platform_admin', 'superadmin'].includes(role);
+  return role === 'gm_teacher_admin';
 }
 
 export default function AdminQuestionBankControlPanel({ user }) {

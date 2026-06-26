@@ -2,7 +2,7 @@ import React, { Suspense, lazy, useState, useEffect, useRef, useCallback } from 
 import { io } from 'socket.io-client';
 import { QRCodeSVG } from 'qrcode.react';
 import { collection, addDoc, getDocs, doc, updateDoc, setDoc } from 'firebase/firestore';
-import { Cloud, UploadCloud, Shuffle, ListChecks, Folder, FileText, CheckCircle, Trophy, BarChart3, Clock, Users, Trash2, ChevronDown, ChevronRight, MessageSquare, Save, Archive, PlusCircle, ArrowLeft } from 'lucide-react';
+import { Cloud, UploadCloud, Shuffle, ListChecks, Folder, FileText, CheckCircle, Trophy, BarChart3, Clock, Users, Trash2, ChevronDown, ChevronRight, MessageSquare, Save, Archive, PlusCircle, ArrowLeft, Pencil } from 'lucide-react';
 import { db } from '../firebase';
 import ParticleButton from './ParticleButton';
 import LazyErrorBoundary from './LazyErrorBoundary';
@@ -20,7 +20,7 @@ const SOCKET_URL = window.location.hostname === 'localhost'
 
 function isAdminUser(user) {
   const role = String(user?.role || user?.customClaims?.role || '').toLowerCase();
-  return ['admin', 'developer', 'owner', 'platform_admin', 'superadmin'].includes(role);
+  return role === 'gm_teacher_admin';
 }
 
 function DashboardChunkFallback({ label = '載入模組...' }) {
@@ -42,7 +42,10 @@ export default function TeacherDashboard({ onGoBack, user }) {
   const [savedBanks, setSavedBanks] = useState([]);
   const [selectedBankId, setSelectedBankId] = useState('');
   const [selectedBankQuestions, setSelectedBankQuestions] = useState([]);
-  
+  // 題目線上編輯：null=關閉, -1=新增, >=0=編輯該題索引
+  const [qEditIndex, setQEditIndex] = useState(null);
+  const [qForm, setQForm] = useState({ Question: '', OptA: '', OptB: '', OptC: '', OptD: '', Answer: 'A', Chapter: '', Section: '' });
+
   // Dashboard Mode
   const [dashboardMode, setDashboardMode] = useState('live'); // 'live', 'assignment_setup', 'assignment_manage', 'classroom_discussion', 'student_progress', 'world_management'
   
@@ -441,6 +444,53 @@ export default function TeacherDashboard({ onGoBack, user }) {
       setSelectedCustomQIdxs(new Set()); // Reset selections to prevent mismatch
     } catch(err) {
       alert("刪除題目失敗：" + err.message);
+    }
+  };
+
+  const startAddQuestion = () => {
+    setQForm({ Question: '', OptA: '', OptB: '', OptC: '', OptD: '', Answer: 'A', Chapter: '', Section: '' });
+    setQEditIndex(-1);
+  };
+
+  const startEditQuestion = (idx) => {
+    const q = selectedBankQuestions[idx] || {};
+    setQForm({
+      Question: q.Question || '',
+      OptA: q.OptA || '', OptB: q.OptB || '', OptC: q.OptC || '', OptD: q.OptD || '',
+      Answer: ['A', 'B', 'C', 'D'].includes(q.Answer) ? q.Answer : 'A',
+      Chapter: q.Chapter || '', Section: q.Section || ''
+    });
+    setQEditIndex(idx);
+  };
+
+  const saveQuestion = async () => {
+    if (!selectedBankId) return;
+    if (!qForm.Question.trim()) return alert('請輸入題目內容。');
+    if (!qForm.OptA.trim() || !qForm.OptB.trim()) return alert('至少需要 A、B 兩個選項。');
+    if (!['A', 'B', 'C', 'D'].includes(qForm.Answer)) return alert('答案需為 A / B / C / D。');
+    try {
+      const bank = savedBanks.find(b => b.id === selectedBankId);
+      if (!bank) return;
+      const existing = bank.questions || [];
+      const hasCD = !!(qForm.OptC.trim() || qForm.OptD.trim());
+      const entry = {
+        id: (qEditIndex >= 0 && existing[qEditIndex]?.id) ? existing[qEditIndex].id : `q_${Date.now()}`,
+        Question: qForm.Question.trim(),
+        OptA: qForm.OptA.trim(), OptB: qForm.OptB.trim(), OptC: qForm.OptC.trim(), OptD: qForm.OptD.trim(),
+        Answer: qForm.Answer,
+        Chapter: qForm.Chapter.trim() || '未分類',
+        Section: qForm.Section.trim() || '未分類',
+        Type: hasCD ? '選擇題' : '是非題'
+      };
+      const newQuestions = qEditIndex >= 0
+        ? existing.map((q, i) => (i === qEditIndex ? { ...q, ...entry } : q))
+        : [...existing, entry];
+      await updateDoc(doc(db, "QuizBanks", selectedBankId), { questions: newQuestions });
+      setSavedBanks(savedBanks.map(b => (b.id === selectedBankId ? { ...b, questions: newQuestions } : b)));
+      setSelectedBankQuestions(newQuestions.map((q, idx) => ({ ...q, originalIndex: idx })));
+      setQEditIndex(null);
+    } catch (e) {
+      alert('儲存題目失敗：' + e.message);
     }
   };
 
@@ -1000,6 +1050,58 @@ export default function TeacherDashboard({ onGoBack, user }) {
                 )}
               </div>
             </div>
+
+            {selectedBankId && (
+              <div style={{ marginTop: '1.5rem', padding: '1.25rem', background: 'var(--surface-elevated)', borderRadius: '12px', border: '1px solid var(--gold-border)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                  <strong style={{ color: 'var(--primary-dark)' }}>題目管理（共 {selectedBankQuestions.length} 題）</strong>
+                  <button onClick={startAddQuestion} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', background: 'var(--primary)', color: '#fff', border: 'none', borderRadius: '8px', padding: '0.4rem 0.9rem', cursor: 'pointer', fontWeight: 'bold' }}>
+                    <PlusCircle size={16} /> 新增題目
+                  </button>
+                </div>
+
+                {qEditIndex !== null && (
+                  <div style={{ background: 'var(--surface)', border: '1px solid var(--gold-border)', borderRadius: '10px', padding: '1rem', marginBottom: '0.75rem' }}>
+                    <textarea value={qForm.Question} onChange={e => setQForm({ ...qForm, Question: e.target.value })} placeholder="題目內容" className="input-field" style={{ width: '100%', minHeight: '60px', marginBottom: '0.5rem' }} />
+                    {['A', 'B', 'C', 'D'].map(opt => (
+                      <input key={opt} value={qForm['Opt' + opt]} onChange={e => setQForm({ ...qForm, ['Opt' + opt]: e.target.value })} placeholder={`選項 ${opt}${(opt === 'A' || opt === 'B') ? '（必填）' : '（選填，是非題免填）'}`} className="input-field" style={{ width: '100%', marginBottom: '0.4rem' }} />
+                    ))}
+                    <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ fontSize: '0.85rem' }}>正確答案</label>
+                        <select value={qForm.Answer} onChange={e => setQForm({ ...qForm, Answer: e.target.value })} className="input-field" style={{ width: '100%' }}>
+                          {['A', 'B', 'C', 'D'].map(o => <option key={o} value={o}>{o}</option>)}
+                        </select>
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ fontSize: '0.85rem' }}>章節大類</label>
+                        <input value={qForm.Chapter} onChange={e => setQForm({ ...qForm, Chapter: e.target.value })} placeholder="未分類" className="input-field" style={{ width: '100%' }} />
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ fontSize: '0.85rem' }}>子內容</label>
+                        <input value={qForm.Section} onChange={e => setQForm({ ...qForm, Section: e.target.value })} placeholder="未分類" className="input-field" style={{ width: '100%' }} />
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      <button onClick={saveQuestion} style={{ background: 'var(--success)', color: '#fff', border: 'none', borderRadius: '8px', padding: '0.4rem 1.1rem', cursor: 'pointer', fontWeight: 'bold' }}>{qEditIndex >= 0 ? '儲存修改' : '新增'}</button>
+                      <button onClick={() => setQEditIndex(null)} style={{ background: 'transparent', border: '1px solid var(--gold-border)', borderRadius: '8px', padding: '0.4rem 1.1rem', cursor: 'pointer' }}>取消</button>
+                    </div>
+                  </div>
+                )}
+
+                <div style={{ maxHeight: '320px', overflowY: 'auto' }}>
+                  {selectedBankQuestions.length === 0 ? (
+                    <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '1rem' }}>此題庫尚無題目，點「新增題目」開始建立。</p>
+                  ) : selectedBankQuestions.map((q, idx) => (
+                    <div key={q.id || idx} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 0', borderBottom: '1px solid var(--white-3)' }}>
+                      <span style={{ flex: 1, fontSize: '0.9rem' }}>{idx + 1}. {q.Question} <span style={{ color: 'var(--success)', fontWeight: 'bold', marginLeft: '6px' }}>答:{q.Answer}</span></span>
+                      <button onClick={() => startEditQuestion(idx)} title="編輯此題" style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--primary-dark)' }}><Pencil size={16} /></button>
+                      <button onClick={(e) => deleteQuestion(e, idx)} title="刪除此題" style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--danger)' }}><Trash2 size={16} /></button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {selectedBankQuestions.length > 0 && (
               <div style={{ marginTop: '2rem', padding: '1.5rem', background: '#f9fbe7', borderRadius: '12px', border: '1px solid #dcedc8' }}>

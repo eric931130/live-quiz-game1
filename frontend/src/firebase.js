@@ -9,8 +9,8 @@ const firebaseConfig = {
   projectId: "empath-os",
   storageBucket: "empath-os.firebasestorage.app",
   messagingSenderId: "723285383886",
-  appId: "1:723285383886:web:d28a8e8142ce190bb38e9f",
-  measurementId: "G-TL3EHQY14W"
+  appId: "1:723285383886:web:cb73ae3fc6a89313b38e9f",
+  measurementId: "G-M58JJDZWC7"
 };
 
 const app = initializeApp(firebaseConfig);

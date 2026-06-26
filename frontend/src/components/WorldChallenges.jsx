@@ -1,20 +1,21 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { collection, query, where, getDocs, addDoc, doc, setDoc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Play, ArrowLeft, CheckCircle2, XCircle, Flame, Trophy, Lock, RefreshCw, User } from 'lucide-react';
+import { Play, ArrowLeft, CheckCircle2, XCircle, Flame, Trophy, Lock, RefreshCw, User, Map as MapIcon } from 'lucide-react';
 import ParticleButton from './ParticleButton';
 
 // Pure helper functions outside component to satisfy hook purity rules
 const getCurrentTime = () => Date.now();
 const getCurrentISO = () => new Date().toISOString();
 
-export default function WorldChallenges({ currentUser, onGoBack }) {
+export default function WorldChallenges({ currentUser, onGoBack, API_BASE_URL, onEvolveTriggered }) {
   const [view, setView] = useState('world_select'); // world_select, stage_select, playing, result, leaderboard
   const [loading, setLoading] = useState(true);
   const [worlds, setWorlds] = useState([]);
   const [selectedWorld, setSelectedWorld] = useState(null);
   const [progress, setProgress] = useState({}); // key: `${worldId}_${stageId}_${checkpointId}_${roundId}`, val: progressData
   const [worldSettings, setWorldSettings] = useState({}); // key: `world_${worldId}`, val: settingsData
+  const [error, setError] = useState(null);
   
   // Active Challenge State
   const [activeStage, setActiveStage] = useState(null);
@@ -38,6 +39,7 @@ export default function WorldChallenges({ currentUser, onGoBack }) {
 
   const loadData = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       // 1. Fetch World settings
       const settingsSnap = await getDocs(collection(db, "WorldSettings"));
@@ -156,6 +158,7 @@ export default function WorldChallenges({ currentUser, onGoBack }) {
       setWorlds(worldsList);
     } catch (e) {
       console.error("Failed to load world challenges data", e);
+      setError(e?.message || '無法載入世界資料，請稍後再試。');
     } finally {
       setLoading(false);
     }
@@ -353,6 +356,28 @@ export default function WorldChallenges({ currentUser, onGoBack }) {
       }, { merge: true });
 
       await loadData();
+
+      if (isCleared) {
+        try {
+          const token = await currentUser.getIdToken();
+          const evolRes = await fetch(`${API_BASE_URL}/api/player/check-evolution`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          });
+          if (evolRes.ok) {
+            const evolData = await evolRes.json();
+            if (evolData.evolved) {
+              onEvolveTriggered && onEvolveTriggered(evolData);
+            }
+          }
+        } catch (evolErr) {
+          console.warn("Auto evolution check failed:", evolErr);
+        }
+      }
+
       setView('result');
     } catch(err) {
       console.error(err);
@@ -360,7 +385,7 @@ export default function WorldChallenges({ currentUser, onGoBack }) {
     } finally {
       setLoading(false);
     }
-  }, [currentUser, correctCount, questions, selectedWorld, activeStage, activeCheckpoint, worldSettings, quizStartedAt, answersLog, loadData]);
+  }, [currentUser, correctCount, questions, selectedWorld, activeStage, activeCheckpoint, worldSettings, quizStartedAt, answersLog, loadData, API_BASE_URL, onEvolveTriggered]);
 
   const handleAnswer = useCallback((selectedOption, qs, idx, activeId) => {
     const idToClear = activeId || timerId;
@@ -636,31 +661,64 @@ export default function WorldChallenges({ currentUser, onGoBack }) {
   };
 
   const renderWorldSelect = () => {
+    if (!worlds || worlds.length === 0) {
+      return (
+        <div className="world-empty-state">
+          <MapIcon size={40} />
+          <p style={{ fontWeight: 'bold', fontSize: '1.1rem' }}>目前還沒有開放任何挑戰世界</p>
+          <p>請聯絡老師於開發者模式開啟世界，或稍後再回來探索這片永續地圖。</p>
+        </div>
+      );
+    }
+
+    // 世界解鎖規則：第一個世界預設開放；其後世界僅在「老師於開發者模式開放」後才解鎖。
     return (
       <div className="animate-fade-in" style={{ width: '100%' }}>
-        <p style={{ color: '#94a3b8', textAlign: 'center', marginBottom: '3rem', fontSize: '1.1rem' }}>選擇一個主題領域，挑戰各個檢查點。滿分或符合規則才能解鎖下一關！</p>
+        <p className="world-map-intro">沿著永續之路前進，破關解鎖下一座島嶼。滿分或達標才能繼續前進！</p>
 
-        <div className="world-grid">
-          {worlds.map((w) => {
-            const pct = Math.round((w.clearedCount / w.totalStages) * 100);
+        <div className="world-map">
+          {worlds.map((w, idx) => {
+            const order = parseInt(String(w.id).replace(/\D/g, ''), 10) || (idx + 1);
+            const total = w.totalStages || 0;
+            const cleared = w.clearedCount || 0;
+            const pct = total > 0 ? Math.round((cleared / total) * 100) : 0;
+            const fullyCleared = total > 0 && cleared >= total;
+            const teacherOpened = !!worldSettings[`world_${order}`] || w.isOpen === true;
+            const unlocked = idx === 0 || teacherOpened;
+            const status = !unlocked ? 'locked' : fullyCleared ? 'cleared' : 'open';
+
+            const displayName = w.name && !/世界\s*world_/i.test(w.name) ? w.name : `世界 ${order}`;
+
             return (
-              <div 
-                key={w.id} 
-                className="world-card" 
-                onClick={() => selectWorld(w)}
-              >
-                <div>
-                  <h3 className="world-title">世界 {w.id}</h3>
-                  <p style={{ fontSize: '0.9rem', color: '#555', marginBottom: '0.8rem', fontWeight: 'bold' }}>SDGs 第 {w.id} 指標單元</p>
+              <div key={w.id} className="world-node-container">
+                <div
+                  className={`world-node ${status}`}
+                  onClick={() => unlocked && selectWorld(w)}
+                  role="button"
+                  aria-disabled={!unlocked}
+                  title={unlocked ? displayName : '尚未開放'}
+                >
+                  {status === 'cleared' ? <CheckCircle2 size={30} /> : status === 'locked' ? <Lock size={22} /> : order}
                 </div>
-                <div>
-                  <div className="world-stats" style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
-                    <span>進度: {w.clearedCount}/{w.totalStages} 關</span>
-                    <span>{pct}%</span>
-                  </div>
-                  <div className="progress-bar-container">
-                    <div className="progress-bar-fill" style={{ width: `${pct}%` }}></div>
-                  </div>
+                <div className="world-node-info">
+                  <h4>{displayName}</h4>
+                  <p className="world-node-sub">SDGs 第 {order} 指標單元</p>
+                  {unlocked ? (
+                    <>
+                      <div className="world-stats" style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
+                        <span>進度 {cleared}/{total} 關</span>
+                        <span>{pct}%</span>
+                      </div>
+                      <div className="progress-bar-container">
+                        <div className="progress-bar-fill" style={{ width: `${pct}%` }}></div>
+                      </div>
+                      <span className={`world-status-pill ${status}`}>
+                        {status === 'cleared' ? '✓ 全數通關' : '⚡ 開放挑戰中'}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="world-status-pill locked">🔒 尚未開放（由老師於開發者模式開啟）</span>
+                  )}
                 </div>
               </div>
             );
@@ -998,6 +1056,17 @@ export default function WorldChallenges({ currentUser, onGoBack }) {
 
   if (loading) {
     return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', fontSize: '1.5rem', color: 'var(--primary-dark)' }}>載入闖關世界中...🗺️</div>;
+  }
+
+  if (error) {
+    return (
+      <div className="world-error-state">
+        <MapIcon size={40} />
+        <p style={{ fontWeight: 'bold', fontSize: '1.1rem' }}>😵 載入世界資料時發生問題</p>
+        <p className="world-error-detail">{error}</p>
+        <button onClick={() => loadData()}>重新載入</button>
+      </div>
+    );
   }
 
   let headerTitle = "";

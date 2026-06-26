@@ -12,7 +12,7 @@ service cloud.firestore {
     function isTeacher() {
       return signedIn() && 
              exists(/databases/$(database)/documents/Users/$(request.auth.uid)) &&
-             get(/databases/$(database)/documents/Users/$(request.auth.uid)).data.role == 'teacher';
+             get(/databases/$(database)/documents/Users/$(request.auth.uid)).data.role == 'gm_teacher_admin';
     }
 
     // Question bank authority lives in the backend API. Teachers should not
@@ -32,7 +32,7 @@ service cloud.firestore {
     // User profiles - restricted read to prevent email disclosure
     match /Users/{userId} {
       allow read: if isSelf(userId) || isTeacher();
-      allow create: if isSelf(userId) || isTeacher();
+      allow create: if (isSelf(userId) && (!('role' in request.resource.data) || request.resource.data.role == 'player')) || isTeacher();
       allow update: if (isSelf(userId) && 
                         (request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']) == false))
                     || isTeacher();

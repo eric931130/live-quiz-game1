@@ -1,13 +1,32 @@
 services:
   - type: web
-    name: empath-os-backend
+    name: live-quiz-game1
     env: node
     rootDir: backend
     buildCommand: npm ci --omit=dev
     startCommand: npm start
+    # 持久化磁碟：題庫/同儕共學/作答 JSON 儲存於此，避免容器重啟或重新部署時資料消失。
+    disk:
+      name: quiz-store
+      mountPath: /data
+      sizeGB: 1
     envVars:
       - key: NODE_VERSION
         value: 20
+      # JSON 儲存檔放在持久化磁碟掛載點，跨重啟保留。
+      - key: QUESTION_BANK_STORE_PATH
+        value: /data/question_banks_store.json
+      - key: NODE_ENV
+        value: production
+      # 必填密鑰：未設定時伺服器會拒絕啟動（避免使用寫死的後備值）。請於 Render 後台設定。
+      - key: JWT_SECRET
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: GM_TEACHER_ADMIN_EMAIL
+        sync: false
+      - key: GM_TEACHER_ADMIN_PASSWORD
+        sync: false
       - key: ADMIN_USER_IDS
         sync: false
       - key: ADMIN_EMAILS
@@ -15,8 +34,9 @@ services:
       - key: ADMIN_API_SECRET
         sync: false
       - key: FIREBASE_PROJECT_ID
-        value: teach999-53c2d
+        value: empath-os
       - key: FIREBASE_SERVICE_ACCOUNT_JSON
         sync: false
+      # 正式環境一律強制 Firebase 驗證，禁止用 HTTP header 模擬身分。
       - key: REQUIRE_FIREBASE_AUTH
-        value: "false"
+        value: "true"

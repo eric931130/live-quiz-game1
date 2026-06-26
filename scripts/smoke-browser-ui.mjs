@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core');
 
-const hostingUrl = process.env.SMOKE_HOSTING_URL || 'https://teach999-53c2d.web.app';
+const hostingUrl = process.env.SMOKE_HOSTING_URL || 'https://empath-os.web.app';
 const chromeCandidates = [
   process.env.PLAYWRIGHT_CHROME_PATH,
   'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',

@@ -1,11 +1,11 @@
-﻿const isLocalDevHost = ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
+const isLocalDevHost = ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
 
 const API_BASE = isLocalDevHost
   ? 'http://localhost:3001'
   : 'https://live-quiz-game1.onrender.com';
 
 function getRole(user) {
-  return user?.role || user?.customClaims?.role || 'teacher';
+  return user?.role || user?.customClaims?.role || 'player';
 }
 
 async function headersFor(user, extra = {}) {

@@ -12,15 +12,24 @@ require('dotenv').config();
 const jwt = require('jsonwebtoken');
 
 // Initialize Firebase Admin (optional for local testing, required for production)
+// 統一接受 FIREBASE_SERVICE_ACCOUNT_JSON（render.yaml 使用的名稱）與舊的
+// FIREBASE_SERVICE_ACCOUNT，並一併帶入 FIREBASE_PROJECT_ID，避免部署設定與程式碼名稱
+// 對不上而導致 db 永遠為 null。
 try {
-  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount)
-    });
+  const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON || process.env.FIREBASE_SERVICE_ACCOUNT;
+  const projectId = process.env.FIREBASE_PROJECT_ID;
+  if (!admin.apps.length && (serviceAccountJson || projectId)) {
+    const appOptions = {};
+    if (serviceAccountJson) {
+      appOptions.credential = admin.credential.cert(JSON.parse(serviceAccountJson));
+    } else {
+      appOptions.credential = admin.credential.applicationDefault();
+    }
+    if (projectId) appOptions.projectId = projectId;
+    admin.initializeApp(appOptions);
     console.log('Firebase Admin initialized.');
-  } else {
-    console.warn('FIREBASE_SERVICE_ACCOUNT not set in environment. Firebase Admin will not connect.');
+  } else if (!admin.apps.length) {
+    console.warn('FIREBASE_SERVICE_ACCOUNT_JSON / FIREBASE_PROJECT_ID not set. Firebase Admin will not connect.');
   }
 } catch (error) {
   console.error('Error initializing Firebase Admin:', error);
@@ -45,7 +54,6 @@ const MUTATION_LIMIT = 80;
 const mutationBuckets = new Map();
 const ADMIN_ROLE_VALUES = new Set(['admin', 'developer', 'platform_owner', 'owner', 'platform_admin', 'superadmin']);
 let firebaseAuthClient = null;
-let firebaseAuthInitAttempted = false;
 
 function envList(name) {
   return String(process.env[name] || '')
@@ -54,8 +62,18 @@ function envList(name) {
     .filter(Boolean);
 }
 
-const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret_for_dev';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'teacher123'; // Default for development
+// 必要密鑰一律改由環境變數提供；缺少時直接拒絕啟動，避免使用寫死的後備值形成後門。
+function requiredSecret(name) {
+  const value = process.env[name];
+  if (!value || !String(value).trim()) {
+    console.error(`[FATAL] 缺少必要的環境變數 ${name}。請於 .env 或部署環境設定後再啟動伺服器（可參考 backend/.env.example）。`);
+    process.exit(1);
+  }
+  return value;
+}
+
+const JWT_SECRET = requiredSecret('JWT_SECRET');
+const ADMIN_PASSWORD = requiredSecret('ADMIN_PASSWORD');
 
 app.post('/api/admin/login', (req, res) => {
   const { password } = req.body;
@@ -102,6 +120,11 @@ app.post('/api/register', async (req, res) => {
     return res.status(400).json({ success: false, error: 'weak-password', message: '密碼長度至少需要 6 碼。' });
   }
   
+  const adminEmail = String(process.env.GM_TEACHER_ADMIN_EMAIL || '').toLowerCase();
+  if (adminEmail && email.trim().toLowerCase() === adminEmail) {
+    return res.status(400).json({ success: false, error: 'registration-blocked', message: '該管理員帳號不開放手動註冊。' });
+  }
+
   if (!db) {
     return res.status(503).json({ success: false, error: 'FIREBASE_NOT_CONFIGURED', message: '伺服器未設定 Firebase Admin。' });
   }
@@ -143,7 +166,8 @@ app.post('/api/register', async (req, res) => {
         avatarType: avatarType || '🧑‍🚀',
         avatar: avatarType || '🧑‍🚀',
         playFrequency: playFrequency || '每週 3 次',
-        role: 'student',
+        role: 'player',
+        points: 0,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       });
@@ -267,29 +291,9 @@ function hasTrustedAdminAccess(req, userId, email) {
 }
 
 function getFirebaseAuthClient() {
-  if (firebaseAuthClient || firebaseAuthInitAttempted) return firebaseAuthClient;
-  firebaseAuthInitAttempted = true;
-
-  try {
-    const serviceAccountJson = String(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '').trim();
-    const projectId = String(process.env.FIREBASE_PROJECT_ID || '').trim();
-    if (!serviceAccountJson && !projectId) return null;
-
-    const appOptions = {};
-    if (serviceAccountJson) {
-      appOptions.credential = admin.credential.cert(JSON.parse(serviceAccountJson));
-    } else {
-      appOptions.credential = admin.credential.applicationDefault();
-    }
-    if (projectId) appOptions.projectId = projectId;
-
-    if (!admin.apps.length) admin.initializeApp(appOptions);
-    firebaseAuthClient = admin.auth();
-  } catch (error) {
-    console.error('Firebase Admin initialization failed:', error.message);
-    firebaseAuthClient = null;
-  }
-
+  if (firebaseAuthClient) return firebaseAuthClient;
+  // Firebase Admin 已於檔案頂端統一初始化；這裡只取用同一個 app，不再用不同的環境變數重複初始化。
+  firebaseAuthClient = admin.apps.length ? admin.auth() : null;
   return firebaseAuthClient;
 }
 
@@ -368,43 +372,114 @@ function readStore() {
     };
   } catch (error) {
     console.error('Unable to read question bank store:', error);
+    // 解析失敗代表檔案可能毀損；先把毀損檔備份起來，避免後續 writeStore 直接覆蓋造成資料永久遺失。
+    try {
+      const backupPath = `${storeFilePath}.corrupt.${Date.now()}.json`;
+      fs.renameSync(storeFilePath, backupPath);
+      console.error(`[store] 已將毀損的儲存檔備份為 ${backupPath}，本次以空資料回應。`);
+    } catch (backupError) {
+      console.error('[store] 備份毀損儲存檔失敗：', backupError.message);
+    }
     return { questionBanks: [], shares: [], auditLogs: [], activities: [], studentAnswers: [], questionAnalytics: [], peerExplanations: [], helpRequests: [], helpResponses: [], studentCreatedQuestions: [], peerChallenges: [], peerReviewAssignments: [], wrongQuestionExchanges: [], learningGuilds: [], peerLearningSettings: [], moderationLogs: [] };
   }
 }
 
+// 原子化寫入：先寫到唯一暫存檔並 fsync 落盤，再以 rename 覆蓋目標檔。
+// rename 在同一檔案系統為原子操作，可避免「寫到一半當機」導致儲存檔毀損。
+// Node 為單執行緒且各處理器在 readStore→writeStore 之間沒有 await，
+// 故 read-modify-write 在 JS 層即天然序列化，不會互相覆寫。
 function writeStore(store) {
-  fs.writeFileSync(storeFilePath, JSON.stringify(store, null, 2));
+  const data = JSON.stringify(store, null, 2);
+  const dir = path.dirname(storeFilePath);
+  const tmpPath = path.join(dir, `.${path.basename(storeFilePath)}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`);
+  try {
+    const fd = fs.openSync(tmpPath, 'w');
+    try {
+      fs.writeFileSync(fd, data);
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+    fs.renameSync(tmpPath, storeFilePath);
+  } catch (error) {
+    try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch { /* 忽略暫存檔清理失敗 */ }
+    throw error;
+  }
 }
 
 async function getPrincipal(req) {
   const decodedToken = await verifyFirebaseToken(req);
-  const tokenRole = decodedToken?.role || (decodedToken?.admin ? 'admin' : '');
-  const requestedRole = String(tokenRole || req.header('x-user-role') || 'teacher').toLowerCase();
-  const userId = String(decodedToken?.uid || req.header('x-user-id') || '').trim() || 'anonymous-teacher';
-  const email = String(decodedToken?.email || req.header('x-user-email') || '').trim();
-  const tokenClaimsAdmin = Boolean(decodedToken && (decodedToken.admin === true || isAdminRole(decodedToken.role)));
-  const clientClaimsAdmin = isAdminRole(requestedRole);
-  const trustedAdmin = clientClaimsAdmin && (tokenClaimsAdmin || hasTrustedAdminAccess(req, userId, email));
-  const role = clientClaimsAdmin && !trustedAdmin ? 'teacher' : requestedRole;
+  let role = 'player';
+  let userId = 'anonymous-player';
+  let email = '';
+  let displayName = '';
+  let authVerified = false;
+
+  if (decodedToken) {
+    userId = decodedToken.uid;
+    email = decodedToken.email || '';
+    displayName = decodedToken.name || '';
+    authVerified = true;
+
+    // Check token claims
+    if (decodedToken.role === 'gm_teacher_admin') {
+      role = 'gm_teacher_admin';
+    } else {
+      // Check database role as fallback
+      if (db) {
+        try {
+          const userDoc = await db.collection('Users').doc(userId).get();
+          if (userDoc.exists && userDoc.data().role === 'gm_teacher_admin') {
+            role = 'gm_teacher_admin';
+          } else if (userDoc.exists) {
+            role = userDoc.data().role || 'player';
+          }
+        } catch (dbErr) {
+          console.error('[getPrincipal] Failed to read user doc:', dbErr);
+        }
+      }
+    }
+  } else {
+    // 僅在「非正式環境」且未強制 Firebase 驗證時，才允許用 HTTP header 模擬身分（本機開發用）。
+    // 正式環境（NODE_ENV=production）一律禁止，避免任何人送 x-user-role 就變成管理員。
+    const allowHeaderIdentity =
+      process.env.NODE_ENV !== 'production' &&
+      String(process.env.REQUIRE_FIREBASE_AUTH || '').toLowerCase() !== 'true';
+    if (allowHeaderIdentity) {
+      role = req.header('x-user-role') || 'player';
+      userId = req.header('x-user-id') || 'anonymous-player';
+      email = req.header('x-user-email') || '';
+      displayName = req.header('x-user-name') || '';
+    }
+  }
+
+  // Force single admin check（管理員信箱僅來自環境變數，未設定則略過此自動授權）
+  const adminEmail = String(process.env.GM_TEACHER_ADMIN_EMAIL || '').toLowerCase();
+  if (adminEmail && email && email.toLowerCase() === adminEmail) {
+    role = 'gm_teacher_admin';
+  }
+
+  // Map legacy roles to player
+  if (role !== 'gm_teacher_admin') {
+    role = 'player';
+  }
 
   return {
     userId,
     role,
-    requestedRole,
-    trustedAdmin,
-    authVerified: Boolean(decodedToken),
+    requestedRole: role,
+    trustedAdmin: role === 'gm_teacher_admin',
+    authVerified,
     authSource: decodedToken ? 'firebase_id_token' : 'headers',
     email,
-    displayName: String(decodedToken?.name || req.header('x-user-name') || '').trim(),
-    organizationId: String(req.header('x-organization-id') || req.header('x-school-id') || 'default-school').trim(),
-    schoolId: String(req.header('x-school-id') || req.header('x-organization-id') || 'default-school').trim(),
+    displayName,
     ipAddress: req.ip,
     userAgent: req.get('user-agent') || ''
   };
 }
 
 function isAdmin(principal) {
-  return Boolean(principal.trustedAdmin && isAdminRole(principal.role));
+  return principal && principal.role === 'gm_teacher_admin';
 }
 
 async function requirePrincipal(req, res, next) {
@@ -416,16 +491,16 @@ async function requirePrincipal(req, res, next) {
 }
 
 function requireAdmin(req, res, next) {
-  if (!isAdmin(req.principal)) return res.status(403).json({ error: '需要管理員權限。' });
+  if (!isAdmin(req.principal)) return res.status(403).json({ error: '需要管理員權限 (gm_teacher_admin)。' });
   next();
 }
 
 function isTeacherRole(principal) {
-  return isAdmin(principal) || ['teacher', 'instructor', 'educator'].includes(String(principal.role || '').toLowerCase());
+  return principal && principal.role === 'gm_teacher_admin';
 }
 
 function requireTeacher(req, res, next) {
-  if (!isTeacherRole(req.principal)) return res.status(403).json({ error: '需要教師權限。' });
+  if (!isTeacherRole(req.principal)) return res.status(403).json({ error: '需要管理員權限 (gm_teacher_admin)。' });
   next();
 }
 
@@ -2165,15 +2240,33 @@ app.post('/api/question-banks/import/preview', rateLimitMutations, (req, res) =>
 });
 
 app.post('/api/question-banks/import/commit', rateLimitMutations, (req, res) => {
-  const { metadata = {}, rows = [], legalAcknowledged } = req.body;
+  const { metadata = {}, rows = [], legalAcknowledged, importValidOnly } = req.body;
   if (!legalAcknowledged) return res.status(400).json({ error: '匯入前必須完成權利確認。' });
 
   const preview = validateQuestions(rows.map((row) => row.question || row), req.principal, metadata);
-  if (preview.summary.invalidRows > 0) return res.status(422).json({ error: '匯入內容包含驗證錯誤。', preview });
+  
+  let finalQuestions = [];
+  if (importValidOnly) {
+    finalQuestions = preview.rows.filter(r => r.valid).map(r => r.question);
+  } else {
+    if (preview.summary.invalidRows > 0) {
+      return res.status(422).json({ error: '匯入內容包含驗證錯誤。', preview });
+    }
+    finalQuestions = preview.rows.map(r => r.question);
+  }
+
+  if (finalQuestions.length === 0) {
+    return res.status(400).json({ error: '沒有可匯入的有效題目。' });
+  }
 
   const store = readStore();
-  const bank = createQuestionBank({ principal: req.principal, metadata, questions: preview.rows.map((row) => row.question), legalAcknowledged });
+  const bank = createQuestionBank({ principal: req.principal, metadata, questions: finalQuestions, legalAcknowledged });
   store.questionBanks.push(bank);
+
+  if (req.principal.role === 'gm_teacher_admin') {
+    logGMAction(req.principal, 'import_question_bank', 'questionBank', bank.id, `Imported question bank ${bank.title} (${finalQuestions.length} rows)`, { targetQuestionBankId: bank.id, count: finalQuestions.length });
+  }
+
   addAudit(store, req.principal, 'IMPORT_QUESTION_BANK', 'questionBank', bank.id, {
     targetQuestionBankId: bank.id,
     summary: preview.summary,
@@ -3447,7 +3540,1855 @@ app.post('/api/admin/question-banks/:id/status', requireAdmin, rateLimitMutation
   res.json(publicBank(store, bank, req.principal));
 });
 
+// --- GM Action Logging Helper ---
+async function logGMAction(principal, actionType, targetType, targetId, description, metadata = {}) {
+  if (!db) return;
+  try {
+    const id = `gmlog_${crypto.randomUUID()}`;
+    const logDoc = {
+      id,
+      actorUserId: principal.userId,
+      actorEmail: principal.email || 'unknown',
+      actionType,
+      targetType,
+      targetId: targetId || null,
+      description,
+      metadata,
+      createdAt: new Date().toISOString()
+    };
+    await db.collection('GMTeacherAdminActionLog').doc(id).set(logDoc);
+  } catch (error) {
+    console.error('[GM Audit Log] failed to write:', error);
+  }
+}
+
+// GM Audit logs list
+app.get('/api/admin/gm-logs', requireAdmin, async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  try {
+    const snap = await db.collection('GMTeacherAdminActionLog').orderBy('createdAt', 'desc').limit(200).get();
+    const logs = [];
+    snap.forEach(doc => logs.push(doc.data()));
+    res.json(logs);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get all students (emails masked by default)
+app.get('/api/admin/all-users', requireAdmin, async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  try {
+    const snap = await db.collection('Users').get();
+    const users = [];
+    snap.forEach(doc => {
+      const data = doc.data();
+      if (data.role !== 'gm_teacher_admin') {
+        const maskedEmail = data.email ? data.email.replace(/(.{2})(.*)(@.*)/, '$1***$3') : '無信箱';
+        users.push({
+          ...data,
+          email: maskedEmail,
+          rawEmailHidden: true
+        });
+      }
+    });
+    res.json(users);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Reveal student email with audit log
+app.post('/api/admin/users/:userId/reveal-email', requireAdmin, async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  try {
+    const userDoc = await db.collection('Users').doc(req.params.userId).get();
+    if (!userDoc.exists) return res.status(404).json({ error: '找不到該用戶。' });
+    const userData = userDoc.data();
+    
+    // Log GM action
+    await logGMAction(
+      req.principal,
+      'reveal_student_email',
+      'user',
+      userData.id,
+      `GM revealed email of student ${userData.anonymizedStudentCode || userData.id}`,
+      { studentId: userData.id, studentNickname: userData.nickname || userData.displayName }
+    );
+
+    res.json({ success: true, email: userData.email || '無信箱' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Rewards granting
+app.post('/api/admin/rewards', requireAdmin, async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  const { playerIds, target, rewardType, amount, badge, token, outfit, item, stageUnlock, reason } = req.body;
+  try {
+    let targets = [];
+    if (target === 'all') {
+      const usersSnap = await db.collection('Users').where('role', '==', 'player').get();
+      usersSnap.forEach(d => targets.push(d.data()));
+    } else if (Array.isArray(playerIds)) {
+      for (const id of playerIds) {
+        const docSnap = await db.collection('Users').doc(id).get();
+        if (docSnap.exists) targets.push(docSnap.data());
+      }
+    }
+
+    const updates = [];
+    for (const t of targets) {
+      const userRef = db.collection('Users').doc(t.id);
+      const updateData = { updatedAt: new Date().toISOString() };
+
+      if (rewardType === 'points' && amount) {
+        updateData.points = admin.firestore.FieldValue.increment(Number(amount));
+        // Also record transaction
+        const txId = `tx_${crypto.randomUUID()}`;
+        await db.collection('PointTransactions').doc(txId).set({
+          id: txId,
+          playerId: t.id,
+          amount: Number(amount),
+          reason: reason || 'GM 獎勵贈送',
+          createdAt: new Date().toISOString()
+        });
+      } else if (rewardType === 'badges' && badge) {
+        updateData.badges = admin.firestore.FieldValue.arrayUnion(badge);
+      } else if (rewardType === 'tokens' && token) {
+        updateData.tokens = admin.firestore.FieldValue.arrayUnion(token);
+      } else if (rewardType === 'outfits' && outfit) {
+        updateData.outfits = admin.firestore.FieldValue.arrayUnion(outfit);
+      } else if (rewardType === 'items' && item) {
+        updateData.items = admin.firestore.FieldValue.arrayUnion(item);
+      } else if (rewardType === 'stage_unlock' && stageUnlock) {
+        updateData.stageUnlockPermissions = admin.firestore.FieldValue.arrayUnion(stageUnlock);
+      }
+
+      await userRef.set(updateData, { merge: true });
+      updates.push(t.anonymizedStudentCode || t.id);
+    }
+
+    await logGMAction(
+      req.principal,
+      'grant_reward',
+      'rewards',
+      null,
+      `GM granted ${rewardType} reward to ${target === 'all' ? 'all players' : updates.join(', ')}`,
+      { rewardType, amount, badge, token, outfit, item, stageUnlock, reason, targetCount: updates.length }
+    );
+
+    res.json({ success: true, count: updates.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Grant points to players
+app.post('/api/admin/points', requireAdmin, async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  const { playerIds, target, amount, reason } = req.body;
+  try {
+    let targets = [];
+    if (target === 'all') {
+      const usersSnap = await db.collection('Users').where('role', '==', 'player').get();
+      usersSnap.forEach(d => targets.push(d.data()));
+    } else if (Array.isArray(playerIds)) {
+      for (const id of playerIds) {
+        const docSnap = await db.collection('Users').doc(id).get();
+        if (docSnap.exists) targets.push(docSnap.data());
+      }
+    }
+
+    const updates = [];
+    for (const t of targets) {
+      const userRef = db.collection('Users').doc(t.id);
+      await userRef.set({
+        points: admin.firestore.FieldValue.increment(Number(amount)),
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+
+      const txId = `tx_${crypto.randomUUID()}`;
+      await db.collection('PointTransactions').doc(txId).set({
+        id: txId,
+        playerId: t.id,
+        amount: Number(amount),
+        reason: reason || 'GM 點數調整',
+        createdAt: new Date().toISOString()
+      });
+      updates.push(t.anonymizedStudentCode || t.id);
+    }
+
+    await logGMAction(
+      req.principal,
+      'grant_points',
+      'points',
+      null,
+      `GM granted ${amount} points to ${target === 'all' ? 'all players' : updates.join(', ')}`,
+      { amount, reason, targetCount: updates.length }
+    );
+
+    res.json({ success: true, count: updates.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get player points transactions history
+app.get('/api/points/transactions', requirePrincipal, async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  try {
+    let q = db.collection('PointTransactions');
+    if (req.principal.role !== 'gm_teacher_admin') {
+      q = q.where('playerId', '==', req.principal.userId);
+    }
+    const snap = await q.orderBy('createdAt', 'desc').get();
+    const txs = [];
+    snap.forEach(d => txs.push(d.data()));
+    res.json(txs);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// CRUD - Images Library
+app.get('/api/admin/images-library', requireAdmin, async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  try {
+    const snap = await db.collection('UploadedImages').orderBy('createdAt', 'desc').get();
+    const images = [];
+    snap.forEach(d => images.push(d.data()));
+    res.json(images);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/images-library', requireAdmin, async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  try {
+    const { imageUrl, name, type } = req.body;
+    if (!imageUrl) return res.status(400).json({ error: 'Missing imageUrl' });
+    
+    // Check if the image already exists in the collection to avoid duplicates
+    const existingSnap = await db.collection('UploadedImages')
+      .where('imageUrl', '==', imageUrl)
+      .limit(1)
+      .get();
+      
+    if (!existingSnap.empty) {
+      let existingDoc = null;
+      existingSnap.forEach(d => { existingDoc = d.data(); });
+      return res.json(existingDoc);
+    }
+    
+    const imageDoc = {
+      id: `img_${crypto.randomUUID()}`,
+      name: sanitizeCell(name || '未命名圖片'),
+      type: sanitizeCell(type || 'general'), // 'character' | 'scene' | 'general'
+      imageUrl,
+      createdAt: new Date().toISOString()
+    };
+    
+    await db.collection('UploadedImages').doc(imageDoc.id).set(imageDoc);
+    res.status(201).json(imageDoc);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// CRUD - Characters
+app.get('/api/admin/characters', requireAdmin, async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  try {
+    const snap = await db.collection('Characters').get();
+    const chars = [];
+    snap.forEach(d => chars.push(d.data()));
+    res.json(chars);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/characters', requireAdmin, async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  try {
+    const char = {
+      id: `char_${crypto.randomUUID()}`,
+      name: sanitizeCell(req.body.name || ''),
+      description: sanitizeCell(req.body.description || ''),
+      unlockConditions: sanitizeCell(req.body.unlockConditions || ''),
+      avatarSymbol: sanitizeCell(req.body.avatarSymbol || '🧑‍🚀'),
+      imageUrl: req.body.imageUrl || '',
+      status: 'active',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    await db.collection('Characters').doc(char.id).set(char);
+    await logGMAction(req.principal, 'create_character', 'character', char.id, `Created character ${char.name}`, char);
+    res.status(201).json(char);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/admin/characters/:id', requireAdmin, async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  try {
+    const updateData = {
+      name: sanitizeCell(req.body.name || ''),
+      description: sanitizeCell(req.body.description || ''),
+      unlockConditions: sanitizeCell(req.body.unlockConditions || ''),
+      avatarSymbol: sanitizeCell(req.body.avatarSymbol || '🧑‍🚀'),
+      imageUrl: req.body.imageUrl || '',
+      status: sanitizeCell(req.body.status || 'active'),
+      updatedAt: new Date().toISOString()
+    };
+    await db.collection('Characters').doc(req.params.id).set(updateData, { merge: true });
+    await logGMAction(req.principal, 'edit_character', 'character', req.params.id, `Updated character ${updateData.name}`, updateData);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/admin/characters/:id', requireAdmin, async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  try {
+    await db.collection('Characters').doc(req.params.id).set({ status: 'archived', updatedAt: new Date().toISOString() }, { merge: true });
+    await logGMAction(req.principal, 'archive_character', 'character', req.params.id, `Archived character id ${req.params.id}`);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// CRUD - Scenes
+app.get('/api/admin/scenes', requireAdmin, async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  try {
+    const snap = await db.collection('Scenes').get();
+    const scenes = [];
+    snap.forEach(d => scenes.push(d.data()));
+    res.json(scenes);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/scenes', requireAdmin, async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  try {
+    const scene = {
+      id: `scene_${crypto.randomUUID()}`,
+      name: sanitizeCell(req.body.name || ''),
+      description: sanitizeCell(req.body.description || ''),
+      linkedWorldId: sanitizeCell(req.body.linkedWorldId || ''),
+      imageUrl: req.body.imageUrl || '',
+      status: 'active',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    await db.collection('Scenes').doc(scene.id).set(scene);
+    await logGMAction(req.principal, 'create_scene', 'scene', scene.id, `Created scene ${scene.name}`, scene);
+    res.status(201).json(scene);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/admin/scenes/:id', requireAdmin, async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  try {
+    const updateData = {
+      name: sanitizeCell(req.body.name || ''),
+      description: sanitizeCell(req.body.description || ''),
+      linkedWorldId: sanitizeCell(req.body.linkedWorldId || ''),
+      imageUrl: req.body.imageUrl || '',
+      status: sanitizeCell(req.body.status || 'active'),
+      updatedAt: new Date().toISOString()
+    };
+    await db.collection('Scenes').doc(req.params.id).set(updateData, { merge: true });
+    await logGMAction(req.principal, 'edit_scene', 'scene', req.params.id, `Updated scene ${updateData.name}`, updateData);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/admin/scenes/:id', requireAdmin, async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  try {
+    await db.collection('Scenes').doc(req.params.id).set({ status: 'archived', updatedAt: new Date().toISOString() }, { merge: true });
+    await logGMAction(req.principal, 'archive_scene', 'scene', req.params.id, `Archived scene id ${req.params.id}`);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// CRUD - Items
+app.get('/api/admin/items', requireAdmin, async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  try {
+    const snap = await db.collection('Items').get();
+    const items = [];
+    snap.forEach(d => items.push(d.data()));
+    res.json(items);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/items', requireAdmin, async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  try {
+    const item = {
+      id: `item_${crypto.randomUUID()}`,
+      name: sanitizeCell(req.body.name || ''),
+      description: sanitizeCell(req.body.description || ''),
+      effect: sanitizeCell(req.body.effect || ''),
+      status: 'active',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    await db.collection('Items').doc(item.id).set(item);
+    await logGMAction(req.principal, 'create_item', 'item', item.id, `Created item ${item.name}`, item);
+    res.status(201).json(item);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/admin/items/:id', requireAdmin, async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  try {
+    const updateData = {
+      name: sanitizeCell(req.body.name || ''),
+      description: sanitizeCell(req.body.description || ''),
+      effect: sanitizeCell(req.body.effect || ''),
+      status: sanitizeCell(req.body.status || 'active'),
+      updatedAt: new Date().toISOString()
+    };
+    await db.collection('Items').doc(req.params.id).set(updateData, { merge: true });
+    await logGMAction(req.principal, 'edit_item', 'item', req.params.id, `Updated item ${updateData.name}`, updateData);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/admin/items/:id', requireAdmin, async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  try {
+    await db.collection('Items').doc(req.params.id).set({ status: 'archived', updatedAt: new Date().toISOString() }, { merge: true });
+    await logGMAction(req.principal, 'archive_item', 'item', req.params.id, `Archived item id ${req.params.id}`);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// CRUD - Introductions
+app.get('/api/admin/introductions', requireAdmin, async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  try {
+    const snap = await db.collection('Introductions').get();
+    const intros = [];
+    snap.forEach(d => intros.push(d.data()));
+    res.json(intros);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/introductions', requireAdmin, async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  try {
+    const intro = {
+      id: `intro_${crypto.randomUUID()}`,
+      targetType: sanitizeCell(req.body.targetType || 'general'),
+      targetId: sanitizeCell(req.body.targetId || ''),
+      title: sanitizeCell(req.body.title || ''),
+      content: sanitizeCell(req.body.content || ''),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    await db.collection('Introductions').doc(intro.id).set(intro);
+    await logGMAction(req.principal, 'create_introduction', 'introduction', intro.id, `Created introduction ${intro.title}`, intro);
+    res.status(201).json(intro);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/admin/introductions/:id', requireAdmin, async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  try {
+    const updateData = {
+      targetType: sanitizeCell(req.body.targetType || 'general'),
+      targetId: sanitizeCell(req.body.targetId || ''),
+      title: sanitizeCell(req.body.title || ''),
+      content: sanitizeCell(req.body.content || ''),
+      updatedAt: new Date().toISOString()
+    };
+    await db.collection('Introductions').doc(req.params.id).set(updateData, { merge: true });
+    await logGMAction(req.principal, 'edit_introduction', 'introduction', req.params.id, `Updated introduction ${updateData.title}`, updateData);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/admin/introductions/:id', requireAdmin, async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  try {
+    await db.collection('Introductions').doc(req.params.id).delete();
+    await logGMAction(req.principal, 'delete_introduction', 'introduction', req.params.id, `Deleted introduction id ${req.params.id}`);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// CRUD - Announcements
+app.get('/api/admin/announcements', requireAdmin, async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  try {
+    const snap = await db.collection('Announcements').get();
+    const list = [];
+    snap.forEach(d => list.push(d.data()));
+    res.json(list);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/announcements', requireAdmin, async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  try {
+    const ann = {
+      id: `ann_${crypto.randomUUID()}`,
+      title: sanitizeCell(req.body.title || ''),
+      content: sanitizeCell(req.body.content || ''),
+      status: 'active',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    await db.collection('Announcements').doc(ann.id).set(ann);
+    await logGMAction(req.principal, 'publish_announcement', 'announcement', ann.id, `Published announcement ${ann.title}`, ann);
+    res.status(201).json(ann);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/admin/announcements/:id', requireAdmin, async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  try {
+    const updateData = {
+      title: sanitizeCell(req.body.title || ''),
+      content: sanitizeCell(req.body.content || ''),
+      status: sanitizeCell(req.body.status || 'active'),
+      updatedAt: new Date().toISOString()
+    };
+    await db.collection('Announcements').doc(req.params.id).set(updateData, { merge: true });
+    await logGMAction(req.principal, 'edit_announcement', 'announcement', req.params.id, `Updated announcement ${updateData.title}`, updateData);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/admin/announcements/:id', requireAdmin, async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  try {
+    await db.collection('Announcements').doc(req.params.id).set({ status: 'archived', updatedAt: new Date().toISOString() }, { merge: true });
+    await logGMAction(req.principal, 'archive_announcement', 'announcement', req.params.id, `Archived announcement id ${req.params.id}`);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Public announcements
+app.get('/api/announcements', async (req, res) => {
+  if (!db) return res.json([]);
+  try {
+    const snap = await db.collection('Announcements').where('status', '==', 'active').get();
+    const list = [];
+    snap.forEach(d => list.push(d.data()));
+    res.json(list);
+  } catch (err) {
+    res.json([]);
+  }
+});
+
+// Worlds & Levels API (Duplicate / Restart / Archive / Open progress)
+app.post('/api/admin/worlds/restart', requireAdmin, async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  const { worldId, roundId } = req.body;
+  try {
+    const roundRef = db.collection('ChallengeRounds').doc(roundId);
+    const roundSnap = await roundRef.get();
+    if (roundSnap.exists) {
+      const currentVer = Number(roundSnap.data().roundVersion || 1);
+      const nextVer = currentVer + 1;
+      await roundRef.set({ roundVersion: nextVer, updatedAt: new Date().toISOString() }, { merge: true });
+      
+      await logGMAction(req.principal, 'restart_world', 'world', worldId, `Restarted world ${worldId} as new round version ${nextVer}`, { worldId, roundId, roundVersion: nextVer });
+      res.json({ success: true, roundVersion: nextVer });
+    } else {
+      res.status(404).json({ error: '找不到該挑戰輪次' });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/worlds/duplicate', requireAdmin, async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  const { srcWorldId, newWorldId, newWorldName } = req.body;
+  try {
+    const srcDoc = await db.collection('Worlds').doc(srcWorldId).get();
+    if (!srcDoc.exists) return res.status(404).json({ error: '來源世界不存在' });
+    const srcData = srcDoc.data();
+    
+    const duplicated = {
+      ...srcData,
+      id: newWorldId,
+      name: newWorldName,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    await db.collection('Worlds').doc(newWorldId).set(duplicated);
+    
+    await logGMAction(req.principal, 'duplicate_world', 'world', newWorldId, `Duplicated world ${srcWorldId} to new world ${newWorldId} (${newWorldName})`, { srcWorldId, newWorldId, newWorldName });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/worlds/archive', requireAdmin, async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  const { worldId } = req.body;
+  try {
+    await db.collection('Worlds').doc(worldId).set({ status: 'archived', updatedAt: new Date().toISOString() }, { merge: true });
+    await logGMAction(req.principal, 'archive_world', 'world', worldId, `Archived world ${worldId} without deleting historical data`, { worldId });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/worlds/open', requireAdmin, async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  const { worldId, stageId, checkpointId, perfectClearRequired, targetProgress } = req.body;
+  try {
+    await db.collection('WorldSettings').doc(`world_${worldId}`).set({
+      worldId,
+      stageId: stageId || null,
+      checkpointId: checkpointId || null,
+      perfectClearRequired: !!perfectClearRequired,
+      targetProgress: targetProgress || null,
+      updatedAt: new Date().toISOString()
+    }, { merge: true });
+
+    await logGMAction(req.principal, 'open_new_progress', 'world', worldId, `Opened progress for world ${worldId}, stage ${stageId}, checkpoint ${checkpointId}`, req.body);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Manually adjust student progress
+app.post('/api/admin/users/:userId/adjust-progress', requireAdmin, async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  const { roundId, worldId, stageId, checkpointId, isPerfect } = req.body;
+  const playerId = req.params.userId;
+  try {
+    const progressId = `${playerId}_${worldId}_${stageId}_${checkpointId}_${roundId}`;
+    const clearedAt = new Date().toISOString();
+    await db.collection('UserStageProgress').doc(progressId).set({
+      playerId,
+      worldId,
+      stageId: Number(stageId),
+      checkpointId,
+      roundId,
+      isPerfect: !!isPerfect,
+      clearedAt,
+      firstClearedAt: clearedAt,
+      failedAttempts: 0,
+      retryCount: 0
+    }, { merge: true });
+
+    const profileDocRef = db.collection('PlayerCompetitionProgress').doc(`${playerId}_${roundId}`);
+    await profileDocRef.set({
+      playerId,
+      roundId,
+      worldId,
+      farthestWorldOrder: Number(worldId.replace(/\D/g, '') || 0),
+      farthestStageIndex: Number(stageId),
+      lastUpdatedAt: clearedAt
+    }, { merge: true });
+
+    await logGMAction(req.principal, 'manually_adjust_student_progress', 'user', playerId, `Manually adjusted student ${playerId} progress to world ${worldId}, stage ${stageId}`, req.body);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Log GM login action
+app.post('/api/admin/login-audit', requireAdmin, async (req, res) => {
+  await logGMAction(
+    req.principal,
+    'login',
+    'auth',
+    null,
+    `GM logged in from IP ${req.ip} using email ${req.principal.email}`
+  );
+  res.json({ success: true });
+});
+
+// Custom GM action logging from client
+app.post('/api/admin/log-action', requireAdmin, async (req, res) => {
+  const { actionType, targetType, targetId, description, metadata } = req.body;
+  try {
+    await logGMAction(req.principal, actionType, targetType, targetId, description, metadata);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==========================================
+// CHARACTER EVOLUTION & PLAYER PROFILE SYSTEM
+// ==========================================
+
+// Global register player routes middleware
+app.use('/api/player', requirePrincipal);
+
+// Database Helper: Validate Evolution Chain Integrity
+async function validateEvolutionChainIntegrity(evolutionChainId) {
+  if (!db) return { valid: false, errors: ['Firestore not configured'] };
+  
+  const errors = [];
+  try {
+    const charSnap = await db.collection('Characters')
+      .where('evolutionChainId', '==', evolutionChainId)
+      .limit(1)
+      .get();
+      
+    if (charSnap.empty) {
+      errors.push(`找不到與 evolutionChainId "${evolutionChainId}" 關聯的角色。`);
+      return { valid: false, errors };
+    }
+    
+    let character = null;
+    charSnap.forEach(d => { character = d.data(); });
+    
+    const stagesSnap = await db.collection('CharacterEvolutionStages')
+      .where('evolutionChainId', '==', evolutionChainId)
+      .get();
+      
+    const stages = [];
+    stagesSnap.forEach(d => {
+      const data = d.data();
+      if (data.isActive !== false) {
+        stages.push(data);
+      }
+    });
+    
+    if (stages.length !== 6) {
+      errors.push(`該進化鏈目前有 ${stages.length} 個啟用的階段，發布前必須剛好有 6 個。`);
+    }
+    
+    const numbers = stages.map(s => Number(s.stageNumber)).sort((a, b) => a - b);
+    for (let i = 1; i <= 6; i++) {
+      if (!numbers.includes(i)) {
+        errors.push(`缺少階段編號 ${i}。`);
+      }
+    }
+    
+    const counts = {};
+    numbers.forEach(n => { counts[n] = (counts[n] || 0) + 1; });
+    Object.keys(counts).forEach(n => {
+      if (counts[n] > 1) {
+        errors.push(`階段編號 ${n} 重複出現。`);
+      }
+    });
+    
+    stages.forEach(stage => {
+      if (stage.characterId !== character.id) {
+        errors.push(`階段 ${stage.stageNumber} 的 characterId (${stage.characterId}) 與主資料角色 ID (${character.id}) 不符。`);
+      }
+      if (stage.characterCode !== character.characterCode) {
+        errors.push(`階段 ${stage.stageNumber} 的 characterCode (${stage.characterCode}) 與主資料代碼 (${character.characterCode}) 不符。`);
+      }
+      if (!stage.imageUrl) {
+        errors.push(`階段 ${stage.stageNumber} 的圖片路徑為空值。`);
+      }
+      
+      if (stage.stageNumber > 1) {
+        if (!stage.evolutionConditionId) {
+          errors.push(`階段 ${stage.stageNumber} 缺少進化條件關聯。`);
+        }
+      }
+    });
+    
+    if (stages.length > 0) {
+      const condSnap = await db.collection('EvolutionConditions')
+        .where('evolutionChainId', '==', evolutionChainId)
+        .get();
+      const conditions = {};
+      condSnap.forEach(d => {
+        conditions[d.id] = d.data();
+      });
+      
+      stages.forEach(stage => {
+        if (stage.stageNumber > 1 && stage.evolutionConditionId) {
+          const cond = conditions[stage.evolutionConditionId];
+          if (!cond || cond.isActive === false) {
+            errors.push(`階段 ${stage.stageNumber} 關聯的進化條件 ID (${stage.evolutionConditionId}) 找不到或已被停用。`);
+          }
+        }
+      });
+    }
+    
+    return {
+      valid: errors.length === 0,
+      errors
+    };
+  } catch (err) {
+    return { valid: false, errors: [err.message] };
+  }
+}
+
+// Database Helper: Check and Resolve Next Evolution Stage
+async function resolveNextEvolutionStage(playerId) {
+  if (!db) return { status: 'error', reason: 'Firestore not configured' };
+  
+  try {
+    const profileRef = db.collection('PlayerProfiles').doc(playerId);
+    const profileSnap = await profileRef.get();
+    
+    if (!profileSnap.exists) {
+      return { status: 'error', reason: '找不到學員個人檔案。' };
+    }
+    
+    const profile = profileSnap.data();
+    const { selectedEvolutionChainId, currentEvolutionStage } = profile;
+    
+    if (!selectedEvolutionChainId) {
+      return { status: 'no_character', reason: '學員尚未選擇角色。' };
+    }
+    
+    if (Number(currentEvolutionStage) >= 6) {
+      return { status: 'max_stage', reason: '已達最終進化階段！' };
+    }
+    
+    const nextStageNumber = Number(currentEvolutionStage) + 1;
+    
+    const stageSnap = await db.collection('CharacterEvolutionStages')
+      .where('evolutionChainId', '==', selectedEvolutionChainId)
+      .where('stageNumber', '==', nextStageNumber)
+      .limit(1)
+      .get();
+      
+    if (stageSnap.empty) {
+      return { status: 'stage_not_found', reason: `在進化鏈內找不到下一階段編號 ${nextStageNumber}。` };
+    }
+    
+    let nextStage = null;
+    stageSnap.forEach(d => { nextStage = d.data(); });
+    
+    if (nextStage.isActive === false) {
+      return { status: 'stage_inactive', reason: `下一階段編號 ${nextStageNumber} 目前處於停用狀態。` };
+    }
+    
+    if (!nextStage.evolutionConditionId) {
+      return { status: 'condition_missing', reason: `下一階段 ${nextStageNumber} 尚未設定進化條件。` };
+    }
+    
+    const conditionSnap = await db.collection('EvolutionConditions')
+      .doc(nextStage.evolutionConditionId)
+      .get();
+      
+    if (!conditionSnap.exists) {
+      return { status: 'condition_not_found', reason: `下一階段的進化條件 ${nextStage.evolutionConditionId} 不存在。` };
+    }
+    
+    const condition = conditionSnap.data();
+    if (condition.isActive === false) {
+      return { status: 'condition_inactive', reason: '此階段的進化條件已被停用。' };
+    }
+    
+    const checks = {
+      points: { met: true, required: condition.requiredPoints || 0, current: profile.points || 0 },
+      perfectClears: { met: true, required: condition.requiredPerfectClears || 0, current: 0 },
+      checkpointClears: { met: true, required: condition.requiredCheckpointClears || 0, current: 0 },
+      worldClear: { met: true, required: condition.requiredWorldId || null, current: false },
+      stageClear: { met: true, required: condition.requiredStageIndex || null, current: false },
+      checkpointClear: { met: true, required: condition.requiredCheckpointIndex || null, current: false },
+      badges: { met: true, required: condition.requiredBadgeIds || [], missing: [] },
+      tokens: { met: true, required: condition.requiredTokenIds || [], missing: [] },
+      items: { met: true, required: condition.requiredItemIds || [], missing: [] },
+      loginDays: { met: true, required: condition.requiredLoginDays || 0, current: profile.loginDates?.length || 0 },
+      learningDaysThisWeek: { met: true, required: condition.requiredLearningDaysThisWeek || 0, current: 0 },
+      targetReached: { met: true, required: !!condition.requiredTargetReached, current: false }
+    };
+    
+    let isSatisfied = true;
+    
+    if (condition.requiredPoints && (profile.points || 0) < condition.requiredPoints) {
+      checks.points.met = false;
+      isSatisfied = false;
+    }
+    
+    const progressSnap = await db.collection('UserStageProgress')
+      .where('playerId', '==', playerId)
+      .get();
+      
+    const progressList = [];
+    progressSnap.forEach(d => progressList.push(d.data()));
+    
+    const perfectCount = progressList.filter(p => p.isPerfect).length;
+    checks.perfectClears.current = perfectCount;
+    if (condition.requiredPerfectClears && perfectCount < condition.requiredPerfectClears) {
+      checks.perfectClears.met = false;
+      isSatisfied = false;
+    }
+    
+    const clearCount = progressList.filter(p => p.clearedAt).length;
+    checks.checkpointClears.current = clearCount;
+    if (condition.requiredCheckpointClears && clearCount < condition.requiredCheckpointClears) {
+      checks.checkpointClears.met = false;
+      isSatisfied = false;
+    }
+    
+    if (condition.requiredWorldId) {
+      const worldCleared = progressList.some(p => p.worldId === condition.requiredWorldId && p.clearedAt);
+      checks.worldClear.current = worldCleared;
+      if (!worldCleared) {
+        checks.worldClear.met = false;
+        isSatisfied = false;
+      }
+    }
+    
+    if (condition.requiredStageIndex) {
+      let stageCleared = false;
+      if (condition.requiredWorldId) {
+        stageCleared = progressList.some(p => p.worldId === condition.requiredWorldId && Number(p.stageId) === Number(condition.requiredStageIndex) && p.clearedAt);
+      } else {
+        stageCleared = progressList.some(p => Number(p.stageId) === Number(condition.requiredStageIndex) && p.clearedAt);
+      }
+      checks.stageClear.current = stageCleared;
+      if (!stageCleared) {
+        checks.stageClear.met = false;
+        isSatisfied = false;
+      } else {
+        checks.stageClear.met = true;
+      }
+    }
+    
+    if (condition.requiredCheckpointIndex) {
+      let cpCleared = false;
+      const cpVal = `cp_${condition.requiredCheckpointIndex}`;
+      if (condition.requiredWorldId && condition.requiredStageIndex) {
+        cpCleared = progressList.some(p => p.worldId === condition.requiredWorldId && Number(p.stageId) === Number(condition.requiredStageIndex) && p.checkpointId === cpVal && p.clearedAt);
+      } else {
+        cpCleared = progressList.some(p => p.checkpointId === cpVal && p.clearedAt);
+      }
+      checks.checkpointClear.current = cpCleared;
+      if (!cpCleared) {
+        checks.checkpointClear.met = false;
+        isSatisfied = false;
+      } else {
+        checks.checkpointClear.met = true;
+      }
+    }
+    
+    if (condition.requiredBadgeIds && condition.requiredBadgeIds.length > 0) {
+      const userBadges = profile.badges || [];
+      const missing = condition.requiredBadgeIds.filter(b => !userBadges.includes(b));
+      checks.badges.missing = missing;
+      if (missing.length > 0) {
+        checks.badges.met = false;
+        isSatisfied = false;
+      }
+    }
+    
+    if (condition.requiredTokenIds && condition.requiredTokenIds.length > 0) {
+      const userTokens = profile.tokens || [];
+      const missing = condition.requiredTokenIds.filter(t => !userTokens.includes(t));
+      checks.tokens.missing = missing;
+      if (missing.length > 0) {
+        checks.tokens.met = false;
+        isSatisfied = false;
+      }
+    }
+    
+    if (condition.requiredItemIds && condition.requiredItemIds.length > 0) {
+      const userItems = profile.items || [];
+      const missing = condition.requiredItemIds.filter(i => !userItems.includes(i));
+      checks.items.missing = missing;
+      if (missing.length > 0) {
+        checks.items.met = false;
+        isSatisfied = false;
+      }
+    }
+    
+    if (condition.requiredLoginDays && (profile.loginDates?.length || 0) < condition.requiredLoginDays) {
+      checks.loginDays.met = false;
+      isSatisfied = false;
+    }
+    
+    if (condition.requiredLearningDaysThisWeek && condition.requiredLearningDaysThisWeek > 0) {
+      const now = new Date();
+      const currentDay = now.getDay();
+      const distance = currentDay === 0 ? -6 : 1 - currentDay;
+      const monday = new Date(now);
+      monday.setDate(now.getDate() + distance);
+      monday.setHours(0, 0, 0, 0);
+      
+      const userLoginDates = profile.loginDates || [];
+      const daysThisWeek = userLoginDates.filter(dStr => {
+        const d = new Date(dStr);
+        return d >= monday;
+      }).length;
+      
+      checks.learningDaysThisWeek.current = daysThisWeek;
+      if (daysThisWeek < condition.requiredLearningDaysThisWeek) {
+        checks.learningDaysThisWeek.met = false;
+        isSatisfied = false;
+      }
+    }
+    
+    if (condition.requiredTargetReached) {
+      const compSnap = await db.collection('PlayerCompetitionProgress')
+        .where('playerId', '==', playerId)
+        .get();
+      let targetReached = false;
+      compSnap.forEach(d => {
+        if (d.data().targetReachedAt) targetReached = true;
+      });
+      checks.targetReached.current = targetReached;
+      if (!targetReached) {
+        checks.targetReached.met = false;
+        isSatisfied = false;
+      }
+    }
+    
+    return {
+      status: isSatisfied ? 'satisfied' : 'not_satisfied',
+      nextStage,
+      condition,
+      checks
+    };
+    
+  } catch (err) {
+    return { status: 'error', reason: err.message };
+  }
+}
+
+// Helper: Get or Create Player Profile
+async function getOrCreatePlayerProfile(uid, email = '', displayName = '') {
+  if (!db) return null;
+  const profileRef = db.collection('PlayerProfiles').doc(uid);
+  const snap = await profileRef.get();
+  
+  if (snap.exists) {
+    const data = snap.data();
+    const userDoc = await db.collection('Users').doc(uid).get();
+    if (userDoc.exists) {
+      const user = userDoc.data();
+      const updatedProfile = {
+        ...data,
+        points: user.points || 0,
+        displayName: user.displayName || user.nickname || data.displayName || '',
+        email: user.email || data.email || email || '',
+        anonymizedStudentCode: user.anonymizedStudentCode || data.anonymizedStudentCode || ''
+      };
+      await profileRef.set(updatedProfile, { merge: true });
+      return updatedProfile;
+    }
+    return data;
+  }
+  
+  const userDoc = await db.collection('Users').doc(uid).get();
+  const userData = userDoc.exists ? userDoc.data() : {};
+  
+  const newProfile = {
+    id: uid,
+    playerId: uid,
+    email: userData.email || email || '',
+    anonymizedStudentCode: userData.anonymizedStudentCode || '',
+    displayName: userData.displayName || userData.nickname || displayName || '',
+    selectedCharacterId: '',
+    selectedEvolutionChainId: '',
+    currentEvolutionStage: 1,
+    currentCharacterStageAssetId: '',
+    characterSelectedAt: '',
+    lastEvolutionAt: '',
+    points: userData.points || 0,
+    badges: [],
+    tokens: [],
+    items: [],
+    loginDates: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  
+  await profileRef.set(newProfile);
+  return newProfile;
+}
+
+// ------------------------------------------
+// PLAYER PROFILE & EVOLUTION CLIENT API ENDPOINTS
+// ------------------------------------------
+
+app.get('/api/player/character-stages/:evolutionChainId', async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  const evolutionChainId = req.params.evolutionChainId;
+  try {
+    const stagesSnap = await db.collection('CharacterEvolutionStages')
+      .where('evolutionChainId', '==', evolutionChainId)
+      .get();
+      
+    const stages = [];
+    stagesSnap.forEach(d => {
+      const data = d.data();
+      if (data.isActive !== false) {
+        stages.push(data);
+      }
+    });
+    
+    stages.sort((a, b) => Number(a.stageNumber) - Number(b.stageNumber));
+    
+    const condSnap = await db.collection('EvolutionConditions')
+      .where('evolutionChainId', '==', evolutionChainId)
+      .get();
+      
+    const conditions = {};
+    condSnap.forEach(d => {
+      conditions[d.id] = d.data();
+    });
+    
+    const result = stages.map(s => {
+      const cond = conditions[s.evolutionConditionId] || null;
+      return {
+        ...s,
+        conditions: cond ? {
+          conditionName: cond.conditionName,
+          conditionDescription: cond.conditionDescription,
+          requiredPoints: cond.requiredPoints,
+          requiredPerfectClears: cond.requiredPerfectClears,
+          requiredCheckpointClears: cond.requiredCheckpointClears,
+          requiredWorldId: cond.requiredWorldId,
+          requiredStageIndex: cond.requiredStageIndex,
+          requiredCheckpointIndex: cond.requiredCheckpointIndex,
+          requiredBadgeIds: cond.requiredBadgeIds,
+          requiredTokenIds: cond.requiredTokenIds,
+          requiredItemIds: cond.requiredItemIds,
+          requiredLoginDays: cond.requiredLoginDays,
+          requiredLearningDaysThisWeek: cond.requiredLearningDaysThisWeek,
+          requiredTargetReached: cond.requiredTargetReached
+        } : null
+      };
+    });
+    
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/player/profile', async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  const uid = req.principal.userId;
+  try {
+    const profile = await getOrCreatePlayerProfile(uid, req.principal.email, req.principal.displayName);
+    if (!profile) return res.status(500).json({ error: 'Failed to retrieve profile' });
+    
+    const todayStr = new Date().toISOString().split('T')[0];
+    const loginDates = profile.loginDates || [];
+    if (!loginDates.includes(todayStr)) {
+      loginDates.push(todayStr);
+      await db.collection('PlayerProfiles').doc(uid).set({
+        loginDates,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+      profile.loginDates = loginDates;
+    }
+    
+    let activeCharacter = null;
+    let currentStage = null;
+    
+    if (profile.selectedCharacterId) {
+      const charDoc = await db.collection('Characters').doc(profile.selectedCharacterId).get();
+      if (charDoc.exists) {
+        activeCharacter = charDoc.data();
+      }
+      
+      const stageSnap = await db.collection('CharacterEvolutionStages')
+        .where('evolutionChainId', '==', profile.selectedEvolutionChainId)
+        .where('stageNumber', '==', profile.currentEvolutionStage)
+        .limit(1)
+        .get();
+      if (!stageSnap.empty) {
+        stageSnap.forEach(d => { currentStage = d.data(); });
+      }
+    }
+    
+    res.json({
+      profile,
+      activeCharacter,
+      currentStage
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/player/starters', async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  try {
+    const snap = await db.collection('Characters')
+      .where('isActive', '==', true)
+      .where('isStarterAvailable', '==', true)
+      .get();
+      
+    const starters = [];
+    for (const doc of snap.docs) {
+      const char = doc.data();
+      const stageSnap = await db.collection('CharacterEvolutionStages')
+        .where('evolutionChainId', '==', char.evolutionChainId)
+        .where('stageNumber', '==', 1)
+        .limit(1)
+        .get();
+        
+      let stage1 = null;
+      stageSnap.forEach(d => { stage1 = d.data(); });
+      
+      starters.push({
+        character: char,
+        stage1
+      });
+    }
+    res.json(starters);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/player/select-starter', async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  const { characterId } = req.body;
+  const uid = req.principal.userId;
+  
+  if (!characterId) return res.status(400).json({ error: '缺少 characterId' });
+  
+  try {
+    const profile = await getOrCreatePlayerProfile(uid, req.principal.email, req.principal.displayName);
+    if (profile.selectedCharacterId) {
+      const settingsDoc = await db.collection('SystemSettings').doc('character_settings').get();
+      const allowCharacterChange = settingsDoc.exists ? !!settingsDoc.data().allowCharacterChange : false;
+      
+      if (!allowCharacterChange) {
+        return res.status(400).json({ error: '您已經選擇過角色，不可重複選擇。' });
+      }
+    }
+    
+    const charDoc = await db.collection('Characters').doc(characterId).get();
+    if (!charDoc.exists) return res.status(404).json({ error: '找不到該角色資料。' });
+    
+    const char = charDoc.data();
+    if (char.isActive === false || char.isStarterAvailable === false) {
+      return res.status(400).json({ error: '該角色目前不可被選為初始角色。' });
+    }
+    
+    const stageSnap = await db.collection('CharacterEvolutionStages')
+      .where('evolutionChainId', '==', char.evolutionChainId)
+      .where('stageNumber', '==', 1)
+      .limit(1)
+      .get();
+      
+    if (stageSnap.empty) {
+      return res.status(404).json({ error: '找不到該角色的第一階段資料。' });
+    }
+    
+    let stage1 = null;
+    stageSnap.forEach(d => { stage1 = d.data(); });
+    
+    const now = new Date().toISOString();
+    const updatedFields = {
+      selectedCharacterId: char.id,
+      selectedEvolutionChainId: char.evolutionChainId,
+      currentEvolutionStage: 1,
+      currentCharacterStageAssetId: stage1.id,
+      characterSelectedAt: now,
+      updatedAt: now
+    };
+    
+    await db.collection('PlayerProfiles').doc(uid).set(updatedFields, { merge: true });
+    
+    res.json({ success: true, profile: { ...profile, ...updatedFields } });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/player/check-evolution', async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  const uid = req.principal.userId;
+  
+  try {
+    const profile = await getOrCreatePlayerProfile(uid, req.principal.email, req.principal.displayName);
+    if (!profile.selectedCharacterId) {
+      return res.status(400).json({ error: '尚未選擇角色' });
+    }
+    
+    const nextResult = await resolveNextEvolutionStage(uid);
+    if (nextResult.status !== 'satisfied') {
+      return res.json({
+        success: true,
+        evolved: false,
+        status: nextResult.status,
+        reason: nextResult.reason,
+        checks: nextResult.checks
+      });
+    }
+    
+    const { nextStage, condition } = nextResult;
+    const fromStageNumber = Number(profile.currentEvolutionStage);
+    const toStageNumber = Number(nextStage.stageNumber);
+    const fromStageAssetId = profile.currentCharacterStageAssetId;
+    const toStageAssetId = nextStage.id;
+    const now = new Date().toISOString();
+    
+    const updatedProfile = {
+      currentEvolutionStage: toStageNumber,
+      currentCharacterStageAssetId: toStageAssetId,
+      lastEvolutionAt: now,
+      updatedAt: now
+    };
+    await db.collection('PlayerProfiles').doc(uid).set(updatedProfile, { merge: true });
+    
+    const logId = `evolog_${crypto.randomUUID()}`;
+    const evolutionLog = {
+      id: logId,
+      playerId: uid,
+      evolutionChainId: profile.selectedEvolutionChainId,
+      characterId: profile.selectedCharacterId,
+      characterCode: nextStage.characterCode,
+      fromStageNumber,
+      toStageNumber,
+      fromStageAssetId,
+      toStageAssetId,
+      triggerType: 'gameplay',
+      satisfiedConditions: nextResult.checks,
+      evolvedAt: now
+    };
+    await db.collection('CharacterEvolutionLogs').doc(logId).set(evolutionLog);
+    
+    const charDoc = await db.collection('Characters').doc(profile.selectedCharacterId).get();
+    const characterName = charDoc.exists ? charDoc.data().name : '';
+    
+    res.json({
+      success: true,
+      evolved: true,
+      fromStage: fromStageNumber,
+      toStage: toStageNumber,
+      fromStageName: fromStageNumber === 1 ? '蛋 (Egg)' : `階段 ${fromStageNumber}`,
+      toStageName: nextStage.stageName,
+      toStageTitle: nextStage.stageTitle,
+      characterName,
+      fromImageUrl: '',
+      toImageUrl: nextStage.imageUrl
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/system-settings/character', async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  try {
+    const docSnap = await db.collection('SystemSettings').doc('character_settings').get();
+    const data = docSnap.exists ? docSnap.data() : { allowCharacterChange: false };
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ------------------------------------------
+// GM CHARACTER EVOLUTION MANAGEMENT APIS
+// ------------------------------------------
+
+app.get('/api/admin/evolution-chains', requireAdmin, async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  try {
+    const charSnap = await db.collection('Characters').get();
+    const characters = [];
+    charSnap.forEach(d => {
+      const data = d.data();
+      if (data.isActive !== false) {
+        characters.push(data);
+      }
+    });
+    
+    const stagesSnap = await db.collection('CharacterEvolutionStages').get();
+    const stages = [];
+    stagesSnap.forEach(d => {
+      const data = d.data();
+      if (data.isActive !== false) {
+        stages.push(data);
+      }
+    });
+    
+    const condSnap = await db.collection('EvolutionConditions').get();
+    const conditions = [];
+    condSnap.forEach(d => {
+      const data = d.data();
+      if (data.isActive !== false) {
+        conditions.push(data);
+      }
+    });
+    
+    const chains = characters.map(char => {
+      const chainStages = stages
+        .filter(s => s.evolutionChainId === char.evolutionChainId)
+        .sort((a, b) => Number(a.stageNumber) - Number(b.stageNumber));
+        
+      const assembledStages = chainStages.map(s => {
+        const cond = conditions.find(c => c.id === s.evolutionConditionId) || null;
+        return {
+          ...s,
+          conditions: cond
+        };
+      });
+      
+      return {
+        character: char,
+        stages: assembledStages
+      };
+    });
+    
+    res.json(chains);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/evolution-chains', requireAdmin, async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  const { character, stages } = req.body;
+  
+  if (!character || !stages) return res.status(400).json({ error: '缺少角色主資料或階段資料。' });
+  if (stages.length !== 6) return res.status(400).json({ error: '角色發布前必須剛好有 6 個階段。' });
+  
+  const charCode = sanitizeCell(character.characterCode || '').trim();
+  if (!charCode) return res.status(400).json({ error: '必須填寫 characterCode。' });
+  
+  try {
+    const duplicateCodeSnap = await db.collection('Characters')
+      .where('characterCode', '==', charCode)
+      .limit(1)
+      .get();
+      
+    if (!duplicateCodeSnap.empty) {
+      return res.status(400).json({ error: `角色代碼 (characterCode) "${charCode}" 已被其他角色使用，請更換一個唯一的代碼。` });
+    }
+    
+    const characterId = `char_${crypto.randomUUID()}`;
+    const evolutionChainId = `chain_${crypto.randomUUID()}`;
+    const now = new Date().toISOString();
+    
+    const charDoc = {
+      id: characterId,
+      evolutionChainId,
+      characterCode: charCode,
+      name: sanitizeCell(character.name || ''),
+      type: sanitizeCell(character.type || 'Indicator'),
+      rarity: sanitizeCell(character.rarity || 'Normal'),
+      description: sanitizeCell(character.description || ''),
+      isStarterAvailable: !!character.isStarterAvailable,
+      isActive: character.isActive !== false,
+      createdBy: req.principal.email || 'unknown',
+      createdAt: now,
+      updatedAt: now
+    };
+    
+    const batch = db.batch();
+    const createdStages = [];
+    const createdConditions = [];
+    
+    for (let i = 0; i < 6; i++) {
+      const s = stages[i];
+      const stageNum = Number(s.stageNumber || (i + 1));
+      const stageAssetId = `stage_${evolutionChainId}_${stageNum}`;
+      const stageCode = `${charCode}_STAGE_0${stageNum}_${s.stageName ? sanitizeCell(s.stageName).toUpperCase().replace(/\s+/g, '_') : 'STAGE'}`;
+      
+      let evolutionConditionId = '';
+      if (stageNum > 1) {
+        evolutionConditionId = `cond_${evolutionChainId}_to_${stageNum}`;
+        const rawCond = s.conditions || {};
+        const condDoc = {
+          id: evolutionConditionId,
+          evolutionChainId,
+          fromStageNumber: stageNum - 1,
+          toStageNumber: stageNum,
+          conditionName: sanitizeCell(rawCond.conditionName || `進化至 ${s.stageName || '下一階段'}`),
+          conditionDescription: sanitizeCell(rawCond.conditionDescription || ''),
+          requiredPoints: rawCond.requiredPoints ? Number(rawCond.requiredPoints) : null,
+          requiredPerfectClears: rawCond.requiredPerfectClears ? Number(rawCond.requiredPerfectClears) : null,
+          requiredCheckpointClears: rawCond.requiredCheckpointClears ? Number(rawCond.requiredCheckpointClears) : null,
+          requiredWorldId: rawCond.requiredWorldId || null,
+          requiredStageIndex: rawCond.requiredStageIndex ? Number(rawCond.requiredStageIndex) : null,
+          requiredCheckpointIndex: rawCond.requiredCheckpointIndex ? Number(rawCond.requiredCheckpointIndex) : null,
+          requiredBadgeIds: Array.isArray(rawCond.requiredBadgeIds) ? rawCond.requiredBadgeIds : [],
+          requiredTokenIds: Array.isArray(rawCond.requiredTokenIds) ? rawCond.requiredTokenIds : [],
+          requiredItemIds: Array.isArray(rawCond.requiredItemIds) ? rawCond.requiredItemIds : [],
+          requiredLoginDays: rawCond.requiredLoginDays ? Number(rawCond.requiredLoginDays) : null,
+          requiredLearningDaysThisWeek: rawCond.requiredLearningDaysThisWeek ? Number(rawCond.requiredLearningDaysThisWeek) : null,
+          requiredTargetReached: !!rawCond.requiredTargetReached,
+          customRuleJson: rawCond.customRuleJson || null,
+          isActive: true,
+          createdAt: now,
+          updatedAt: now
+        };
+        batch.set(db.collection('EvolutionConditions').doc(evolutionConditionId), condDoc);
+        createdConditions.push(condDoc);
+      }
+      
+      const stageDoc = {
+        id: stageAssetId,
+        evolutionChainId,
+        characterId,
+        characterCode: charCode,
+        stageNumber: stageNum,
+        stageCode,
+        stageName: sanitizeCell(s.stageName || ''),
+        stageTitle: sanitizeCell(s.stageTitle || ''),
+        imageUrl: s.imageUrl || '',
+        thumbnailUrl: s.thumbnailUrl || null,
+        description: sanitizeCell(s.description || ''),
+        evolutionConditionId,
+        sortOrder: stageNum,
+        isActive: true,
+        createdAt: now,
+        updatedAt: now
+      };
+      
+      batch.set(db.collection('CharacterEvolutionStages').doc(stageAssetId), stageDoc);
+      createdStages.push(stageDoc);
+    }
+    
+    batch.set(db.collection('Characters').doc(characterId), charDoc);
+    
+    await batch.commit();
+    
+    const check = await validateEvolutionChainIntegrity(evolutionChainId);
+    
+    await logGMAction(req.principal, 'create_character_chain', 'character', characterId, `Created character chain for ${charDoc.name} (${charDoc.characterCode})`, { characterId, evolutionChainId });
+    
+    res.status(201).json({
+      success: true,
+      character: charDoc,
+      stages: createdStages,
+      conditions: createdConditions,
+      validation: check
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/admin/evolution-chains/:characterId', requireAdmin, async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  const { character, stages } = req.body;
+  const characterId = req.params.characterId;
+  
+  try {
+    const charDocRef = db.collection('Characters').doc(characterId);
+    const charSnap = await charDocRef.get();
+    if (!charSnap.exists) return res.status(404).json({ error: '找不到該角色。' });
+    
+    const oldChar = charSnap.data();
+    const evolutionChainId = oldChar.evolutionChainId;
+    const now = new Date().toISOString();
+    
+    const batch = db.batch();
+    
+    const updatedChar = {
+      name: sanitizeCell(character.name || oldChar.name),
+      type: sanitizeCell(character.type || oldChar.type),
+      rarity: sanitizeCell(character.rarity || oldChar.rarity),
+      description: sanitizeCell(character.description || oldChar.description),
+      isStarterAvailable: character.isStarterAvailable !== undefined ? !!character.isStarterAvailable : oldChar.isStarterAvailable,
+      isActive: character.isActive !== undefined ? !!character.isActive : oldChar.isActive,
+      updatedAt: now
+    };
+    batch.set(charDocRef, updatedChar, { merge: true });
+    
+    if (stages && Array.isArray(stages)) {
+      for (const s of stages) {
+        const stageNum = Number(s.stageNumber);
+        const stageAssetId = `stage_${evolutionChainId}_${stageNum}`;
+        
+        const stageUpdate = {
+          stageName: sanitizeCell(s.stageName || ''),
+          stageTitle: sanitizeCell(s.stageTitle || ''),
+          imageUrl: s.imageUrl || '',
+          description: sanitizeCell(s.description || ''),
+          updatedAt: now
+        };
+        batch.set(db.collection('CharacterEvolutionStages').doc(stageAssetId), stageUpdate, { merge: true });
+        
+        if (stageNum > 1 && s.conditions) {
+          const conditionId = `cond_${evolutionChainId}_to_${stageNum}`;
+          const rawCond = s.conditions;
+          
+          const condUpdate = {
+            conditionName: sanitizeCell(rawCond.conditionName || `進化至 ${s.stageName || '下一階段'}`),
+            conditionDescription: sanitizeCell(rawCond.conditionDescription || ''),
+            requiredPoints: rawCond.requiredPoints !== undefined ? (rawCond.requiredPoints ? Number(rawCond.requiredPoints) : null) : undefined,
+            requiredPerfectClears: rawCond.requiredPerfectClears !== undefined ? (rawCond.requiredPerfectClears ? Number(rawCond.requiredPerfectClears) : null) : undefined,
+            requiredCheckpointClears: rawCond.requiredCheckpointClears !== undefined ? (rawCond.requiredCheckpointClears ? Number(rawCond.requiredCheckpointClears) : null) : undefined,
+            requiredWorldId: rawCond.requiredWorldId !== undefined ? rawCond.requiredWorldId : undefined,
+            requiredStageIndex: rawCond.requiredStageIndex !== undefined ? (rawCond.requiredStageIndex ? Number(rawCond.requiredStageIndex) : null) : undefined,
+            requiredCheckpointIndex: rawCond.requiredCheckpointIndex !== undefined ? (rawCond.requiredCheckpointIndex ? Number(rawCond.requiredCheckpointIndex) : null) : undefined,
+            requiredBadgeIds: Array.isArray(rawCond.requiredBadgeIds) ? rawCond.requiredBadgeIds : undefined,
+            requiredTokenIds: Array.isArray(rawCond.requiredTokenIds) ? rawCond.requiredTokenIds : undefined,
+            requiredItemIds: Array.isArray(rawCond.requiredItemIds) ? rawCond.requiredItemIds : undefined,
+            requiredLoginDays: rawCond.requiredLoginDays !== undefined ? (rawCond.requiredLoginDays ? Number(rawCond.requiredLoginDays) : null) : undefined,
+            requiredLearningDaysThisWeek: rawCond.requiredLearningDaysThisWeek !== undefined ? (rawCond.requiredLearningDaysThisWeek ? Number(rawCond.requiredLearningDaysThisWeek) : null) : undefined,
+            requiredTargetReached: rawCond.requiredTargetReached !== undefined ? !!rawCond.requiredTargetReached : undefined,
+            updatedAt: now
+          };
+          
+          Object.keys(condUpdate).forEach(key => condUpdate[key] === undefined && delete condUpdate[key]);
+          
+          batch.set(db.collection('EvolutionConditions').doc(conditionId), condUpdate, { merge: true });
+        }
+      }
+    }
+    
+    await batch.commit();
+    
+    const check = await validateEvolutionChainIntegrity(evolutionChainId);
+    await logGMAction(req.principal, 'edit_character_chain', 'character', characterId, `Updated character chain ${oldChar.name}`, { characterId });
+    
+    res.json({ success: true, validation: check });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/admin/evolution-chains/:characterId', requireAdmin, async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  const characterId = req.params.characterId;
+  try {
+    const charDocRef = db.collection('Characters').doc(characterId);
+    const charSnap = await charDocRef.get();
+    if (!charSnap.exists) return res.status(404).json({ error: '找不到該角色' });
+    
+    const char = charSnap.data();
+    const now = new Date().toISOString();
+    
+    await charDocRef.set({ isActive: false, isStarterAvailable: false, updatedAt: now }, { merge: true });
+    
+    const stagesSnap = await db.collection('CharacterEvolutionStages')
+      .where('evolutionChainId', '==', char.evolutionChainId)
+      .get();
+      
+    const batch = db.batch();
+    stagesSnap.forEach(d => {
+      batch.set(d.ref, { isActive: false, updatedAt: now }, { merge: true });
+    });
+    
+    const condSnap = await db.collection('EvolutionConditions')
+      .where('evolutionChainId', '==', char.evolutionChainId)
+      .get();
+    condSnap.forEach(d => {
+      batch.set(d.ref, { isActive: false, updatedAt: now }, { merge: true });
+    });
+    
+    await batch.commit();
+    await logGMAction(req.principal, 'archive_character_chain', 'character', characterId, `Archived character chain ${char.name} (${char.characterCode})`);
+    
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/evolution-chains/:evolutionChainId/validate', requireAdmin, async (req, res) => {
+  const check = await validateEvolutionChainIntegrity(req.params.evolutionChainId);
+  await logGMAction(req.principal, 'validate_character_chain', 'character', null, `Validated character evolution chain ID ${req.params.evolutionChainId}, Result: ${check.valid ? 'Valid' : 'Invalid'}`);
+  res.json(check);
+});
+
+app.get('/api/admin/player-character-progress', requireAdmin, async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  try {
+    const snap = await db.collection('PlayerProfiles').get();
+    const profiles = [];
+    snap.forEach(d => profiles.push(d.data()));
+    
+    const charSnap = await db.collection('Characters').get();
+    const charMap = {};
+    charSnap.forEach(d => { charMap[d.id] = d.data(); });
+    
+    const result = profiles.map(p => {
+      const char = charMap[p.selectedCharacterId] || null;
+      return {
+        ...p,
+        characterName: char ? char.name : '未選擇',
+        characterCode: char ? char.characterCode : ''
+      };
+    });
+    
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/player-character-progress/:playerId/trigger-evolution', requireAdmin, async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  const playerId = req.params.playerId;
+  try {
+    const profileRef = db.collection('PlayerProfiles').doc(playerId);
+    const profileSnap = await profileRef.get();
+    if (!profileSnap.exists) return res.status(404).json({ error: '找不到學員檔案。' });
+    
+    const profile = profileSnap.data();
+    if (!profile.selectedEvolutionChainId) {
+      return res.status(400).json({ error: '該學員尚未選擇角色。' });
+    }
+    
+    const fromStageNumber = Number(profile.currentEvolutionStage);
+    if (fromStageNumber >= 6) {
+      return res.status(400).json({ error: '學員已達最終階段。' });
+    }
+    
+    const toStageNumber = fromStageNumber + 1;
+    
+    const stageSnap = await db.collection('CharacterEvolutionStages')
+      .where('evolutionChainId', '==', profile.selectedEvolutionChainId)
+      .where('stageNumber', '==', toStageNumber)
+      .limit(1)
+      .get();
+      
+    if (stageSnap.empty) {
+      return res.status(404).json({ error: `找不到下一階段編號 ${toStageNumber} 的設定。` });
+    }
+    
+    let nextStage = null;
+    stageSnap.forEach(d => { nextStage = d.data(); });
+    
+    const now = new Date().toISOString();
+    
+    const updatedFields = {
+      currentEvolutionStage: toStageNumber,
+      currentCharacterStageAssetId: nextStage.id,
+      lastEvolutionAt: now,
+      updatedAt: now
+    };
+    await profileRef.set(updatedFields, { merge: true });
+    
+    const logId = `evolog_${crypto.randomUUID()}`;
+    const evolutionLog = {
+      id: logId,
+      playerId,
+      evolutionChainId: profile.selectedEvolutionChainId,
+      characterId: profile.selectedCharacterId,
+      characterCode: nextStage.characterCode,
+      fromStageNumber,
+      toStageNumber,
+      fromStageAssetId: profile.currentCharacterStageAssetId,
+      toStageAssetId: nextStage.id,
+      triggerType: 'manual_admin',
+      satisfiedConditions: { manual_bypass: true },
+      evolvedAt: now
+    };
+    await db.collection('CharacterEvolutionLogs').doc(logId).set(evolutionLog);
+    
+    await logGMAction(req.principal, 'manual_trigger_evolution', 'user', playerId, `Manually evolved player ${playerId} character to stage ${toStageNumber}`, { playerId, toStageNumber });
+    
+    res.json({ success: true, toStageNumber });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/player-character-progress/:playerId/reset-character', requireAdmin, async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  const playerId = req.params.playerId;
+  try {
+    const profileRef = db.collection('PlayerProfiles').doc(playerId);
+    const profileSnap = await profileRef.get();
+    if (!profileSnap.exists) return res.status(404).json({ error: '找不到學員檔案。' });
+    
+    const profile = profileSnap.data();
+    if (!profile.selectedEvolutionChainId) {
+      return res.status(400).json({ error: '該學員尚未選擇角色。' });
+    }
+    
+    const stageSnap = await db.collection('CharacterEvolutionStages')
+      .where('evolutionChainId', '==', profile.selectedEvolutionChainId)
+      .where('stageNumber', '==', 1)
+      .limit(1)
+      .get();
+      
+    if (stageSnap.empty) {
+      return res.status(404).json({ error: '找不到第一階段設定。' });
+    }
+    
+    let stage1 = null;
+    stageSnap.forEach(d => { stage1 = d.data(); });
+    
+    const now = new Date().toISOString();
+    
+    const updatedFields = {
+      currentEvolutionStage: 1,
+      currentCharacterStageAssetId: stage1.id,
+      lastEvolutionAt: '',
+      updatedAt: now
+    };
+    await profileRef.set(updatedFields, { merge: true });
+    
+    await logGMAction(req.principal, 'reset_player_character', 'user', playerId, `Manually reset player ${playerId} character back to stage 1`, { playerId });
+    
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/system-settings/character', requireAdmin, async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Firestore not configured' });
+  const { allowCharacterChange } = req.body;
+  try {
+    await db.collection('SystemSettings').doc('character_settings').set({
+      allowCharacterChange: !!allowCharacterChange,
+      updatedAt: new Date().toISOString()
+    }, { merge: true });
+    
+    await logGMAction(req.principal, 'update_character_system_settings', 'system', 'character_settings', `Set allowCharacterChange to ${!!allowCharacterChange}`, { allowCharacterChange: !!allowCharacterChange });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Legacy endpoints retained for older clients.
+
 function getLegacyBanks() {
   try {
     return JSON.parse(fs.readFileSync(legacyBanksFilePath, 'utf8'));
@@ -3498,6 +5439,10 @@ app.post('/api/student-answers/bulk', rateLimitMutations, (req, res) => {
 });
 
 const rooms = {};
+const MAX_PLAYERS_PER_ROOM = 100;
+const MAX_NICKNAME_LENGTH = 24;
+const ROOM_IDLE_TIMEOUT_MS = 60 * 60 * 1000;     // 1 小時無任何活動即清除房間
+const FINISHED_ROOM_GRACE_MS = 10 * 60 * 1000;   // 遊戲結束後保留 10 分鐘供查看結果
 
 function generateRoomCode() {
   let code;
@@ -3507,19 +5452,145 @@ function generateRoomCode() {
   return code;
 }
 
+// Fisher–Yates 洗牌：回傳新陣列，不就地改動傳入的原始陣列。
+function shuffleArray(input) {
+  const arr = [...input];
+  for (let i = arr.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+function connectedPlayers(room) {
+  return Object.values(room.players).filter((player) => !player.disconnected);
+}
+
+function broadcastPlayerList(room) {
+  io.to(room.teacherId).emit('player_joined', connectedPlayers(room));
+}
+
+function clearRoomTimer(room) {
+  if (room && room.timerInterval) {
+    clearInterval(room.timerInterval);
+    room.timerInterval = null;
+  }
+}
+
+function cleanupRoom(roomId) {
+  const room = rooms[roomId];
+  if (!room) return;
+  clearRoomTimer(room);
+  delete rooms[roomId];
+}
+
+function touchRoom(room) {
+  if (room) room.lastActivityAt = Date.now();
+}
+
+function nextQuestion(room) {
+  if (!room) return;
+  clearRoomTimer(room);
+  touchRoom(room);
+
+  room.currentQuestionIndex += 1;
+  if (room.currentQuestionIndex >= room.questions.length) {
+    room.status = 'game_over';
+    room.finishedAt = Date.now();
+    io.to(room.id).emit('game_over', {
+      players: Object.values(room.players).map((player) => ({
+        nickname: player.nickname,
+        score: player.score,
+        answers: player.answers
+      }))
+    });
+    return;
+  }
+
+  room.status = 'playing';
+  room.answeredCount = 0;
+  room.questionStartTime = Date.now();
+
+  const question = room.questions[room.currentQuestionIndex];
+  const payload = {
+    qIndex: room.currentQuestionIndex,
+    total: room.questions.length,
+    question: question.Question || question.prompt,
+    options: {
+      A: question.OptA || question.options?.A,
+      B: question.OptB || question.options?.B,
+      C: question.OptC || question.options?.C,
+      D: question.OptD || question.options?.D
+    },
+    timeLimit: room.timeLimit
+  };
+
+  io.to(room.teacherId).emit('new_question', payload);
+  io.to(room.id).emit('new_question_student', payload);
+
+  let timeLeft = room.timeLimit;
+  room.timerInterval = setInterval(() => {
+    timeLeft -= 1;
+    const total = connectedPlayers(room).length;
+    if (total > 0 && room.answeredCount >= total / 2) {
+      timeLeft -= 1;
+    }
+    io.to(room.id).emit('tick', timeLeft);
+
+    if (timeLeft <= 0) {
+      endQuestion(room);
+    }
+  }, 1000);
+}
+
+function endQuestion(room) {
+  if (!room || room.status !== 'playing') return; // 防止計時器與「全員答完」重複觸發
+  clearRoomTimer(room);
+
+  room.status = 'question_result';
+  const question = room.questions[room.currentQuestionIndex];
+  const distribution = { A: 0, B: 0, C: 0, D: 0 };
+  Object.values(room.players).forEach((player) => {
+    const answer = player.answers.find((item) => item.qIndex === room.currentQuestionIndex);
+    if (answer && answer.selected) {
+      const selected = String(answer.selected).toUpperCase();
+      if (distribution[selected] !== undefined) distribution[selected] += 1;
+    }
+  });
+
+  const leaderboard = Object.values(room.players)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 5)
+    .map((player) => ({ nickname: player.nickname, score: player.score }));
+
+  io.to(room.id).emit('question_result', {
+    correctOption: question.Answer || question.answer,
+    leaderboard,
+    distribution
+  });
+}
+
+// 若目前所有「在線」玩家都已作答本題，提前結束（避免斷線玩家拖住進度）。
+function maybeEndQuestion(room) {
+  if (!room || room.status !== 'playing') return;
+  const active = connectedPlayers(room);
+  if (active.length === 0) return; // 無在線玩家時交給計時器收尾
+  const everyoneAnswered = active.every((player) =>
+    player.answers.some((answer) => answer.qIndex === room.currentQuestionIndex));
+  if (everyoneAnswered) endQuestion(room);
+}
+
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
   socket.on('create_room', ({ questions, limit, teacherUserId, activityId, questionBankId }) => {
-    const shuffled = questions.sort(() => 0.5 - Math.random());
-    let selected = shuffled.slice(0, limit || 10);
-
-    if (selected.length === 0) {
+    if (!Array.isArray(questions) || questions.length === 0) {
       socket.emit('error', '目前沒有可進行的題目。');
       return;
     }
 
-    selected = selected.map((question) => ({
+    const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 10, 1), questions.length);
+    const selected = shuffleArray(questions).slice(0, safeLimit).map((question) => ({
       ...question,
       Answer: String(question.Answer || question.answer || '').trim().toUpperCase()
     }));
@@ -3537,8 +5608,10 @@ io.on('connection', (socket) => {
       players: {},
       answeredCount: 0,
       timeLimit: 60,
-      timer: null,
-      questionStartTime: 0
+      timerInterval: null,
+      questionStartTime: 0,
+      createdAt: Date.now(),
+      lastActivityAt: Date.now()
     };
 
     socket.join(roomId);
@@ -3548,25 +5621,54 @@ io.on('connection', (socket) => {
   socket.on('join_room_student', ({ roomId, nickname }) => {
     const room = rooms[roomId];
     if (!room) return socket.emit('error', '找不到房間。');
-    if (room.status !== 'waiting') return socket.emit('error', '遊戲已經開始。');
+    if (room.status === 'game_over') return socket.emit('error', '遊戲已經結束。');
+
+    const cleanNickname = sanitizeCell(nickname).slice(0, MAX_NICKNAME_LENGTH);
+    if (!cleanNickname) return socket.emit('error', '請輸入有效的暱稱。');
+
+    touchRoom(room);
+
+    // 斷線重連：沿用同暱稱、已離線的玩家紀錄，恢復其分數與作答進度。
+    const previous = Object.values(room.players).find(
+      (player) => player.nickname === cleanNickname && player.disconnected
+    );
+    if (previous) {
+      delete room.players[previous.id];
+      previous.id = socket.id;
+      previous.disconnected = false;
+      room.players[socket.id] = previous;
+      socket.join(roomId);
+      socket.emit('joined_room', { roomId, nickname: cleanNickname, reconnected: true, score: previous.score });
+      broadcastPlayerList(room);
+      return;
+    }
+
+    // 新玩家：僅允許在等待階段加入，並檢查暱稱重複與人數上限。
+    if (room.status !== 'waiting') return socket.emit('error', '遊戲已經開始，無法加入。');
+    if (connectedPlayers(room).some((player) => player.nickname === cleanNickname)) {
+      return socket.emit('error', '此暱稱已被使用，請換一個。');
+    }
+    if (connectedPlayers(room).length >= MAX_PLAYERS_PER_ROOM) {
+      return socket.emit('error', '房間人數已滿。');
+    }
 
     room.players[socket.id] = {
       id: socket.id,
-      nickname,
+      nickname: cleanNickname,
       score: 0,
       streak: 0,
-      answers: []
+      answers: [],
+      disconnected: false
     };
 
     socket.join(roomId);
-    socket.emit('joined_room', { roomId, nickname });
-    io.to(room.teacherId).emit('player_joined', Object.values(room.players));
+    socket.emit('joined_room', { roomId, nickname: cleanNickname });
+    broadcastPlayerList(room);
   });
 
   socket.on('start_game', (roomId) => {
     const room = rooms[roomId];
-    if (room && room.teacherId === socket.id) {
-      room.status = 'playing';
+    if (room && room.teacherId === socket.id && room.status === 'waiting') {
       nextQuestion(room);
     }
   });
@@ -3583,6 +5685,7 @@ io.on('connection', (socket) => {
     if (!room || room.status !== 'playing') return;
     const player = room.players[socket.id];
     if (!player) return;
+    touchRoom(room);
 
     const qIndex = room.currentQuestionIndex;
     if (player.answers.some((answer) => answer.qIndex === qIndex)) return;
@@ -3596,13 +5699,12 @@ io.on('connection', (socket) => {
 
     if (isCorrect) {
       player.streak += 1;
-      const totalPlayers = Object.keys(room.players).length || 1;
+      const totalPlayers = connectedPlayers(room).length || 1;
       const timeRatio = Math.max(0, 1 - (timeTaken / room.timeLimit));
       const orderRatio = Math.max(0, 1 - (room.answeredCount / totalPlayers));
       const questionBaseScore = 1000 * (0.5 * timeRatio + 0.5 * orderRatio);
       const streakMultiplier = 1 + (player.streak - 1) * 0.2;
-      points = Math.round(questionBaseScore * streakMultiplier);
-      points = Math.max(100, points);
+      points = Math.max(100, Math.round(questionBaseScore * streakMultiplier));
       player.score += points;
     } else {
       player.streak = 0;
@@ -3610,7 +5712,7 @@ io.on('connection', (socket) => {
 
     player.answers.push({
       qIndex,
-      selected: selectedOption,
+      selected: cleanSelectedOption,
       correct: isCorrect,
       score: points,
       timeTaken
@@ -3648,102 +5750,104 @@ io.on('connection', (socket) => {
     });
 
     io.to(room.teacherId).emit('player_answered_count', room.answeredCount);
-
-    const totalPlayers = Object.keys(room.players).length;
-    if (room.answeredCount >= totalPlayers) {
-      endQuestion(room);
-    }
+    maybeEndQuestion(room);
   });
-
-  function nextQuestion(room) {
-    if (room.timerInterval) clearInterval(room.timerInterval);
-
-    room.currentQuestionIndex += 1;
-    if (room.currentQuestionIndex >= room.questions.length) {
-      room.status = 'game_over';
-      io.to(room.id).emit('game_over', {
-        players: Object.values(room.players).map((player) => ({
-          nickname: player.nickname,
-          score: player.score,
-          answers: player.answers
-        }))
-      });
-      return;
-    }
-
-    room.status = 'playing';
-    room.answeredCount = 0;
-    room.questionStartTime = Date.now();
-
-    const question = room.questions[room.currentQuestionIndex];
-    const payload = {
-      qIndex: room.currentQuestionIndex,
-      total: room.questions.length,
-      question: question.Question || question.prompt,
-      options: {
-        A: question.OptA || question.options?.A,
-        B: question.OptB || question.options?.B,
-        C: question.OptC || question.options?.C,
-        D: question.OptD || question.options?.D
-      },
-      timeLimit: room.timeLimit
-    };
-
-    io.to(room.teacherId).emit('new_question', payload);
-    io.to(room.id).emit('new_question_student', payload);
-
-    let timeLeft = room.timeLimit;
-    const interval = setInterval(() => {
-      timeLeft -= 1;
-      const totalPlayers = Object.keys(room.players).length;
-      if (totalPlayers > 0 && room.answeredCount >= totalPlayers / 2) {
-        timeLeft -= 1;
-      }
-      io.to(room.id).emit('tick', timeLeft);
-
-      if (timeLeft <= 0) {
-        clearInterval(interval);
-        endQuestion(room);
-      }
-    }, 1000);
-    room.timerInterval = interval;
-  }
-
-  function endQuestion(room) {
-    if (room.timerInterval) {
-      clearInterval(room.timerInterval);
-      room.timerInterval = null;
-    }
-
-    room.status = 'question_result';
-    const question = room.questions[room.currentQuestionIndex];
-    const distribution = { A: 0, B: 0, C: 0, D: 0 };
-    Object.values(room.players).forEach((player) => {
-      const answer = player.answers.find((item) => item.qIndex === room.currentQuestionIndex);
-      if (answer && answer.selected) {
-        const selected = answer.selected.toUpperCase();
-        if (distribution[selected] !== undefined) distribution[selected] += 1;
-      }
-    });
-
-    const leaderboard = Object.values(room.players)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 5)
-      .map((player) => ({ nickname: player.nickname, score: player.score }));
-
-    io.to(room.id).emit('question_result', {
-      correctOption: question.Answer || question.answer,
-      leaderboard,
-      distribution
-    });
-  }
 
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
+    for (const roomId of Object.keys(rooms)) {
+      const room = rooms[roomId];
+      if (room.teacherId === socket.id) {
+        // 主持人離線：通知房內學生並關閉房間，避免孤兒房間殘留。
+        io.to(room.id).emit('room_closed', '主持人已離線，本場遊戲結束。');
+        cleanupRoom(roomId);
+        continue;
+      }
+      const player = room.players[socket.id];
+      if (player) {
+        // 學生離線：標記為離線（保留分數供重連），更新名單並視情況提前結束本題。
+        player.disconnected = true;
+        broadcastPlayerList(room);
+        maybeEndQuestion(room);
+      }
+    }
   });
 });
+
+// 定期清理閒置與已結束的房間，避免 rooms 物件無限累積造成記憶體洩漏。
+const roomSweepInterval = setInterval(() => {
+  const now = Date.now();
+  for (const roomId of Object.keys(rooms)) {
+    const room = rooms[roomId];
+    const idleFor = now - (room.lastActivityAt || room.createdAt || now);
+    const finishedFor = room.finishedAt ? now - room.finishedAt : 0;
+    if (idleFor > ROOM_IDLE_TIMEOUT_MS || (room.status === 'game_over' && finishedFor > FINISHED_ROOM_GRACE_MS)) {
+      cleanupRoom(roomId);
+    }
+  }
+}, 5 * 60 * 1000);
+if (typeof roomSweepInterval.unref === 'function') roomSweepInterval.unref();
+
+// Seed unique admin account
+async function seedAdminAccount() {
+  const adminEmail = process.env.GM_TEACHER_ADMIN_EMAIL;
+  const adminPassword = process.env.GM_TEACHER_ADMIN_PASSWORD;
+
+  if (!adminEmail || !adminPassword) {
+    console.log('[Admin Seeding] 未設定 GM_TEACHER_ADMIN_EMAIL / GM_TEACHER_ADMIN_PASSWORD，略過管理員種子建立。');
+    return;
+  }
+
+  if (!admin.apps.length) {
+    console.log("Firebase Admin is not initialized. Admin seeding is skipped.");
+    return;
+  }
+  
+  try {
+    let userRecord;
+    try {
+      userRecord = await admin.auth().getUserByEmail(adminEmail);
+      console.log(`[Admin Seeding] Unique GM account already exists: ${userRecord.uid}`);
+    } catch (err) {
+      if (err.code === 'auth/user-not-found') {
+        console.log(`[Admin Seeding] Unique GM account does not exist. Creating...`);
+        userRecord = await admin.auth().createUser({
+          email: adminEmail,
+          password: adminPassword,
+          displayName: 'GM Teacher Admin',
+          emailVerified: true
+        });
+        console.log(`[Admin Seeding] Unique GM account created: ${userRecord.uid}`);
+      } else {
+        throw err;
+      }
+    }
+
+    // Set custom claims
+    await admin.auth().setCustomUserClaims(userRecord.uid, { role: 'gm_teacher_admin' });
+    console.log(`[Admin Seeding] Custom claim role: "gm_teacher_admin" set successfully.`);
+
+    // Write to Firestore Users collection
+    if (db) {
+      await db.collection('Users').doc(userRecord.uid).set({
+        id: userRecord.uid,
+        email: adminEmail,
+        role: 'gm_teacher_admin',
+        displayName: 'GM Teacher Admin',
+        nickname: 'GM Teacher Admin',
+        anonymizedStudentCode: 'GM0000',
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+      console.log(`[Admin Seeding] Firestore Users doc updated.`);
+    }
+  } catch (error) {
+    console.error(`[Admin Seeding] Failed to seed unique admin account:`, error);
+  }
+}
+seedAdminAccount();
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
   console.log(`Backend server running on port ${PORT}`);
 });
+

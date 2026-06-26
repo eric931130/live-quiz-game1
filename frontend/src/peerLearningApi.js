@@ -4,11 +4,11 @@ const API_BASE = isLocalDevHost
   ? 'http://localhost:3001'
   : 'https://live-quiz-game1.onrender.com';
 
-function getRole(user, fallback = 'student') {
+function getRole(user, fallback = 'player') {
   return user?.role || user?.customClaims?.role || fallback;
 }
 
-async function headersFor(user, extra = {}, fallbackRole = 'student') {
+async function headersFor(user, extra = {}, fallbackRole = 'player') {
   const token = user?.getIdToken ? await user.getIdToken() : null;
   return {
     'x-user-id': user?.uid || user?.studentId || 'anonymous-student',

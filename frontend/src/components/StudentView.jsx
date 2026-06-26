@@ -398,7 +398,7 @@ if (!currentAuthUser) {
   const peerLearningUser = currentUser || {
     uid: studentId || nickname || 'guest-student',
     displayName: nickname || 'Guest Student',
-    role: 'student',
+    role: 'player',
     schoolId: 'default-school'
   };
 
@@ -679,7 +679,7 @@ if (!currentAuthUser) {
                 <h1 style={{ fontSize: '3.5rem', margin: '0 0 1rem', textShadow: '0 0 20px rgba(244, 211, 122, 0.5)', background: '-webkit-linear-gradient(45deg, #FFD54F, var(--primary-color))', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
                    境界突破！
                 </h1>
-                <p style={{ fontSize: '1.5rem', color: '#B0BEC5', letterSpacing: '2px' }}>永續知識的能量正在匯聚...</p>
+                <p style={{ fontSize: '1.5rem', color: 'var(--green-2)', letterSpacing: '2px' }}>永續知識的能量正在匯聚...</p>
                 <div style={{ marginTop: '3rem', width: '300px', height: '4px', background: 'rgba(255,255,255,0.2)', margin: '3rem auto 0', position: 'relative', overflow: 'hidden', borderRadius: '2px' }}>
                    <div style={{ position: 'absolute', top: 0, left: 0, height: '100%', width: '100%', background: 'linear-gradient(90deg, transparent, var(--primary-color), transparent)', animation: 'orbit 2s linear infinite' }}></div>
                 </div>

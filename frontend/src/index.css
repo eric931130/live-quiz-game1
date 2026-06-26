@@ -1,57 +1,66 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+TC:wght@400;500;600;700;800&family=Fredoka:wght@600&display=swap');
 
 :root {
-  /* Green Palette Tokens */
-  --green-1: #EAF7EC;
-  --green-2: #BFE7C6;
-  --green-3: #7BC47F;
-  --green-4: #3E9A52;
-  --green-5: #1F6B3A;
+  /* === 森林大地綠 Forest-Earth Palette ===
+     主調：深松綠 + 森林綠 + 萊姆葉綠；大地：暖米白 + 淺木 + 木質棕；
+     藍色僅保留作 SDG 水資源點綴。調整 token 值即可整站連動換色。 */
 
-  /* Yellow Palette Tokens */
-  --yellow-1: #FFF4CC;
-  --yellow-2: #F2D56B;
-  --yellow-3: #D4A72C;
+  /* Green Palette Tokens (leaf → forest → pine) */
+  --green-1: #EDF5E9;   /* 葉白：最淺背景綠 */
+  --green-2: #C3DEB4;   /* 鼠尾草綠 */
+  --green-3: #6FAE4A;   /* 萊姆葉綠：亮點/強調 */
+  --green-4: #2E7D32;   /* 森林綠：主色 */
+  --green-5: #14532D;   /* 深松綠：最深 */
 
-  /* Blue Palette Tokens */
+  /* Earth Palette Tokens (sand → wood) 大地米 / 木質棕 */
+  --earth-1: #F6F1E4;   /* 暖米白 */
+  --earth-2: #E4D6B8;   /* 淺木色 */
+  --earth-3: #8C6A43;   /* 木質棕：大地點綴 */
+
+  /* Yellow → 大地琥珀 (取代原亮金，偏暖土) */
+  --yellow-1: #FBF1D4;
+  --yellow-2: #E8C46A;
+  --yellow-3: #B8862F;
+
+  /* Blue Palette Tokens (保留作 SDG 水資源點綴) */
   --blue-1: #EAF4FF;
   --blue-2: #7CB7F3;
   --blue-3: #2F6FBB;
 
   /* White Palette Tokens */
   --white-1: #FFFFFF;
-  --white-2: #F8FBF9;
-  --white-3: #EEF4F1;
+  --white-2: #F8FBF4;
+  --white-3: #EEF3E7;
 
   /* Theme tokens */
-  --bg: var(--white-2);
+  --bg: var(--earth-1);
   --bg-soft: var(--white-3);
   --surface: var(--white-1);
   --surface-card: var(--white-1);
   --surface-elevated: var(--green-1);
-  --surface-ivory: var(--yellow-1);
-  
+  --surface-ivory: var(--earth-1);
+
   --gold: var(--green-4);
   --gold-bright: var(--green-3);
   --gold-deep: var(--green-5);
-  --gold-border: rgba(62, 154, 82, 0.25);
-  
+  --gold-border: rgba(46, 125, 50, 0.25);
+
   --text-on-dark: var(--white-1);
   --text-on-dark-secondary: var(--green-1);
   --text-on-dark-muted: var(--green-2);
-  
+
   --text-on-light: var(--green-5);
-  --text-on-light-secondary: var(--blue-3);
-  
-  --danger: #E65A5A;
+  --text-on-light-secondary: var(--earth-3);
+
+  --danger: #C62828;
   --success: var(--green-4);
   --warning: var(--yellow-3);
-  
-  --shadow-soft: 0 12px 30px rgba(31, 107, 58, 0.08);
-  --shadow-gold: 0 12px 30px rgba(212, 167, 44, 0.15);
-  
+
+  --shadow-soft: 0 12px 30px rgba(20, 83, 45, 0.10);
+  --shadow-gold: 0 12px 30px rgba(140, 106, 67, 0.15);
+
   --gold-gradient: linear-gradient(135deg, var(--green-3), var(--green-4) 48%, var(--green-5));
-  --dark-gradient: linear-gradient(135deg, var(--white-2) 0%, var(--white-3) 48%, var(--green-1) 100%);
+  --dark-gradient: linear-gradient(135deg, var(--earth-1) 0%, var(--white-3) 48%, var(--green-1) 100%);
 
   --primary: var(--gold);
   --primary-color: var(--gold);
@@ -63,13 +72,18 @@
   --bg-color: var(--bg-soft);
   --panel-bg: var(--surface-card);
   --text-main: var(--green-5);
-  --text-muted: #4a5d4e;
-  
+  --text-muted: #5a6b4f;
+
+  /* 大地/木質點綴 accents */
+  --wood: var(--earth-3);
+  --earth-beige: var(--earth-1);
+  --earth-sand: var(--earth-2);
+
   /* Expanded teaching palette for variety */
   --sdg-water: var(--blue-2);
   --sdg-edu: var(--yellow-3);
-  --sdg-industry: var(--yellow-2);
-  
+  --sdg-industry: var(--earth-3);
+
   /* Option colors */
   --opt-a: var(--green-4);
   --opt-b: var(--blue-3);
@@ -3861,10 +3875,142 @@ input[type="file"]::file-selector-button {
 }
 
 .progress-bar-fill {
-  background: linear-gradient(90deg, #43a047, #00acc1);
+  background: linear-gradient(90deg, var(--green-4), var(--green-3));
   height: 100%;
   border-radius: 4px;
   transition: width 0.5s ease-in-out;
+}
+
+/* World Map（SDG 島嶼永續之路） */
+.world-map-intro {
+  text-align: center;
+  color: var(--text-muted);
+  margin-bottom: 2rem;
+  font-size: 1.05rem;
+}
+.world-map {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.5rem;
+  position: relative;
+  padding: 2rem 0;
+  max-width: 640px;
+  margin: 0 auto;
+}
+.world-map::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: repeating-linear-gradient(var(--green-3) 0 10px, transparent 10px 20px);
+  opacity: 0.5;
+  z-index: 1;
+}
+.world-node-container {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  position: relative;
+  z-index: 2;
+}
+.world-node-container:nth-child(even) {
+  flex-direction: row-reverse;
+}
+.world-node-container:nth-child(even) .world-node-info {
+  text-align: right;
+  padding-right: 1.25rem;
+  padding-left: 0;
+}
+.world-node {
+  flex: 0 0 auto;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.4rem;
+  font-weight: 800;
+  border: 4px solid var(--surface);
+  box-shadow: var(--shadow-soft);
+  cursor: pointer;
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+  background: var(--green-2);
+  color: var(--green-5);
+}
+.world-node.open {
+  background: var(--gold-gradient);
+  color: var(--white-1);
+  animation: pulseNode 2s infinite alternate;
+}
+.world-node.cleared {
+  background: var(--earth-3);
+  color: var(--white-1);
+}
+.world-node.locked {
+  background: var(--white-3);
+  color: #9aa59a;
+  cursor: not-allowed;
+  box-shadow: none;
+  border-color: var(--white-3);
+}
+.world-node:not(.locked):hover {
+  transform: scale(1.08);
+  box-shadow: 0 12px 24px rgba(20, 83, 45, 0.2);
+}
+.world-node-info {
+  flex: 1;
+  padding-left: 1.25rem;
+}
+.world-node-info h4 {
+  margin: 0;
+  font-size: 1.15rem;
+  color: var(--green-5);
+}
+.world-node-sub {
+  margin: 0.15rem 0 0.5rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+.world-status-pill {
+  display: inline-block;
+  margin-top: 0.5rem;
+  padding: 0.2rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+.world-status-pill.open { background: var(--green-1); color: var(--green-5); }
+.world-status-pill.cleared { background: var(--earth-2); color: var(--earth-3); }
+.world-status-pill.locked { background: var(--white-3); color: #8a8a8a; }
+.world-empty-state,
+.world-error-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.8rem;
+  padding: 3rem 1.5rem;
+  text-align: center;
+  color: var(--text-muted);
+  min-height: 260px;
+}
+.world-error-detail {
+  font-size: 0.85rem;
+  color: var(--danger);
+  opacity: 0.85;
+}
+.world-error-state button {
+  margin-top: 0.5rem;
+  padding: 0.5rem 1.3rem;
+  border-radius: 24px;
+  border: none;
+  background: var(--primary);
+  color: #fff;
+  cursor: pointer;
+  font-weight: 700;
 }
 
 /* Stage Path Map */
@@ -3944,7 +4090,7 @@ input[type="file"]::file-selector-button {
 }
 
 .stage-node.cleared {
-  background: linear-gradient(135deg, #00acc1, #007c91);
+  background: linear-gradient(135deg, var(--earth-3), #6f5232);
   color: white;
 }
 

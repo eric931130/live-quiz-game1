@@ -1,4 +1,4 @@
-const hostingUrl = process.env.SMOKE_HOSTING_URL || 'https://teach999-53c2d.web.app';
+const hostingUrl = process.env.SMOKE_HOSTING_URL || 'https://empath-os.web.app';
 const apiUrl = process.env.SMOKE_API_URL || '';
 
 async function checkHosting() {
