@@ -656,6 +656,8 @@ function App() {
           <StarterSelectionModal 
             user={user} 
             API_BASE_URL={API_BASE_URL} 
+            onClose={() => setShowStarterSelection(false)}
+            onLogout={handleLogout}
             onSelectSuccess={() => {
               setShowStarterSelection(false);
               loadPlayerProfile();

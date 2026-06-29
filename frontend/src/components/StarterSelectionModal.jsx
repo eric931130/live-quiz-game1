@@ -1,29 +1,43 @@
 import React, { useState, useEffect } from 'react';
-import { Sparkles, Trophy, Check } from 'lucide-react';
+import { Sparkles, Trophy, Check, X, RefreshCw, LogOut } from 'lucide-react';
 import ParticleButton from './ParticleButton';
 
-export default function StarterSelectionModal({ user, API_BASE_URL, onSelectSuccess }) {
+export default function StarterSelectionModal({ user, API_BASE_URL, onSelectSuccess, onClose, onLogout }) {
   const [starters, setStarters] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [selected, setSelected] = useState(null);
   const [confirming, setConfirming] = useState(false);
 
   useEffect(() => {
     let active = true;
     const fetchStarters = async () => {
+      setLoading(true);
+      setError('');
       try {
         const token = await user.getIdToken();
         const res = await fetch(`${API_BASE_URL}/api/player/starters`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
-        if (res.ok) {
-          const data = await res.json();
-          if (active) {
-            setStarters(data);
+        if (!res.ok) {
+          let message = `無法載入初始角色 (${res.status})`;
+          try {
+            const data = await res.json();
+            message = data.error || message;
+          } catch {
+            // Keep the status-based message when the body is not JSON.
           }
+          throw new Error(message);
+        }
+        const data = await res.json();
+        if (active) {
+          setStarters(Array.isArray(data) ? data : []);
         }
       } catch (err) {
         console.error("Failed to fetch starters:", err);
+        if (active) {
+          setError(err.message || '無法載入初始角色，請稍後再試。');
+        }
       } finally {
         if (active) {
           setLoading(false);
@@ -33,6 +47,27 @@ export default function StarterSelectionModal({ user, API_BASE_URL, onSelectSucc
     fetchStarters();
     return () => { active = false; };
   }, [user, API_BASE_URL]);
+
+  const retry = async () => {
+    setLoading(true);
+    setError('');
+    setSelected(null);
+    setConfirming(false);
+    try {
+      const token = await user.getIdToken();
+      const res = await fetch(`${API_BASE_URL}/api/player/starters`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error(`無法載入初始角色 (${res.status})`);
+      const data = await res.json();
+      setStarters(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error("Failed to retry starters:", err);
+      setError(err.message || '無法載入初始角色，請稍後再試。');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSelect = (starter) => {
     setSelected(starter);
@@ -76,7 +111,16 @@ export default function StarterSelectionModal({ user, API_BASE_URL, onSelectSucc
 
   return (
     <div className="app-tool-window-modal-overlay" style={{ background: 'rgba(12, 24, 18, 0.96)', backdropFilter: 'blur(10px)', zIndex: 9999 }}>
-      <div className="app-tool-window-modal animate-pop-in" style={{ width: '100%', maxWidth: '850px', maxHeight: '90vh', overflowY: 'auto' }}>
+      <div className="app-tool-window-modal animate-pop-in" style={{ width: '100%', maxWidth: '850px', maxHeight: '90vh', overflowY: 'auto', position: 'relative' }}>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="稍後再選"
+          title="稍後再選"
+          style={{ position: 'absolute', top: '1rem', right: '1rem', zIndex: 2, background: 'rgba(255,255,255,0.75)', border: '1px solid rgba(123,196,127,0.35)', borderRadius: '999px', color: 'var(--primary-dark)', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '0.35rem' }}
+        >
+          <X size={20} />
+        </button>
         <div className="app-tool-window-header">
           <div className="app-tool-window-header-title">
             <Sparkles size={20} color="var(--gold-bright)" />
@@ -93,7 +137,41 @@ export default function StarterSelectionModal({ user, API_BASE_URL, onSelectSucc
             角色會從蛋開始，隨著你通關、獲得積分與成就，歷經 6 個階段的終極進化蛻變！
           </p>
 
-          {confirming && selected ? (
+          {error || starters.length === 0 ? (
+            <div className="animate-fade-in" style={{ textAlign: 'center', padding: '2rem', background: 'rgba(123, 196, 127, 0.08)', borderRadius: '16px', border: '1px solid rgba(123, 196, 127, 0.3)', maxWidth: '560px', margin: '0 auto' }}>
+              <h3 style={{ color: 'var(--primary-dark)', fontSize: '1.35rem', marginBottom: '0.75rem' }}>
+                目前還沒有可選的初始角色
+              </h3>
+              <p style={{ color: 'var(--text-main)', lineHeight: 1.7, marginBottom: '1.5rem' }}>
+                {error || '管理員尚未建立並開放初始角色，因此暫時無法完成角色選擇。你可以先返回首頁，或等管理員在 GM 控制台建立角色後再重試。'}
+              </p>
+              <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+                <ParticleButton
+                  className="btn"
+                  style={{ background: '#f5f5f5', color: '#2f4f3a', border: '1px solid rgba(123, 196, 127, 0.35)', borderRadius: '24px', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+                  onClick={retry}
+                >
+                  <RefreshCw size={16} /> 重新載入
+                </ParticleButton>
+                <ParticleButton
+                  className="btn"
+                  style={{ background: '#ffffff', color: '#2f4f3a', border: '1px solid rgba(123, 196, 127, 0.35)', borderRadius: '24px' }}
+                  onClick={onClose}
+                >
+                  稍後再選
+                </ParticleButton>
+                {onLogout && (
+                  <ParticleButton
+                    className="btn"
+                    style={{ background: '#fff4f4', color: '#b91c1c', border: '1px solid rgba(185, 28, 28, 0.25)', borderRadius: '24px', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+                    onClick={onLogout}
+                  >
+                    <LogOut size={16} /> 登出
+                  </ParticleButton>
+                )}
+              </div>
+            </div>
+          ) : confirming && selected ? (
             <div className="animate-fade-in" style={{ textAlign: 'center', padding: '2rem', background: 'rgba(123, 196, 127, 0.08)', borderRadius: '16px', border: '1px solid rgba(123, 196, 127, 0.3)', maxWidth: '500px', margin: '0 auto' }}>
               <div style={{ width: '150px', height: '150px', margin: '0 auto 1.5rem', borderRadius: '50%', background: 'var(--white-3)', border: '4px solid var(--gold-bright)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
                 {selected.stage1?.imageUrl ? (
