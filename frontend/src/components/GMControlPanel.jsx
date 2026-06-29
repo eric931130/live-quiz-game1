@@ -4,6 +4,8 @@ import {
   FileSpreadsheet, History, Sparkles, Plus, Edit, Trash, Eye, EyeOff, Check, X, 
   RefreshCw, Copy, Archive, ArrowLeft, Download, Search
 } from 'lucide-react';
+import { addDoc, collection } from 'firebase/firestore';
+import { db } from '../firebase';
 import { questionBankApi } from '../questionBankApi';
 const compressImage = (file, maxWidth = 300, maxHeight = 300, quality = 0.75) => {
   return new Promise((resolve, reject) => {
@@ -155,6 +157,7 @@ export default function GMControlPanel({ onGoBack, user }) {
   const [questionBankFile, setQuestionBankFile] = useState(null);
   const [importValidOnly, setImportValidOnly] = useState(false);
   const [previewData, setPreviewData] = useState(null);
+  const [worldBankTarget, setWorldBankTarget] = useState({ worldId: '1', stage: 'All' });
   const [bankMetadata, setBankMetadata] = useState({ title: '', subject: 'ESG 永續金融', gradeLevel: '大專院校', visibility: 'public', chapter: '第 1 章' });
 
   // Search queries
@@ -1480,6 +1483,34 @@ export default function GMControlPanel({ onGoBack, user }) {
     }
   };
 
+  const syncWorldChallengeBank = async (serverBank, rows) => {
+    const finalQuestions = (importValidOnly ? rows.filter(row => row.valid) : rows)
+      .map(row => row.question || row)
+      .filter(Boolean);
+    const rawWorldId = String(worldBankTarget.worldId || '').trim();
+    if (!rawWorldId || finalQuestions.length === 0) return null;
+
+    const stageValue = String(worldBankTarget.stage || 'All').trim();
+    const normalizedStage = stageValue.toLowerCase() === 'all' ? 'All' : Number(stageValue);
+    if (normalizedStage !== 'All' && (!Number.isInteger(normalizedStage) || normalizedStage < 1 || normalizedStage > 10)) {
+      throw new Error('Stage 必須是 All 或 1 到 10。');
+    }
+    const title = bankMetadata.title?.trim() || `World ${rawWorldId} ${normalizedStage === 'All' ? 'All Stages' : `Stage ${normalizedStage}`} Question Bank`;
+
+    return addDoc(collection(db, 'QuizBanks'), {
+      name: title,
+      world: rawWorldId,
+      stage: normalizedStage,
+      courseCategory: bankMetadata.subject || 'ESG 永續金融',
+      chapter: bankMetadata.chapter || '',
+      questions: finalQuestions,
+      source: 'gm-control-panel',
+      serverQuestionBankId: serverBank?.id || '',
+      createdBy: user?.uid || user?.email || 'gm-admin',
+      createdAt: new Date().toISOString()
+    });
+  };
+
   const handleCommitImport = async () => {
     if (!previewData || !previewData.rows) return;
     if (!window.confirm(`確定要匯入此題庫嗎？共包含 ${previewData.rows.length} 題。`)) return;
@@ -1503,7 +1534,9 @@ export default function GMControlPanel({ onGoBack, user }) {
         throw new Error(errData.error || '匯入提交失敗');
       }
       
-      flashSuccess('題庫正式匯入成功！');
+      const serverBank = await response.json();
+      await syncWorldChallengeBank(serverBank, previewData.rows);
+      flashSuccess('題庫已匯入，並已同步到世界關卡模式。');
       setPreviewData(null);
       setQuestionBankFile(null);
     } catch (err) {
@@ -3393,6 +3426,28 @@ export default function GMControlPanel({ onGoBack, user }) {
                       <div className="form-group">
                         <label>預設章節名稱 (Chapter)</label>
                         <input className="gm-input" value={bankMetadata.chapter} onChange={e => setBankMetadata({...bankMetadata, chapter: e.target.value})} />
+                      </div>
+                      <div className="form-group">
+                        <label>世界關卡 World ID</label>
+                        <input
+                          className="gm-input"
+                          value={worldBankTarget.worldId}
+                          onChange={e => setWorldBankTarget(prev => ({ ...prev, worldId: e.target.value }))}
+                          placeholder="例如：1 或 world_1"
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label>匯入階段 Stage</label>
+                        <select
+                          className="gm-select"
+                          value={worldBankTarget.stage}
+                          onChange={e => setWorldBankTarget(prev => ({ ...prev, stage: e.target.value }))}
+                        >
+                          <option value="All">All：整個世界 200 題，每階段自動取 20 題</option>
+                          {Array.from({ length: 10 }, (_, index) => (
+                            <option key={index + 1} value={String(index + 1)}>Stage {index + 1}：只匯入該階段</option>
+                          ))}
+                        </select>
                       </div>
                       <div className="form-group">
                         <label>題庫可見性 (Visibility)</label>
