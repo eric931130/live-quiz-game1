@@ -1,15 +1,7 @@
 const apiUrl = process.env.SMOKE_API_URL || 'https://live-quiz-game1.onrender.com';
 
 async function check(path, label) {
-  const response = await fetch(new URL(path, apiUrl).toString(), {
-    headers: {
-      'x-user-id': 'smoke-health-teacher',
-      'x-user-email': 'smoke-health@example.test',
-      'x-user-name': 'Smoke Health',
-      'x-user-role': 'teacher',
-      'x-school-id': 'smoke-school'
-    }
-  });
+  const response = await fetch(new URL(path, apiUrl).toString());
   if (!response.ok) {
     const body = await response.text();
     throw new Error(`${label} returned ${response.status}: ${body.slice(0, 200)}`);
@@ -22,16 +14,21 @@ try {
   const health = await healthResponse.json();
   if (!health.ok) throw new Error('API health did not return ok=true.');
 
-  const templateResponse = await check('/api/question-banks/template', 'Question bank template');
-  const contentType = templateResponse.headers.get('content-type') || '';
-  if (!contentType.includes('spreadsheetml')) {
-    throw new Error(`Template returned unexpected content type: ${contentType}`);
+  const announcementsResponse = await check('/api/announcements', 'Public announcements');
+  const announcements = await announcementsResponse.json();
+  if (!Array.isArray(announcements)) {
+    throw new Error('Public announcements did not return an array.');
   }
-  const bytes = (await templateResponse.arrayBuffer()).byteLength;
-  if (bytes < 1000) throw new Error(`Template response was unexpectedly small: ${bytes} bytes`);
+
+  const protectedResponse = await fetch(new URL('/api/question-banks', apiUrl).toString());
+  if (![200, 401].includes(protectedResponse.status)) {
+    const body = await protectedResponse.text();
+    throw new Error(`Protected question bank endpoint returned unexpected ${protectedResponse.status}: ${body.slice(0, 200)}`);
+  }
 
   console.log(`Backend health OK: ${apiUrl}`);
-  console.log(`Question bank template OK: ${bytes} bytes (${contentType})`);
+  console.log(`Public announcements OK: ${announcements.length} active`);
+  console.log(`Protected question bank endpoint OK: ${protectedResponse.status}`);
 } catch (error) {
   console.error(`Backend smoke failed for ${apiUrl}`);
   console.error(error.message);

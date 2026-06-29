@@ -47,6 +47,8 @@ app.use(cors());
 app.use(express.json({ limit: '2mb' }));
 
 const storeFilePath = process.env.QUESTION_BANK_STORE_PATH || path.join(__dirname, 'question_banks_store.json');
+const fallbackStoreFilePath = path.join(__dirname, 'question_banks_store.json');
+let activeStoreFilePath = storeFilePath;
 const legacyBanksFilePath = path.join(__dirname, 'banks.json');
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 const MUTATION_WINDOW_MS = 60 * 1000;
@@ -345,42 +347,88 @@ function createId(prefix) {
   return `${prefix}_${crypto.randomUUID()}`;
 }
 
-function readStore() {
-  if (!fs.existsSync(storeFilePath)) {
-    fs.writeFileSync(storeFilePath, JSON.stringify({ questionBanks: [], shares: [], auditLogs: [], activities: [], studentAnswers: [], questionAnalytics: [], peerExplanations: [], helpRequests: [], helpResponses: [], studentCreatedQuestions: [], peerChallenges: [], peerReviewAssignments: [], wrongQuestionExchanges: [], learningGuilds: [], peerLearningSettings: [], moderationLogs: [] }, null, 2));
-  }
+function defaultStore() {
+  return {
+    questionBanks: [],
+    shares: [],
+    auditLogs: [],
+    activities: [],
+    studentAnswers: [],
+    questionAnalytics: [],
+    peerExplanations: [],
+    helpRequests: [],
+    helpResponses: [],
+    studentCreatedQuestions: [],
+    peerChallenges: [],
+    peerReviewAssignments: [],
+    wrongQuestionExchanges: [],
+    learningGuilds: [],
+    peerLearningSettings: [],
+    moderationLogs: []
+  };
+}
 
+function normalizeStore(parsed = {}) {
+  return {
+    questionBanks: Array.isArray(parsed.questionBanks) ? parsed.questionBanks : [],
+    shares: Array.isArray(parsed.shares) ? parsed.shares : [],
+    auditLogs: Array.isArray(parsed.auditLogs) ? parsed.auditLogs : [],
+    activities: Array.isArray(parsed.activities) ? parsed.activities : [],
+    studentAnswers: Array.isArray(parsed.studentAnswers) ? parsed.studentAnswers : [],
+    questionAnalytics: Array.isArray(parsed.questionAnalytics) ? parsed.questionAnalytics : [],
+    peerExplanations: Array.isArray(parsed.peerExplanations) ? parsed.peerExplanations : [],
+    helpRequests: Array.isArray(parsed.helpRequests) ? parsed.helpRequests : [],
+    helpResponses: Array.isArray(parsed.helpResponses) ? parsed.helpResponses : [],
+    studentCreatedQuestions: Array.isArray(parsed.studentCreatedQuestions) ? parsed.studentCreatedQuestions : [],
+    peerChallenges: Array.isArray(parsed.peerChallenges) ? parsed.peerChallenges : [],
+    peerReviewAssignments: Array.isArray(parsed.peerReviewAssignments) ? parsed.peerReviewAssignments : [],
+    wrongQuestionExchanges: Array.isArray(parsed.wrongQuestionExchanges) ? parsed.wrongQuestionExchanges : [],
+    learningGuilds: Array.isArray(parsed.learningGuilds) ? parsed.learningGuilds : [],
+    peerLearningSettings: Array.isArray(parsed.peerLearningSettings) ? parsed.peerLearningSettings : [],
+    moderationLogs: Array.isArray(parsed.moderationLogs) ? parsed.moderationLogs : []
+  };
+}
+
+function ensureStoreFilePath(filePath) {
+  const dir = path.dirname(filePath);
+  fs.mkdirSync(dir, { recursive: true });
+  if (!fs.existsSync(filePath)) {
+    fs.writeFileSync(filePath, JSON.stringify(defaultStore(), null, 2));
+  }
+}
+
+function getStoreFilePath() {
   try {
-    const parsed = JSON.parse(fs.readFileSync(storeFilePath, 'utf8'));
-    return {
-      questionBanks: Array.isArray(parsed.questionBanks) ? parsed.questionBanks : [],
-      shares: Array.isArray(parsed.shares) ? parsed.shares : [],
-      auditLogs: Array.isArray(parsed.auditLogs) ? parsed.auditLogs : [],
-      activities: Array.isArray(parsed.activities) ? parsed.activities : [],
-      studentAnswers: Array.isArray(parsed.studentAnswers) ? parsed.studentAnswers : [],
-      questionAnalytics: Array.isArray(parsed.questionAnalytics) ? parsed.questionAnalytics : [],
-      peerExplanations: Array.isArray(parsed.peerExplanations) ? parsed.peerExplanations : [],
-      helpRequests: Array.isArray(parsed.helpRequests) ? parsed.helpRequests : [],
-      helpResponses: Array.isArray(parsed.helpResponses) ? parsed.helpResponses : [],
-      studentCreatedQuestions: Array.isArray(parsed.studentCreatedQuestions) ? parsed.studentCreatedQuestions : [],
-      peerChallenges: Array.isArray(parsed.peerChallenges) ? parsed.peerChallenges : [],
-      peerReviewAssignments: Array.isArray(parsed.peerReviewAssignments) ? parsed.peerReviewAssignments : [],
-      wrongQuestionExchanges: Array.isArray(parsed.wrongQuestionExchanges) ? parsed.wrongQuestionExchanges : [],
-      learningGuilds: Array.isArray(parsed.learningGuilds) ? parsed.learningGuilds : [],
-      peerLearningSettings: Array.isArray(parsed.peerLearningSettings) ? parsed.peerLearningSettings : [],
-      moderationLogs: Array.isArray(parsed.moderationLogs) ? parsed.moderationLogs : []
-    };
+    ensureStoreFilePath(activeStoreFilePath);
+    return activeStoreFilePath;
+  } catch (error) {
+    if (activeStoreFilePath !== fallbackStoreFilePath) {
+      console.warn(`[store] ${activeStoreFilePath} is not writable (${error.message}). Falling back to ${fallbackStoreFilePath}.`);
+      activeStoreFilePath = fallbackStoreFilePath;
+      ensureStoreFilePath(activeStoreFilePath);
+      return activeStoreFilePath;
+    }
+    throw error;
+  }
+}
+
+function readStore() {
+  try {
+    const filePath = getStoreFilePath();
+    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    return normalizeStore(parsed);
   } catch (error) {
     console.error('Unable to read question bank store:', error);
     // 解析失敗代表檔案可能毀損；先把毀損檔備份起來，避免後續 writeStore 直接覆蓋造成資料永久遺失。
     try {
-      const backupPath = `${storeFilePath}.corrupt.${Date.now()}.json`;
-      fs.renameSync(storeFilePath, backupPath);
+      const filePath = getStoreFilePath();
+      const backupPath = `${filePath}.corrupt.${Date.now()}.json`;
+      fs.renameSync(filePath, backupPath);
       console.error(`[store] 已將毀損的儲存檔備份為 ${backupPath}，本次以空資料回應。`);
     } catch (backupError) {
       console.error('[store] 備份毀損儲存檔失敗：', backupError.message);
     }
-    return { questionBanks: [], shares: [], auditLogs: [], activities: [], studentAnswers: [], questionAnalytics: [], peerExplanations: [], helpRequests: [], helpResponses: [], studentCreatedQuestions: [], peerChallenges: [], peerReviewAssignments: [], wrongQuestionExchanges: [], learningGuilds: [], peerLearningSettings: [], moderationLogs: [] };
+    return defaultStore();
   }
 }
 
@@ -389,9 +437,10 @@ function readStore() {
 // Node 為單執行緒且各處理器在 readStore→writeStore 之間沒有 await，
 // 故 read-modify-write 在 JS 層即天然序列化，不會互相覆寫。
 function writeStore(store) {
-  const data = JSON.stringify(store, null, 2);
-  const dir = path.dirname(storeFilePath);
-  const tmpPath = path.join(dir, `.${path.basename(storeFilePath)}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`);
+  const data = JSON.stringify(normalizeStore(store), null, 2);
+  const filePath = getStoreFilePath();
+  const dir = path.dirname(filePath);
+  const tmpPath = path.join(dir, `.${path.basename(filePath)}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`);
   try {
     const fd = fs.openSync(tmpPath, 'w');
     try {
@@ -400,7 +449,7 @@ function writeStore(store) {
     } finally {
       fs.closeSync(fd);
     }
-    fs.renameSync(tmpPath, storeFilePath);
+    fs.renameSync(tmpPath, filePath);
   } catch (error) {
     try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch { /* 忽略暫存檔清理失敗 */ }
     throw error;
@@ -459,8 +508,11 @@ async function getPrincipal(req) {
     role = 'gm_teacher_admin';
   }
 
-  // Map legacy roles to player
-  if (role !== 'gm_teacher_admin') {
+  role = String(role || 'player').toLowerCase();
+
+  // Map unknown roles to player while preserving verified teacher/student roles.
+  const knownRoles = new Set(['gm_teacher_admin', 'teacher', 'student', 'player']);
+  if (!knownRoles.has(role) && !ADMIN_ROLE_VALUES.has(role)) {
     role = 'player';
   }
 
@@ -496,7 +548,7 @@ function requireAdmin(req, res, next) {
 }
 
 function isTeacherRole(principal) {
-  return principal && principal.role === 'gm_teacher_admin';
+  return principal && (principal.role === 'gm_teacher_admin' || principal.role === 'teacher' || ADMIN_ROLE_VALUES.has(principal.role));
 }
 
 function requireTeacher(req, res, next) {

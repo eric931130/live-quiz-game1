@@ -52,10 +52,11 @@ try {
   if (navLoginButtons !== 1) throw new Error(`Expected one nav login button, found ${navLoginButtons}.`);
 
   await page.locator('.saas-nav .saas-btn-solid').click();
-  await page.locator('.modal-overlay').waitFor({ state: 'visible', timeout: 10000 });
+  const authModal = page.locator('.app-tool-window-modal-overlay');
+  await authModal.waitFor({ state: 'visible', timeout: 10000 });
 
-  const emailInputs = await page.locator('.modal-overlay input[type="email"]').count();
-  const passwordInputs = await page.locator('.modal-overlay input[type="password"]').count();
+  const emailInputs = await authModal.locator('input[type="email"]').count();
+  const passwordInputs = await authModal.locator('input[type="password"]').count();
   if (emailInputs !== 1 || passwordInputs !== 1) {
     throw new Error(`Auth modal did not expose expected inputs. email=${emailInputs}, password=${passwordInputs}`);
   }
