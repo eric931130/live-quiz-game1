@@ -1545,6 +1545,8 @@ export default function GMControlPanel({ onGoBack, user }) {
           display: flex;
           justify-content: space-between;
           align-items: center;
+          gap: 1rem;
+          flex-wrap: wrap;
           padding: 1.25rem 2rem;
           background: rgba(255, 255, 255, 0.9);
           border: 1px solid rgba(62, 154, 82, 0.15);
@@ -1557,6 +1559,8 @@ export default function GMControlPanel({ onGoBack, user }) {
           display: flex;
           align-items: center;
           gap: 0.75rem;
+          min-width: 0;
+          flex-wrap: wrap;
         }
 
         .gold-badge {
@@ -1575,9 +1579,11 @@ export default function GMControlPanel({ onGoBack, user }) {
 
         .gm-nav-tabs {
           display: flex;
+          flex-wrap: wrap;
+          align-items: center;
           gap: 0.5rem;
-          overflow-x: auto;
-          padding: 0.5rem 0;
+          overflow: visible;
+          padding: 0.5rem 0 0.75rem;
           border-bottom: 2px solid rgba(62, 154, 82, 0.1);
         }
 
@@ -1585,16 +1591,18 @@ export default function GMControlPanel({ onGoBack, user }) {
           background: rgba(255, 255, 255, 0.8);
           color: #4a5d4e;
           border: 1px solid rgba(62, 154, 82, 0.1);
-          padding: 0.75rem 1.25rem;
+          min-height: 44px;
+          padding: 0.65rem 1rem;
           border-radius: 12px;
           cursor: pointer;
           font-weight: bold;
-          font-size: 0.9rem;
+          font-size: 0.86rem;
           transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
           white-space: nowrap;
           display: flex;
           align-items: center;
           gap: 0.5rem;
+          flex: 0 1 auto;
         }
 
         .gm-tab-btn:hover {
@@ -1859,6 +1867,59 @@ export default function GMControlPanel({ onGoBack, user }) {
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
+        }
+
+        @media (max-width: 1280px) {
+          .gm-admin-container {
+            padding: 1rem;
+            gap: 1rem;
+          }
+
+          .gm-header {
+            padding: 1rem 1.25rem;
+          }
+
+          .gm-nav-tabs {
+            gap: 0.4rem;
+          }
+
+          .gm-tab-btn {
+            min-height: 40px;
+            padding: 0.55rem 0.75rem;
+            font-size: 0.8rem;
+            gap: 0.35rem;
+          }
+
+          .gm-tab-btn svg {
+            width: 14px;
+            height: 14px;
+          }
+
+          .gm-panel {
+            padding: 1.25rem;
+          }
+        }
+
+        @media (max-width: 760px) {
+          .gm-header {
+            align-items: flex-start;
+          }
+
+          .gm-header > div:last-child {
+            width: 100%;
+            text-align: left !important;
+            overflow-wrap: anywhere;
+          }
+
+          .gm-nav-tabs {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+          }
+
+          .gm-tab-btn {
+            justify-content: flex-start;
+            width: 100%;
+          }
         }
       `}</style>
 
