@@ -236,6 +236,11 @@ export default function StudentAchievements({ currentUser, onGoBack, API_BASE_UR
   const pDoc = playerInfo?.profile || {};
   const activeChar = playerInfo?.activeCharacter || null;
   const currentStage = playerInfo?.currentStage || null;
+  const currentLevel = Number(pDoc.level || 1);
+  const xpIntoLevel = Number(pDoc.xpIntoLevel || 0);
+  const xpForNextLevel = Math.max(1, Number(pDoc.xpForNextLevel || 100));
+  const xpPercent = Math.min(100, Math.round((xpIntoLevel / xpForNextLevel) * 100));
+  const nextEvolutionLevel = pDoc.currentEvolutionStage >= 6 ? null : Math.max(5, Number(pDoc.currentEvolutionStage || 1) * 5);
 
   return (
     <div className="home-container" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', background: 'var(--bg-color)', padding: '2rem' }}>
@@ -373,7 +378,29 @@ export default function StudentAchievements({ currentUser, onGoBack, API_BASE_UR
                       </p>
                     )}
                     
-                    <div style={{ width: '100%', marginTop: '1.5rem' }}>
+                    <div style={{ width: '100%', marginTop: '1.5rem', textAlign: 'left' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '0.75rem', marginBottom: '1rem' }}>
+                        <div style={{ padding: '0.8rem', borderRadius: '14px', background: '#f1f8e9', border: '1px solid rgba(76, 175, 80, 0.18)' }}>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 700 }}>等級</div>
+                          <div style={{ fontSize: '1.3rem', color: 'var(--primary-dark)', fontWeight: 900 }}>Lv.{currentLevel}</div>
+                        </div>
+                        <div style={{ padding: '0.8rem', borderRadius: '14px', background: '#f8fff8', border: '1px solid rgba(76, 175, 80, 0.18)' }}>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 700 }}>總通關數</div>
+                          <div style={{ fontSize: '1.3rem', color: 'var(--primary-dark)', fontWeight: 900 }}>{pDoc.totalClears || 0}</div>
+                        </div>
+                      </div>
+                      <div style={{ marginBottom: '1rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', fontSize: '0.82rem', color: '#55745c', fontWeight: 700, marginBottom: '0.35rem' }}>
+                          <span>經驗值</span>
+                          <span>{xpIntoLevel} / {xpForNextLevel} XP</span>
+                        </div>
+                        <div style={{ height: '10px', background: '#e8f5e9', borderRadius: '999px', overflow: 'hidden', border: '1px solid rgba(76, 175, 80, 0.18)' }}>
+                          <div style={{ width: `${xpPercent}%`, height: '100%', background: 'linear-gradient(90deg, #66bb6a, #2e7d32)', borderRadius: '999px' }} />
+                        </div>
+                        <div style={{ marginTop: '0.45rem', fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center' }}>
+                          {nextEvolutionLevel ? `下一次進化門檻：Lv.${nextEvolutionLevel}` : '已達最終進化階段'}
+                        </div>
+                      </div>
                       <ParticleButton 
                         onClick={handleCheckEvolution} 
                         disabled={checkingEvol || pDoc.currentEvolutionStage >= 6} 

@@ -4419,6 +4419,20 @@ async function validateEvolutionChainIntegrity(evolutionChainId) {
   }
 }
 
+function xpNeededForLevel(level) {
+  return 100 + Math.max(0, Number(level || 1) - 1) * 50;
+}
+
+function levelFromExperience(experience = 0) {
+  let level = 1;
+  let remaining = Math.max(0, Number(experience) || 0);
+  while (remaining >= xpNeededForLevel(level) && level < 999) {
+    remaining -= xpNeededForLevel(level);
+    level += 1;
+  }
+  return { level, xpIntoLevel: remaining, xpForNextLevel: xpNeededForLevel(level) };
+}
+
 // Database Helper: Check and Resolve Next Evolution Stage
 async function resolveNextEvolutionStage(playerId) {
   if (!db) return { status: 'error', reason: 'Firestore not configured' };
@@ -4460,9 +4474,40 @@ async function resolveNextEvolutionStage(playerId) {
     if (nextStage.isActive === false) {
       return { status: 'stage_inactive', reason: `下一階段編號 ${nextStageNumber} 目前處於停用狀態。` };
     }
+
+    const derivedLevel = levelFromExperience(profile.experience || 0).level;
+    const currentLevel = Number(profile.level || derivedLevel || 1);
+    const requiredLevel = Math.max(1, (nextStageNumber - 1) * 5);
+    const levelCheck = {
+      met: currentLevel >= requiredLevel,
+      required: requiredLevel,
+      current: currentLevel
+    };
     
     if (!nextStage.evolutionConditionId) {
-      return { status: 'condition_missing', reason: `下一階段 ${nextStageNumber} 尚未設定進化條件。` };
+      if (levelCheck.met) {
+        return {
+          status: 'satisfied',
+          nextStage,
+          condition: {
+            conditionName: `Level ${requiredLevel}`,
+            conditionDescription: `達到 Lv.${requiredLevel} 即可進化。`,
+            requiredLevel
+          },
+          checks: { level: levelCheck }
+        };
+      }
+      return {
+        status: 'not_satisfied',
+        reason: `需要達到 Lv.${requiredLevel} 才能進化。`,
+        nextStage,
+        condition: {
+          conditionName: `Level ${requiredLevel}`,
+          conditionDescription: `達到 Lv.${requiredLevel} 即可進化。`,
+          requiredLevel
+        },
+        checks: { level: levelCheck }
+      };
     }
     
     const conditionSnap = await db.collection('EvolutionConditions')
@@ -4479,6 +4524,7 @@ async function resolveNextEvolutionStage(playerId) {
     }
     
     const checks = {
+      level: levelCheck,
       points: { met: true, required: condition.requiredPoints || 0, current: profile.points || 0 },
       perfectClears: { met: true, required: condition.requiredPerfectClears || 0, current: 0 },
       checkpointClears: { met: true, required: condition.requiredCheckpointClears || 0, current: 0 },
@@ -4494,6 +4540,10 @@ async function resolveNextEvolutionStage(playerId) {
     };
     
     let isSatisfied = true;
+    
+    if (!levelCheck.met) {
+      isSatisfied = false;
+    }
     
     if (condition.requiredPoints && (profile.points || 0) < condition.requiredPoints) {
       checks.points.met = false;
@@ -4660,6 +4710,12 @@ async function getOrCreatePlayerProfile(uid, email = '', displayName = '') {
       const updatedProfile = {
         ...data,
         points: user.points || 0,
+        experience: Number(data.experience || 0),
+        level: Number(data.level || levelFromExperience(data.experience || 0).level || 1),
+        xpIntoLevel: Number(data.xpIntoLevel || levelFromExperience(data.experience || 0).xpIntoLevel || 0),
+        xpForNextLevel: Number(data.xpForNextLevel || levelFromExperience(data.experience || 0).xpForNextLevel || 100),
+        totalClears: Number(data.totalClears || 0),
+        beastCount: data.selectedCharacterId ? Math.max(1, Number(data.beastCount || 0)) : Number(data.beastCount || 0),
         displayName: user.displayName || user.nickname || data.displayName || '',
         email: user.email || data.email || email || '',
         anonymizedStudentCode: user.anonymizedStudentCode || data.anonymizedStudentCode || ''
@@ -4685,6 +4741,12 @@ async function getOrCreatePlayerProfile(uid, email = '', displayName = '') {
     currentCharacterStageAssetId: '',
     characterSelectedAt: '',
     lastEvolutionAt: '',
+    experience: 0,
+    level: 1,
+    xpIntoLevel: 0,
+    xpForNextLevel: 100,
+    totalClears: 0,
+    beastCount: 0,
     points: userData.points || 0,
     badges: [],
     tokens: [],
@@ -4881,6 +4943,7 @@ app.post('/api/player/select-starter', async (req, res) => {
       selectedEvolutionChainId: char.evolutionChainId,
       currentEvolutionStage: 1,
       currentCharacterStageAssetId: stage1.id,
+      beastCount: 1,
       characterSelectedAt: now,
       updatedAt: now
     };
@@ -4924,6 +4987,7 @@ app.post('/api/player/check-evolution', async (req, res) => {
     const updatedProfile = {
       currentEvolutionStage: toStageNumber,
       currentCharacterStageAssetId: toStageAssetId,
+      beastCount: profile.selectedCharacterId ? Math.max(1, Number(profile.beastCount || 0)) : Number(profile.beastCount || 0),
       lastEvolutionAt: now,
       updatedAt: now
     };

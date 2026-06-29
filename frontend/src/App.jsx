@@ -267,11 +267,10 @@ function App() {
       );
     }
     if (user) {
-      alert("權限不足，只有最高管理員可以存取此頁面！");
       setTimeout(() => {
         navigateTo('/');
       }, 0);
-      return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', fontSize: '1.5rem', color: 'var(--primary-dark)' }}>跳轉中...</div>;
+      return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', fontSize: '1.5rem', color: 'var(--primary-dark)' }}>正在帶你回到一般使用者首頁...</div>;
     }
   }
 

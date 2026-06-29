@@ -7,6 +7,18 @@ import ParticleButton from './ParticleButton';
 // Pure helper functions outside component to satisfy hook purity rules
 const getCurrentTime = () => Date.now();
 const getCurrentISO = () => new Date().toISOString();
+const xpNeededForLevel = (level) => 100 + Math.max(0, Number(level || 1) - 1) * 50;
+const levelFromExperience = (experience = 0) => {
+  let level = 1;
+  let remaining = Math.max(0, Number(experience) || 0);
+  while (remaining >= xpNeededForLevel(level) && level < 999) {
+    remaining -= xpNeededForLevel(level);
+    level += 1;
+  }
+  return { level, xpIntoLevel: remaining, xpForNextLevel: xpNeededForLevel(level) };
+};
+const stageFromLevel = (level = 1) => Math.min(6, Math.max(1, Math.floor(Number(level || 1) / 5) + 1));
+const numericPart = (value, fallback = 0) => parseInt(String(value || '').replace(/\D/g, ''), 10) || fallback;
 
 export default function WorldChallenges({ currentUser, onGoBack, API_BASE_URL, onEvolveTriggered }) {
   const [view, setView] = useState('world_select'); // world_select, stage_select, playing, result, leaderboard
@@ -36,6 +48,7 @@ export default function WorldChallenges({ currentUser, onGoBack, API_BASE_URL, o
   const [leaderboard, setLeaderboard] = useState([]);
   const [loadingLeaderboard, setLoadingLeaderboard] = useState(false);
   const [competitionTarget, setCompetitionTarget] = useState(null);
+  const [firstClearHistory, setFirstClearHistory] = useState([]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -275,16 +288,26 @@ export default function WorldChallenges({ currentUser, onGoBack, API_BASE_URL, o
       const profileDocRef = doc(db, "PlayerCompetitionProgress", `${currentUser.uid}_${roundId}`);
       const profileDocSnap = await getDoc(profileDocRef);
       const prevProfile = profileDocSnap.exists() ? profileDocSnap.data() : null;
+      const playerProfileRef = doc(db, "PlayerProfiles", currentUser.uid);
+      const playerProfileSnap = await getDoc(playerProfileRef);
+      const prevPlayerProfile = playerProfileSnap.exists() ? playerProfileSnap.data() : {};
+
+      const numericWorld = numericPart(worldId, 0);
+      const checkpointDifficulty = numericWorld * 20 + Number(stageId || 0) * 10 + numericPart(checkpointId, 1) * 5;
+      const accuracyBonus = totalQ > 0 ? Math.round((finalCorrect / totalQ) * 50) : 0;
+      const perfectBonus = isPerfect ? 50 : 0;
+      const clearBonus = isCleared ? 25 : 0;
+      const xpGained = isCleared ? Math.max(25, checkpointDifficulty + accuracyBonus + perfectBonus + clearBonus) : 0;
+      const previousXp = Number(prevPlayerProfile.experience || 0);
+      const newExperience = previousXp + xpGained;
+      const levelInfo = levelFromExperience(newExperience);
+      const previousLevel = Number(prevPlayerProfile.level || 1);
+      const previousEvolutionStage = Number(prevPlayerProfile.currentEvolutionStage || 1);
+      const levelBasedEvolutionStage = stageFromLevel(levelInfo.level);
 
       const newFailedCount = !isCleared ? (prevProfile?.failedAttemptCount || 0) + 1 : (prevProfile?.failedAttemptCount || 0);
       const newRetryCount = hasClearedBefore ? (prevProfile?.retryCount || 0) + 1 : (prevProfile?.retryCount || 0);
       const newPerfectCount = (isPerfect && !wasPerfectPrev) ? (prevProfile?.perfectClearCount || 0) + 1 : (prevProfile?.perfectClearCount || 0);
-
-      const getNumericWorldId = (wid) => {
-        if (!wid) return 0;
-        return parseInt(String(wid).replace(/\D/g, ''), 10) || 0;
-      };
-      const numericWorld = getNumericWorldId(worldId);
 
       const prevFarthestWorld = prevProfile?.farthestWorldOrder || 0;
       const prevFarthestStage = prevProfile?.farthestStageIndex || 0;
@@ -308,7 +331,7 @@ export default function WorldChallenges({ currentUser, onGoBack, API_BASE_URL, o
       let reachedRank = prevProfile?.targetReachedRank || null;
 
       if (targetData && !reachedAt) {
-        const targetWorldNum = getNumericWorldId(targetData.targetWorldId);
+        const targetWorldNum = numericPart(targetData.targetWorldId, 0);
         const targetStage = parseInt(targetData.targetStageIndex, 10);
         if (finalFarthestWorld * 100 + finalFarthestStage >= targetWorldNum * 100 + targetStage) {
           reachedAt = finalCompletedAt;
@@ -334,6 +357,48 @@ export default function WorldChallenges({ currentUser, onGoBack, API_BASE_URL, o
         allowPublicDisplayName = !!userData.allowPublicDisplayName;
       }
 
+      const beastCount = prevPlayerProfile.selectedCharacterId ? 1 : 0;
+      const totalClears = isCleared && !hasClearedBefore
+        ? Number(prevPlayerProfile.totalClears || 0) + 1
+        : Number(prevPlayerProfile.totalClears || 0);
+      const effectiveEvolutionStage = Math.max(previousEvolutionStage, levelBasedEvolutionStage);
+
+      await setDoc(playerProfileRef, {
+        experience: newExperience,
+        level: levelInfo.level,
+        xpIntoLevel: levelInfo.xpIntoLevel,
+        xpForNextLevel: levelInfo.xpForNextLevel,
+        lastXpGained: xpGained,
+        lastLevelUpAt: levelInfo.level > previousLevel ? finalCompletedAt : (prevPlayerProfile.lastLevelUpAt || null),
+        nextEvolutionLevel: Math.min(25, Math.max(5, previousEvolutionStage * 5)),
+        totalClears,
+        lastClearedAt: isCleared ? finalCompletedAt : (prevPlayerProfile.lastClearedAt || null),
+        beastCount,
+        updatedAt: finalCompletedAt
+      }, { merge: true });
+
+      if (isCleared && !hasClearedBefore) {
+        const firstClearId = `${worldId}_${stageId}_${checkpointId}_${roundId}`;
+        const firstClearRef = doc(db, "FirstClearRecords", firstClearId);
+        const firstClearSnap = await getDoc(firstClearRef);
+        if (!firstClearSnap.exists()) {
+          await setDoc(firstClearRef, {
+            id: firstClearId,
+            playerId: currentUser.uid,
+            nickname: studentNickname,
+            anonymizedStudentCode,
+            worldId,
+            worldName: selectedWorld.name || '',
+            stageId,
+            stageName: stageObj?.name || '',
+            checkpointId,
+            checkpointName: cpObj?.name || '',
+            roundId,
+            clearedAt: finalCompletedAt
+          });
+        }
+      }
+
       await setDoc(profileDocRef, {
         playerId: currentUser.uid,
         roundId: roundId,
@@ -351,6 +416,13 @@ export default function WorldChallenges({ currentUser, onGoBack, API_BASE_URL, o
         perfectClearCount: newPerfectCount,
         failedAttemptCount: newFailedCount,
         retryCount: newRetryCount,
+        totalClears,
+        beastCount,
+        evolutionStage: effectiveEvolutionStage,
+        level: levelInfo.level,
+        experience: newExperience,
+        lastXpGained: xpGained,
+        lastClearedAt: isCleared ? finalCompletedAt : (prevProfile?.lastClearedAt || null),
         lastUpdatedAt: finalCompletedAt,
         userCreatedAt: userCreatedAt
       }, { merge: true });
@@ -565,58 +637,38 @@ export default function WorldChallenges({ currentUser, onGoBack, API_BASE_URL, o
       }
 
       const sorted = playersList.sort((a, b) => {
-        const aReached = !!a.targetReachedAt;
-        const bReached = !!b.targetReachedAt;
+        const beastDiff = Number(b.beastCount || 0) - Number(a.beastCount || 0);
+        if (beastDiff !== 0) return beastDiff;
 
-        if (aReached && !bReached) return -1;
-        if (!aReached && bReached) return 1;
+        const evolutionDiff = Number(b.evolutionStage || b.currentEvolutionStage || 0) - Number(a.evolutionStage || a.currentEvolutionStage || 0);
+        if (evolutionDiff !== 0) return evolutionDiff;
 
-        if (aReached && bReached) {
-          const timeA = new Date(a.targetReachedAt).getTime();
-          const timeB = new Date(b.targetReachedAt).getTime();
-          if (timeA !== timeB) return timeA - timeB;
+        const clearDiff = Number(b.totalClears || 0) - Number(a.totalClears || 0);
+        if (clearDiff !== 0) return clearDiff;
 
-          const failA = a.failedAttemptCount || 0;
-          const failB = b.failedAttemptCount || 0;
-          if (failA !== failB) return failA - failB;
+        const worldDiff = Number(b.farthestWorldOrder || 0) - Number(a.farthestWorldOrder || 0);
+        if (worldDiff !== 0) return worldDiff;
 
-          const retryA = a.retryCount || 0;
-          const retryB = b.retryCount || 0;
-          if (retryA !== retryB) return retryA - retryB;
+        const stageDiff = Number(b.farthestStageIndex || 0) - Number(a.farthestStageIndex || 0);
+        if (stageDiff !== 0) return stageDiff;
 
-          const totalAttA = (a.perfectClearCount || 0) + (a.failedAttemptCount || 0) + (a.retryCount || 0) || 1;
-          const totalAttB = (b.perfectClearCount || 0) + (b.failedAttemptCount || 0) + (b.retryCount || 0) || 1;
-          const rateA = (a.perfectClearCount || 0) / totalAttA;
-          const rateB = (b.perfectClearCount || 0) / totalAttB;
-          if (rateB !== rateA) return rateB - rateA;
+        const cpDiff = Number(b.farthestCheckpointIndex || 0) - Number(a.farthestCheckpointIndex || 0);
+        if (cpDiff !== 0) return cpDiff;
 
-          const regA = new Date(a.userCreatedAt || 0).getTime();
-          const regB = new Date(b.userCreatedAt || 0).getTime();
-          return regA - regB;
-        } else {
-          const worldA = a.farthestWorldOrder || 0;
-          const worldB = b.farthestWorldOrder || 0;
-          if (worldB !== worldA) return worldB - worldA;
-
-          const stageA = a.farthestStageIndex || 0;
-          const stageB = b.farthestStageIndex || 0;
-          if (stageB !== stageA) return stageB - stageA;
-
-          const cpA = a.farthestCheckpointIndex || 0;
-          const cpB = b.farthestCheckpointIndex || 0;
-          if (cpB !== cpA) return cpB - cpA;
-
-          const perfA = a.perfectClearCount || 0;
-          const perfB = b.perfectClearCount || 0;
-          if (perfB !== perfA) return perfB - perfA;
-
-          const updateA = new Date(a.lastUpdatedAt || 0).getTime();
-          const updateB = new Date(b.lastUpdatedAt || 0).getTime();
-          return updateB - updateA;
-        }
+        const updateA = new Date(a.lastUpdatedAt || 0).getTime();
+        const updateB = new Date(b.lastUpdatedAt || 0).getTime();
+        return updateB - updateA;
       });
 
+      const firstClearSnap = await getDocs(query(collection(db, "FirstClearRecords"), where("roundId", "==", activeRoundId)));
+      const firstClearList = [];
+      firstClearSnap.forEach((doc) => {
+        firstClearList.push({ id: doc.id, ...doc.data() });
+      });
+      firstClearList.sort((a, b) => new Date(a.clearedAt || 0).getTime() - new Date(b.clearedAt || 0).getTime());
+
       setLeaderboard(sorted);
+      setFirstClearHistory(firstClearList);
     } catch(err) {
       console.error("Failed to fetch leaderboard", err);
     } finally {
@@ -960,16 +1012,34 @@ export default function WorldChallenges({ currentUser, onGoBack, API_BASE_URL, o
                </div>
             ) : (
                <>
+                  {firstClearHistory.length > 0 && (
+                     <div style={{ marginBottom: '1.25rem', padding: '1rem', background: '#f8fff8', border: '1px solid rgba(76, 175, 80, 0.18)', borderRadius: '12px' }}>
+                        <h4 style={{ margin: '0 0 0.75rem 0', color: 'var(--primary-dark)', fontWeight: 800 }}>首位通關歷史紀錄</h4>
+                        <div style={{ display: 'grid', gap: '0.5rem' }}>
+                           {firstClearHistory.slice(0, 8).map((record) => (
+                              <div key={record.id} style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap', fontSize: '0.92rem', color: '#35563e' }}>
+                                 <span>
+                                    {record.worldName || record.worldId} / {record.stageName || record.stageId} / {record.checkpointName || record.checkpointId}
+                                 </span>
+                                 <strong>
+                                    {record.anonymizedStudentCode || '首通玩家'} · {record.clearedAt ? new Date(record.clearedAt).toLocaleString() : '-'}
+                                 </strong>
+                              </div>
+                           ))}
+                        </div>
+                     </div>
+                  )}
+
                   <div style={{ overflowX: 'auto' }}>
-                     <table className="progression-leaderboard" style={{ minWidth: '650px' }}>
+                     <table className="progression-leaderboard" style={{ minWidth: '760px' }}>
                         <thead>
                            <tr>
                               <th>名次</th>
-                              <th>挑戰者 (代碼/暱稱)</th>
-                              <th>最遠進度</th>
-                              <th>是否達成目標</th>
-                              <th>達成時間</th>
-                              <th>失敗/重試次數</th>
+                              <th>玩家</th>
+                              <th>神獸 / 進化</th>
+                              <th>通關數</th>
+                              <th>目前進度</th>
+                              <th>通關時間隱私</th>
                            </tr>
                         </thead>
                         <tbody>
@@ -981,11 +1051,14 @@ export default function WorldChallenges({ currentUser, onGoBack, API_BASE_URL, o
                               else if (idx === 1) rankClass += ' second';
                               else if (idx === 2) rankClass += ' third';
 
-                              const isReached = !!item.targetReachedAt;
                               const userCode = item.anonymizedStudentCode || `usr-${item.playerId ? item.playerId.slice(0, 8) : 'unknown'}`;
                               const displayNameVal = (item.playerId === currentUser.uid || item.allowPublicDisplayName)
                                 ? (item.nickname || item.displayName || "神秘玩家")
                                 : "去識別化學員";
+                              const isMine = item.playerId === currentUser.uid;
+                              const privateClearTime = isMine && item.lastClearedAt
+                                ? new Date(item.lastClearedAt).toLocaleString()
+                                : '僅本人可見';
 
                               return (
                                  <tr key={item.playerId} style={{ background: item.playerId === currentUser.uid ? 'rgba(76, 175, 80, 0.08)' : 'transparent' }}>
@@ -1003,24 +1076,19 @@ export default function WorldChallenges({ currentUser, onGoBack, API_BASE_URL, o
                                        </div>
                                     </td>
                                     <td style={{ color: 'var(--primary-dark)', fontWeight: 'bold' }}>
+                                       {item.beastCount || 0} 隻 / 第 {item.evolutionStage || item.currentEvolutionStage || 0} 階
+                                       <div style={{ fontSize: '0.78rem', color: '#68836f', fontWeight: 600 }}>
+                                          Lv.{item.level || 1}
+                                       </div>
+                                    </td>
+                                    <td style={{ textAlign: 'center', fontWeight: 800, color: '#2e7d32' }}>
+                                       {item.totalClears || 0}
+                                    </td>
+                                    <td style={{ color: 'var(--primary-dark)', fontWeight: 'bold' }}>
                                        世界 {item.farthestWorldOrder || 0} - 第 {item.farthestStageIndex || 0} 關
                                     </td>
-                                    <td style={{ textAlign: 'center' }}>
-                                       {isReached ? (
-                                          <span style={{ background: '#e8f5e9', color: '#2e7d32', padding: '0.2rem 0.6rem', borderRadius: '20px', fontSize: '0.85rem', fontWeight: 'bold' }}>
-                                             已達成 ✨
-                                          </span>
-                                       ) : (
-                                          <span style={{ background: '#eceff1', color: '#546e7a', padding: '0.2rem 0.6rem', borderRadius: '20px', fontSize: '0.85rem', fontWeight: 'bold' }}>
-                                             挑戰中 🔄
-                                          </span>
-                                       )}
-                                    </td>
-                                    <td style={{ fontSize: '0.85rem', color: '#666' }}>
-                                       {item.targetReachedAt ? new Date(item.targetReachedAt).toLocaleString() : '-'}
-                                    </td>
                                     <td style={{ fontSize: '0.9rem', color: '#555' }}>
-                                       {item.failedAttemptCount || 0} 敗 / {item.retryCount || 0} 重試
+                                       {privateClearTime}
                                     </td>
                                  </tr>
                               );
