@@ -998,7 +998,7 @@ export default function WorldChallenges({ currentUser, onGoBack, API_BASE_URL, o
                </div>
             ) : (
                <p style={{ color: '#666', marginBottom: '1.5rem', fontSize: '0.95rem' }}>
-                  競賽核心規則：<strong>「誰先達到指定關卡進度，誰就是優勝者。」</strong> 排行榜優先依照解鎖的最遠關卡進度排序，若進度相同，則由「最先挑戰成功該最高關卡」的玩家勝出！
+                  排行榜核心規則：優先依照<strong>神獸數、神獸進化狀態、通關數</strong>排序；首位通關者會公開留在歷史紀錄，其餘玩家的通關日期僅本人可見。
                </p>
             )}
 
