@@ -393,10 +393,19 @@ input:focus, select:focus {
 
 .back-btn {
   background: transparent;
-  color: var(--text-muted);
-  border: 1px solid var(--text-muted);
+  color: #111111;
+  border: 1px solid rgba(17, 17, 17, 0.45);
 }
-.back-btn:hover { background: rgba(76, 175, 80, 0.15); border-color: rgba(76, 175, 80, 0.4); color: var(--text-main); }
+.back-btn:hover { background: rgba(76, 175, 80, 0.15); border-color: rgba(17, 17, 17, 0.65); color: #111111; }
+
+.app-tool-window-header-title button {
+  color: #111111 !important;
+}
+
+.app-tool-window-header-title button svg {
+  color: #111111 !important;
+  stroke: #111111 !important;
+}
 
 .xl-btn { font-size: 1.5rem; padding: 1rem 3rem; }
 
@@ -1646,7 +1655,7 @@ button[type="submit"] {
 .modal-content button,
 .home-container footer button {
   background: rgba(234, 247, 236, 0.6) !important;
-  color: var(--green-5) !important;
+  color: #111111 !important;
   border: 1.5px solid rgba(123, 196, 127, 0.5) !important;
   box-shadow: none !important;
 }
@@ -1659,7 +1668,7 @@ button[type="submit"] {
 .home-container footer button:hover {
   background: rgba(191, 231, 198, 0.8) !important;
   border-color: var(--green-4) !important;
-  color: var(--green-5) !important;
+  color: #111111 !important;
   transform: translateY(-1px) !important;
 }
 

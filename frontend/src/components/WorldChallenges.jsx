@@ -1187,11 +1187,11 @@ export default function WorldChallenges({ currentUser, onGoBack, API_BASE_URL, o
         <div className="app-tool-window-header">
           <div className="app-tool-window-header-title">
              {backAction && (
-                <button onClick={backAction} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 'bold' }}>
+                <button onClick={backAction} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: '#111111', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 'bold' }}>
                    <ArrowLeft size={20} /> {backText}
                 </button>
              )}
-             <span style={{ color: 'rgba(255,255,255,0.4)' }}>|</span>
+             <span style={{ color: 'rgba(17,17,17,0.35)' }}>|</span>
              <span>{headerTitle}</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
