@@ -975,6 +975,15 @@ function validateQuestions(rawRows, principal, defaults = {}) {
         if (!question.options.A || !question.options.B) errors.push({ field: 'options', message: '選擇題至少需要 A、B 兩個選項。' });
         if (question.answer && !['A', 'B', 'C', 'D'].includes(question.answer)) errors.push({ field: 'answer', message: '選擇題答案需為 A、B、C 或 D。' });
         if (question.answer && !question.options[question.answer]) warnings.push({ field: 'answer', message: '答案指向的選項目前沒有內容。' });
+        Object.entries(question.options || {}).forEach(([letter, value]) => {
+          if (normalizeText(value) === '0') {
+            warnings.push({
+              field: `option${letter}`,
+              message: `選項 ${letter} 只有「0」，請確認不是 Excel 空值、公式結果或匯入錯位。`,
+              needsReview: true
+            });
+          }
+        });
       }
       if (question.type === 'true_false' && question.answer && !['A', 'B'].includes(question.answer)) {
         errors.push({ field: 'answer', message: '是非題答案需為 O/對/A 或 X/錯/B。' });

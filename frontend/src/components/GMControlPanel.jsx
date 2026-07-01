@@ -3476,7 +3476,8 @@ export default function GMControlPanel({ onGoBack, user }) {
                         <p style={{ margin: '0.25rem 0 0 0', color: '#4a5d4e' }}>
                           總列數: {previewData.summary.totalRows} | 
                           <span style={{ color: '#10b981', fontWeight: 'bold' }}> 合格列: {previewData.summary.validRows} </span> | 
-                          <span style={{ color: '#dc2626', fontWeight: 'bold' }}> 不合格/有錯誤列: {previewData.summary.invalidRows} </span>
+                          <span style={{ color: '#dc2626', fontWeight: 'bold' }}> 不合格/有錯誤列: {previewData.summary.invalidRows} </span> |
+                          <span style={{ color: '#b45309', fontWeight: 'bold' }}> 需檢查: {previewData.summary.needsReview || 0} </span>
                         </p>
                       </div>
                       
@@ -3519,7 +3520,7 @@ export default function GMControlPanel({ onGoBack, user }) {
                         </thead>
                         <tbody>
                           {previewData.rows.map(row => (
-                            <tr key={row.rowNumber} style={{ background: row.valid ? 'transparent' : 'rgba(220,38,38,0.04)' }}>
+                            <tr key={row.rowNumber} style={{ background: row.valid ? (row.warnings?.length ? 'rgba(245,158,11,0.08)' : 'transparent') : 'rgba(220,38,38,0.04)' }}>
                               <td>{row.rowNumber}</td>
                               <td style={{ maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.question.Question || row.question.prompt}</td>
                               <td>{row.question.Answer || row.question.answer}</td>
@@ -3530,8 +3531,9 @@ export default function GMControlPanel({ onGoBack, user }) {
                                   <span style={{ color: '#dc2626', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '0.25rem' }}><X size={16} /> 錯誤</span>
                                 )}
                               </td>
-                              <td style={{ color: '#dc2626', fontSize: '0.85rem' }}>
+                              <td style={{ color: row.errors.length ? '#dc2626' : '#b45309', fontSize: '0.85rem' }}>
                                 {row.errors.map((e, idx) => <div key={idx}>• {e.message}</div>)}
+                                {row.warnings?.map((warning, idx) => <div key={`warning-${idx}`}>提醒：{warning.message}</div>)}
                               </td>
                             </tr>
                           ))}
